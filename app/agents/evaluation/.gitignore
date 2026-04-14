@@ -1,11 +1,22 @@
-# Ignore everything
-*
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
 
-# Except these
-!src/
-!src/**/
-!src/**/*
-!.env.example
-!pyproject.toml
-!requirements.txt
-!.gitignore
+# Environment
+.env
+.venv/
+venv/
+
+# Binary / large files
+files/*.pdf
+files/*.pptx
+files/*.docx
+files/*.html
+
+# Test / build artefacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+*.egg-info/
