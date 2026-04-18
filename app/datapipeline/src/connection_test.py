@@ -18,9 +18,9 @@ AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN")
 
 
 # SharePoint app registration details: 
-TENANT_ID= os.getenv("TENANT_ID")
-CLIENT_ID= os.getenv("CLIENT_ID")
-CLIENT_SECRET= os.getenv("CLIENT_SECRET")
+TENANT_ID= os.getenv("SHAREPOINT_TENANT_ID")
+CLIENT_ID= os.getenv("SHAREPOINT_CLIENT_ID")
+CLIENT_SECRET= os.getenv("SHAREPOINT_CLIENT_SECRET")
  
 # SharePoint site you were granted access to
 
