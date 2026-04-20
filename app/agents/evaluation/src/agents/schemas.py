@@ -1,5 +1,6 @@
 """Pydantic schemas for security assessment agent I/O and EventBridge detail payloads."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -124,3 +125,50 @@ class PipelineCompleteDetail(BaseModel):
 
     docId: str
     status: Literal["completed", "error"]
+
+
+# ---------------------------------------------------------------------------
+# Stage 6 -> Stage 7 status message and Stage 7 compiled output
+# ---------------------------------------------------------------------------
+
+
+class AgentStatusMessage(BaseModel):
+    """Status message published by Stage 6 agents to the SQS Status queue.
+
+    Consumed by the Stage 7 compile handler.  The ``result`` field is a
+    validated ``AgentResult`` on success, or ``None`` on failure.
+    """
+
+    docId: str
+    agentType: str
+    status: Literal["completed", "failed"]
+    result: AgentResult | None
+    durationMs: float
+    completedAt: str
+    errorMessage: str | None = None
+
+
+class CompiledContentBlock(BaseModel):
+    """A single content block inside a ``CompiledResult``.
+
+    Mirrors the front-end contract where each block is a typed chunk of
+    rendered output (currently only markdown text).
+    """
+
+    type: Literal["text"]
+    text: str
+
+
+class CompiledResult(BaseModel):
+    """Compiled report payload produced by the Stage 7 compile handler.
+
+    Shape matches the front-end response contract -- a list of typed content
+    blocks plus scorecard and per-agent tables rendered into the first block.
+    """
+
+    docId: str
+    type: str
+    generatedAt: datetime
+    content: list[CompiledContentBlock]
+    status: Literal["completed", "error"]
+    processedAt: datetime
