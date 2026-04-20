@@ -17,10 +17,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.agents.schemas import DocumentTaggedDetail
-from src.config import DatabaseConfig, RedisConfig
+from src.config import CloudWatchConfig, DatabaseConfig, PipelineConfig, RedisConfig
 from src.db.questions_repo import fetch_questions_by_category
 from src.utils.redis_client import (
-    TTL_QUESTIONS,
+    get_cache_config,
     get_redis,
     key_questions,
     redis_get_json,
@@ -31,44 +31,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-AGENT_TAG_MAP: dict[str, frozenset[str]] = {
-    "security": frozenset(
-        {
-            "authentication",
-            "authorisation",
-            "encryption",
-            "vulnerability_management",
-            "secrets_management",
-            "network_security",
-        }
-    ),
-    "data": frozenset({"data_governance", "compliance", "audit_logging"}),
-    "risk": frozenset({"incident_response", "compliance", "audit_logging"}),
-    "ea": frozenset({"encryption", "network_security", "compliance"}),
-    "solution": frozenset(
-        {
-            "authentication",
-            "authorisation",
-            "encryption",
-            "vulnerability_management",
-            "secrets_management",
-            "network_security",
-            "incident_response",
-            "data_governance",
-            "audit_logging",
-            "compliance",
-        }
-    ),
-}
-
-AGENT_TYPES: list[str] = ["security", "data", "risk", "ea", "solution"]
-
-_SQS_INLINE_LIMIT: int = 240_000  # bytes — SQS max is 256 KB; leave headroom
-
-# ---------------------------------------------------------------------------
 # Module-level singletons (cold-start reuse)
 # ---------------------------------------------------------------------------
 
@@ -77,6 +39,9 @@ _sqs: Any = None
 _s3: Any = None
 _cw: Any = None
 _db_config: DatabaseConfig | None = None
+_cw_config: CloudWatchConfig | None = None
+_pipeline_config: PipelineConfig | None = None
+_agent_tag_map_cache: dict[str, frozenset[str]] | None = None
 
 
 def _get_redis_config() -> RedisConfig:
@@ -85,6 +50,34 @@ def _get_redis_config() -> RedisConfig:
     if _redis_config is None:
         _redis_config = RedisConfig()  # type: ignore[call-arg]
     return _redis_config
+
+
+def _get_cw_config() -> CloudWatchConfig:
+    """Return the module-level CloudWatchConfig singleton, creating on first call."""
+    global _cw_config  # noqa: PLW0603
+    if _cw_config is None:
+        _cw_config = CloudWatchConfig()
+    return _cw_config
+
+
+def _get_pipeline_config() -> PipelineConfig:
+    """Return the module-level PipelineConfig singleton, creating on first call."""
+    global _pipeline_config  # noqa: PLW0603
+    if _pipeline_config is None:
+        _pipeline_config = PipelineConfig()
+    return _pipeline_config
+
+
+def _get_agent_tag_map() -> dict[str, frozenset[str]]:
+    """Return the agent tag map with ``list[str]`` values converted to ``frozenset[str]``.
+
+    Conversion is cached so it runs at most once per cold start.
+    """
+    global _agent_tag_map_cache  # noqa: PLW0603
+    if _agent_tag_map_cache is None:
+        raw: dict[str, list[str]] = _get_pipeline_config().agent_tag_map
+        _agent_tag_map_cache = {agent: frozenset(tags) for agent, tags in raw.items()}
+    return _agent_tag_map_cache
 
 
 def _get_sqs() -> Any:
@@ -148,7 +141,7 @@ def extract_sections_for_agent(
     Returns:
         Filtered list preserving original chunk order.
     """
-    allowed_tags: frozenset[str] = AGENT_TAG_MAP[agent_type]
+    allowed_tags: frozenset[str] = _get_agent_tag_map()[agent_type]
     result: list[dict[str, Any]] = []
     last_heading: dict[str, Any] | None = None
     heading_added: bool = False
@@ -222,7 +215,7 @@ async def _load_questions(
     question_dicts: list[dict[str, Any]] = [
         {"id": i + 1, "question": q} for i, q in enumerate(questions)
     ]
-    await redis_set_json(redis, cache_key, question_dicts, TTL_QUESTIONS)
+    await redis_set_json(redis, cache_key, question_dicts, get_cache_config().ttl_questions)
     logger.info("Cached %d questions for agent_type=%s", len(question_dicts), agent_type)
     return question_dicts
 
@@ -249,7 +242,7 @@ async def _emit_metric(
     await loop.run_in_executor(
         None,
         lambda: _get_cw().put_metric_data(
-            Namespace="Defra/Pipeline",
+            Namespace=_get_cw_config().namespace,
             MetricData=[
                 {
                     "MetricName": name,
@@ -330,7 +323,7 @@ async def _enqueue_sqs_message(
     doc_id: str = payload["docId"]
     agent_type: str = payload["agentType"]
 
-    if len(message_body.encode("utf-8")) <= _SQS_INLINE_LIMIT:
+    if len(message_body.encode("utf-8")) <= _get_pipeline_config().sqs_inline_limit:
         await _send_sqs_message(sqs_client, queue_url, message_body)
     else:
         # Offload to S3
@@ -410,7 +403,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     payloads: list[dict[str, Any]] = []
     section_counts: list[tuple[str, int]] = []
 
-    for agent_type in AGENT_TYPES:
+    for agent_type in _get_pipeline_config().agent_types:
         sections: list[dict[str, Any]] = extract_sections_for_agent(tagged_chunks, agent_type)
         questions: list[dict[str, Any]] = await _load_questions(redis, agent_type, dsn)
         document_text: str = _sections_to_text(sections)

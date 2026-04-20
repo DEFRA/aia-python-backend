@@ -12,22 +12,28 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
-from src.config import RedisConfig
+from src.config import CacheConfig, RedisConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# TTL constants (seconds)
+# TTL configuration (seconds) — sourced from CacheConfig (config.yaml)
 # ---------------------------------------------------------------------------
 
-TTL_CHUNKS: int = 86_400  # 24 hours — parsed content (content-hash key)
-TTL_TAGGED: int = 86_400  # 24 hours — tagging is the most expensive LLM call
-TTL_SECTIONS: int = 3_600  # 1 hour  — per-agent section slices
-TTL_QUESTIONS: int = 3_600  # 1 hour  — invalidate on question table update
-TTL_RESULT: int = 3_600  # 1 hour  — individual agent results
-TTL_RESULTS_COUNT: int = 1_800  # 30 min  — fan-in counter for Stage 7
-TTL_COMPILED: int = 3_600  # 1 hour  — compiled report payload
-TTL_STAGE8_COUNT: int = 1_800  # 30 min  — fan-in counter for Persist + Move
+_cache_config: CacheConfig | None = None
+
+
+def get_cache_config() -> CacheConfig:
+    """Return the module-level ``CacheConfig`` singleton.
+
+    Created once per cold start so handlers can import a single shared
+    instance without each handler instantiating its own settings object.
+    """
+    global _cache_config  # noqa: PLW0603
+    if _cache_config is None:
+        _cache_config = CacheConfig()
+    return _cache_config
+
 
 # ---------------------------------------------------------------------------
 # Module-level connection singleton

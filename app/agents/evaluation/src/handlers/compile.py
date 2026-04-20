@@ -35,12 +35,10 @@ from src.agents.schemas import (
     DocumentCompiledDetail,
     FinalSummary,
 )
-from src.config import EventBridgeConfig, RedisConfig
+from src.config import EventBridgeConfig, PipelineConfig, RedisConfig
 from src.utils.eventbridge import EventBridgePublisher
 from src.utils.redis_client import (
-    TTL_COMPILED,
-    TTL_RESULT,
-    TTL_RESULTS_COUNT,
+    get_cache_config,
     get_redis,
     key_compiled,
     key_result,
@@ -56,8 +54,6 @@ logger.setLevel(logging.INFO)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-AGENT_TYPES: list[str] = ["security", "data", "risk", "ea", "solution"]
 
 AGENT_DISPLAY_NAMES: dict[str, str] = {
     "security": "Security Policy",
@@ -107,6 +103,7 @@ class _AgentFailureMarker(BaseModel):
 _redis_config: RedisConfig | None = None
 _eb_config: EventBridgeConfig | None = None
 _publisher: EventBridgePublisher | None = None
+_pipeline_config: PipelineConfig | None = None
 
 
 def _get_redis_config() -> RedisConfig:
@@ -117,6 +114,14 @@ def _get_redis_config() -> RedisConfig:
         # mypy cannot see the env-provided arguments so suppress call-arg here.
         _redis_config = RedisConfig()  # type: ignore[call-arg]
     return _redis_config
+
+
+def _get_pipeline_config() -> PipelineConfig:
+    """Return the module-level PipelineConfig singleton, creating on first call."""
+    global _pipeline_config  # noqa: PLW0603
+    if _pipeline_config is None:
+        _pipeline_config = PipelineConfig()
+    return _pipeline_config
 
 
 def _get_eventbridge_config() -> EventBridgeConfig:
@@ -183,7 +188,7 @@ def _render_agent_markdown(agent_type: str, result: AgentResult | None) -> str:
     """Render one agent's section as markdown (heading + table + summary).
 
     Args:
-        agent_type: One of ``AGENT_TYPES``.
+        agent_type: One of the pipeline's configured agent types.
         result: The agent's validated result, or ``None`` if the agent failed.
 
     Returns:
@@ -211,7 +216,7 @@ def _render_scorecard(results: dict[str, AgentResult | None]) -> str:
     divider: str = "|----------|-----|-------|-------|---------|"
     lines: list[str] = ["### Cross-Category Scorecard", header, divider]
 
-    for agent in AGENT_TYPES:
+    for agent in _get_pipeline_config().agent_types:
         display: str = AGENT_DISPLAY_NAMES[agent]
         result: AgentResult | None = results.get(agent)
         if result is None:
@@ -274,7 +279,8 @@ def _assemble(doc_id: str, results: dict[str, AgentResult | None]) -> CompiledRe
         matching the front-end response contract.
     """
     sections: list[str] = [
-        _render_agent_markdown(agent, results.get(agent)) for agent in AGENT_TYPES
+        _render_agent_markdown(agent, results.get(agent))
+        for agent in _get_pipeline_config().agent_types
     ]
     scorecard: str = _render_scorecard(results)
 
@@ -320,7 +326,7 @@ async def _store_agent_outcome(
         payload: dict[str, Any] = marker.model_dump()
     else:
         payload = status_msg.result.model_dump()
-    await redis_set_json(redis, cache_key, payload, TTL_RESULT)
+    await redis_set_json(redis, cache_key, payload, get_cache_config().ttl_result)
 
 
 async def _read_all_results(
@@ -334,7 +340,7 @@ async def _read_all_results(
     condition.
     """
     results: dict[str, AgentResult | None] = {}
-    for agent in AGENT_TYPES:
+    for agent in _get_pipeline_config().agent_types:
         raw: Any = await redis_get_json(redis, key_result(doc_id, agent))
         results[agent] = _coerce_agent_result(raw)
     return results
@@ -395,17 +401,20 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     await _store_agent_outcome(redis, status_msg)
 
-    count: int = await redis_incr(redis, key_results_count(doc_id), TTL_RESULTS_COUNT)
+    count: int = await redis_incr(
+        redis, key_results_count(doc_id), get_cache_config().ttl_results_count
+    )
+    total_agents: int = len(_get_pipeline_config().agent_types)
     logger.info(
         "Stage 7 Compile: doc_id=%s agent_type=%s status=%s count=%d/%d",
         doc_id,
         agent_type,
         status_msg.status,
         count,
-        len(AGENT_TYPES),
+        total_agents,
     )
 
-    if count >= len(AGENT_TYPES):
+    if count >= total_agents:
         await _finalise(redis, doc_id)
 
     return {"statusCode": 200}
@@ -422,7 +431,7 @@ async def _finalise(redis: Any, doc_id: str) -> None:
         redis,
         compiled_key,
         compiled.model_dump(mode="json"),
-        TTL_COMPILED,
+        get_cache_config().ttl_compiled,
     )
 
     detail: DocumentCompiledDetail = DocumentCompiledDetail(

@@ -1,4 +1,5 @@
 """Entry point: run the Security Assessment Agent against a document file."""
+
 import asyncio
 import logging
 import sys
@@ -16,7 +17,6 @@ from src.utils.pdf_creator_multipage import build_security_report
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger: logging.Logger = logging.getLogger(__name__)
-
 
 
 def _build_dataset(result: AgentResult) -> dict[str, dict[str, object]]:
@@ -46,7 +46,7 @@ async def run(document_path: str, output_pdf: str, category: str = "Security") -
     """
     document: str = Path(document_path).read_text(encoding="utf-8")
 
-    db_config: DatabaseConfig = DatabaseConfig()
+    db_config: DatabaseConfig = DatabaseConfig()  # type: ignore[call-arg]
     questions: list[str] = await fetch_questions_by_category(
         dsn=db_config.dsn,
         category=category,

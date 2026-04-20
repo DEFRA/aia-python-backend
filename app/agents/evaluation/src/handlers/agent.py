@@ -14,8 +14,9 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 import anthropic
 import boto3
@@ -28,6 +29,7 @@ from src.agents.schemas import AgentResult
 from src.agents.security_agent import SecurityAgent
 from src.agents.solution_agent import SolutionAgent
 from src.config import (
+    CloudWatchConfig,
     DataAgentConfig,
     EAAgentConfig,
     RiskAgentConfig,
@@ -38,11 +40,45 @@ from src.config import (
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
+# ---------------------------------------------------------------------------
+# Typed agent / config protocols
+# ---------------------------------------------------------------------------
+
+
+class SpecialistAgentConfig(Protocol):
+    """Structural type for any specialist agent's Pydantic config.
+
+    All five specialist agent configs expose ``api_key``, ``model``,
+    ``max_tokens`` and ``temperature``; declaring them here removes the need
+    for ``Any`` annotations at the dispatch site.
+    """
+
+    api_key: str
+    model: str
+    max_tokens: int
+    temperature: float
+
+
+class SpecialistAgent(Protocol):
+    """Structural type for a specialist agent with an async ``assess``."""
+
+    async def assess(self, document: str, questions: list[str]) -> AgentResult: ...
+
+
+# Typed factories for the dispatch registries. ``Callable[..., T]`` accepts
+# any keyword signature (the concrete agents use ``client=`` + ``agent_config=``)
+# while preserving a typed return — so ``AGENT_REGISTRY[agent_type](...)`` is
+# known to produce a ``SpecialistAgent`` without resorting to ``Any``.
+SpecialistAgentFactory = Callable[..., SpecialistAgent]
+SpecialistConfigFactory = Callable[..., SpecialistAgentConfig]
+
+
 # ---------------------------------------------------------------------------
 # Agent and config registries
 # ---------------------------------------------------------------------------
 
-AGENT_REGISTRY: dict[str, type] = {
+AGENT_REGISTRY: dict[str, SpecialistAgentFactory] = {
     "security": SecurityAgent,
     "data": DataAgent,
     "risk": RiskAgent,
@@ -50,7 +86,7 @@ AGENT_REGISTRY: dict[str, type] = {
     "solution": SolutionAgent,
 }
 
-CONFIG_REGISTRY: dict[str, type] = {
+CONFIG_REGISTRY: dict[str, SpecialistConfigFactory] = {
     "security": SecurityAgentConfig,
     "data": DataAgentConfig,
     "risk": RiskAgentConfig,
@@ -93,6 +129,15 @@ class AgentSqsEvent(BaseModel):
 _sqs: Any = None
 _s3: Any = None
 _cw: Any = None
+_cw_config: CloudWatchConfig | None = None
+
+
+def _get_cw_config() -> CloudWatchConfig:
+    """Return the module-level CloudWatchConfig singleton, creating on first call."""
+    global _cw_config  # noqa: PLW0603
+    if _cw_config is None:
+        _cw_config = CloudWatchConfig()
+    return _cw_config
 
 
 def _get_sqs() -> Any:
@@ -188,7 +233,7 @@ async def _emit_metric(
     await loop.run_in_executor(
         None,
         lambda: _get_cw().put_metric_data(
-            Namespace="Defra/Pipeline",
+            Namespace=_get_cw_config().namespace,
             MetricData=[
                 {
                     "MetricName": name,
@@ -271,14 +316,14 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     if agent_type not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent type: {agent_type}")
 
-    agent_cls: type = AGENT_REGISTRY[agent_type]
-    config_cls: type = CONFIG_REGISTRY[agent_type]
-    agent_config: Any = config_cls()
+    agent_cls: SpecialistAgentFactory = AGENT_REGISTRY[agent_type]
+    config_cls: SpecialistConfigFactory = CONFIG_REGISTRY[agent_type]
+    agent_config: SpecialistAgentConfig = config_cls()
 
     client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic(
         api_key=agent_config.api_key,
     )
-    agent: Any = agent_cls(client=client, agent_config=agent_config)
+    agent: SpecialistAgent = agent_cls(client=client, agent_config=agent_config)
 
     # 5. Run assessment and publish result
     status_queue_url: str = os.environ["SQS_STATUS_QUEUE_URL"]
