@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
 from src.agents.schemas import (
     AgentCompleteDetail,
     AgentResult,
+    AgentStatusMessage,
     AllAgentsCompleteDetail,
     AssessmentRow,
+    CompiledContentBlock,
+    CompiledResult,
     DocumentCompiledDetail,
     DocumentMovedDetail,
     DocumentParsedDetail,
@@ -21,6 +26,16 @@ from src.agents.schemas import (
     ResultPersistedDetail,
     SectionsReadyDetail,
 )
+
+
+def _sample_agent_result() -> AgentResult:
+    """Return a minimal valid AgentResult for schema fixtures."""
+    return AgentResult(
+        assessments=[],
+        metadata=LLMResponseMeta(model="m", input_tokens=0, output_tokens=0, stop_reason=None),
+        final_summary=None,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Ensure existing models are untouched
@@ -167,3 +182,109 @@ def test_pipeline_complete_detail_invalid_status() -> None:
     """PipelineCompleteDetail should reject statuses not in the allowed literal."""
     with pytest.raises(ValidationError):
         PipelineCompleteDetail(docId="doc-1", status="unknown")
+
+
+# ---------------------------------------------------------------------------
+# AgentStatusMessage (Stage 6 -> Stage 7 via SQS Status queue)
+# ---------------------------------------------------------------------------
+
+
+def test_agent_status_message_completed_round_trip() -> None:
+    """AgentStatusMessage with status='completed' should round-trip via JSON."""
+    duration: float = 1234.5
+    msg: AgentStatusMessage = AgentStatusMessage(
+        docId="doc-1",
+        agentType="security",
+        status="completed",
+        result=_sample_agent_result(),
+        durationMs=duration,
+        completedAt="2026-04-15T12:00:00Z",
+    )
+    encoded: str = msg.model_dump_json()
+    decoded: AgentStatusMessage = AgentStatusMessage.model_validate_json(encoded)
+    assert decoded.docId == "doc-1"
+    assert decoded.agentType == "security"
+    assert decoded.status == "completed"
+    assert decoded.durationMs == duration
+    assert decoded.errorMessage is None
+    assert isinstance(decoded.result, AgentResult)
+
+
+def test_agent_status_message_failed_allows_null_result() -> None:
+    """AgentStatusMessage should allow result=None when status='failed'."""
+    msg: AgentStatusMessage = AgentStatusMessage(
+        docId="doc-1",
+        agentType="data",
+        status="failed",
+        result=None,
+        durationMs=800.0,
+        completedAt="2026-04-15T12:00:00Z",
+        errorMessage="Claude returned garbage",
+    )
+    assert msg.status == "failed"
+    assert msg.result is None
+    assert msg.errorMessage == "Claude returned garbage"
+
+
+def test_agent_status_message_rejects_invalid_status() -> None:
+    """AgentStatusMessage should reject statuses not in the allowed literal."""
+    with pytest.raises(ValidationError):
+        AgentStatusMessage(
+            docId="doc-1",
+            agentType="risk",
+            status="pending",
+            result=None,
+            durationMs=0.0,
+            completedAt="2026-04-15T12:00:00Z",
+        )
+
+
+def test_agent_status_message_requires_core_fields() -> None:
+    """AgentStatusMessage must reject messages missing required fields."""
+    with pytest.raises(ValidationError):
+        AgentStatusMessage.model_validate({"docId": "doc-1"})
+
+
+# ---------------------------------------------------------------------------
+# CompiledResult (Stage 7 assembled output)
+# ---------------------------------------------------------------------------
+
+
+def test_compiled_result_round_trip() -> None:
+    """CompiledResult should round-trip through JSON without losing fields."""
+    generated_at: datetime = datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
+    result: CompiledResult = CompiledResult(
+        docId="doc-1",
+        type="Security Assessment",
+        generatedAt=generated_at,
+        content=[CompiledContentBlock(type="text", text="# Report")],
+        status="completed",
+        processedAt=generated_at,
+    )
+    encoded: str = result.model_dump_json()
+    decoded: CompiledResult = CompiledResult.model_validate_json(encoded)
+    assert decoded.docId == "doc-1"
+    assert decoded.type == "Security Assessment"
+    assert decoded.status == "completed"
+    assert decoded.content[0].type == "text"
+    assert decoded.content[0].text == "# Report"
+
+
+def test_compiled_result_rejects_invalid_status() -> None:
+    """CompiledResult should reject statuses not in the allowed literal."""
+    now: datetime = datetime.now(tz=UTC)
+    with pytest.raises(ValidationError):
+        CompiledResult(
+            docId="doc-1",
+            type="Security Assessment",
+            generatedAt=now,
+            content=[],
+            status="pending",
+            processedAt=now,
+        )
+
+
+def test_compiled_result_requires_all_core_fields() -> None:
+    """CompiledResult must reject payloads missing required fields."""
+    with pytest.raises(ValidationError):
+        CompiledResult.model_validate({"docId": "doc-1"})
