@@ -4,7 +4,8 @@ import json
 import requests
 import msal
 import boto3
-
+from dotenv import load_dotenv
+load_dotenv()
  
 # -------------------------------
 
