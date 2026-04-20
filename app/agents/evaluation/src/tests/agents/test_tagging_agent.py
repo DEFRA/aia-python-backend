@@ -10,6 +10,14 @@ import pytest
 
 from src.agents.schemas import TaggedChunk
 from src.agents.tagging_agent import TaggingAgent
+from src.config import TaggingAgentConfig
+
+
+def _make_config(batch_size: int | None = None) -> TaggingAgentConfig:
+    """Build a ``TaggingAgentConfig`` for tests, optionally overriding batch_size."""
+    if batch_size is None:
+        return TaggingAgentConfig()
+    return TaggingAgentConfig(TAGGING_BATCH_SIZE=batch_size)
 
 
 def _make_chunk(index: int, text: str = "sample text", page: int = 1) -> dict[str, Any]:
@@ -61,7 +69,7 @@ async def test_tag_returns_list_of_tagged_chunks() -> None:
     response_text: str = _make_tagged_response(chunks)
     client: MagicMock = _mock_client(response_text)
 
-    agent: TaggingAgent = TaggingAgent(client=client)
+    agent: TaggingAgent = TaggingAgent(client=client, config=_make_config())
     result: list[TaggedChunk] = await agent.tag(chunks)
 
     expected_count: int = 2
@@ -89,7 +97,7 @@ async def test_tag_batching_with_more_than_batch_size() -> None:
     client: MagicMock = MagicMock()
     client.messages.create = _mock_create
 
-    agent: TaggingAgent = TaggingAgent(client=client, batch_size=batch_size)
+    agent: TaggingAgent = TaggingAgent(client=client, config=_make_config(batch_size=batch_size))
     result: list[TaggedChunk] = await agent.tag(chunks)
 
     # 7 chunks / batch_size 3 = 3 API calls (3 + 3 + 1)
@@ -107,7 +115,7 @@ async def test_tag_strips_code_fences() -> None:
     fenced: str = f"```json\n{inner}\n```"
     client: MagicMock = _mock_client(fenced)
 
-    agent: TaggingAgent = TaggingAgent(client=client)
+    agent: TaggingAgent = TaggingAgent(client=client, config=_make_config())
     result: list[TaggedChunk] = await agent.tag(chunks)
 
     assert len(result) == 1
@@ -121,7 +129,7 @@ async def test_tag_uses_temperature_zero() -> None:
     response_text: str = _make_tagged_response(chunks)
     client: MagicMock = _mock_client(response_text)
 
-    agent: TaggingAgent = TaggingAgent(client=client)
+    agent: TaggingAgent = TaggingAgent(client=client, config=_make_config())
     await agent.tag(chunks)
 
     call_kwargs: dict[str, Any] = client.messages.create.call_args.kwargs
@@ -134,7 +142,7 @@ async def test_tag_empty_chunks_returns_empty() -> None:
     client: MagicMock = MagicMock()
     client.messages.create = AsyncMock()
 
-    agent: TaggingAgent = TaggingAgent(client=client)
+    agent: TaggingAgent = TaggingAgent(client=client, config=_make_config())
     result: list[TaggedChunk] = await agent.tag([])
 
     assert result == []
@@ -160,7 +168,7 @@ async def test_tag_non_relevant_chunk() -> None:
     )
     client: MagicMock = _mock_client(response)
 
-    agent: TaggingAgent = TaggingAgent(client=client)
+    agent: TaggingAgent = TaggingAgent(client=client, config=_make_config())
     result: list[TaggedChunk] = await agent.tag(chunks)
 
     assert len(result) == 1

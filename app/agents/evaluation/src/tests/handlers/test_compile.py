@@ -27,13 +27,15 @@ from src.agents.schemas import (
 )
 from src.handlers.compile import (
     AGENT_DISPLAY_NAMES,
-    AGENT_TYPES,
     _assemble,
+    _get_pipeline_config,
     _handler,
     _infer_doc_type,
     _render_agent_markdown,
     lambda_handler,
 )
+
+AGENT_TYPES: list[str] = _get_pipeline_config().agent_types
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -312,6 +314,27 @@ async def test_handler_stores_failed_agent_with_error_marker(
     stored: dict[str, Any] = json.loads(raw)
     assert stored["status"] == "failed"
     assert stored["error"] == "boom"
+
+
+# ---------------------------------------------------------------------------
+# PipelineConfig sourcing
+# ---------------------------------------------------------------------------
+
+
+def test_compile_agent_types_come_from_pipeline_config() -> None:
+    """compile.py must source agent_types from PipelineConfig, not a hardcoded list."""
+    from src import config as config_module
+    from src.handlers import compile as compile_module
+
+    # Constant should not exist at module level (removed in favour of config)
+    assert not hasattr(compile_module, "AGENT_TYPES")
+
+    # Singleton accessor returns the config class
+    assert isinstance(compile_module._get_pipeline_config(), config_module.PipelineConfig)
+
+    # Values match what PipelineConfig() yields
+    fresh: list[str] = config_module.PipelineConfig().agent_types
+    assert compile_module._get_pipeline_config().agent_types == fresh
 
 
 # ---------------------------------------------------------------------------

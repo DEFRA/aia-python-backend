@@ -14,24 +14,40 @@ from typing import Any
 import fitz
 from docx import Document
 
+from src.config import ParserConfig
+
 logger: logging.Logger = logging.getLogger(__name__)
 
-_MIN_TEXT_CHARS: int = 100  # Minimum stripped chars to consider a PDF text-based
+_parser_config: ParserConfig | None = None
 
 
-def get_pdf_strategy(file_bytes: bytes) -> str:
+def _get_parser_config() -> ParserConfig:
+    """Return the module-level ``ParserConfig`` singleton, creating on first call."""
+    global _parser_config  # noqa: PLW0603
+    if _parser_config is None:
+        _parser_config = ParserConfig()
+    return _parser_config
+
+
+def get_pdf_strategy(file_bytes: bytes, min_text_chars: int | None = None) -> str:
     """Return ``"text"`` if the PDF has an extractable text layer, else ``"vision"``.
 
-    Samples the first 3 pages.  If the combined stripped text is <= 100
-    characters the PDF is treated as scanned / image-only.
+    Samples the first 3 pages.  If the combined stripped text is ``<=
+    min_text_chars`` the PDF is treated as scanned / image-only.
 
     Args:
         file_bytes: Raw PDF bytes.
+        min_text_chars: Optional override for the text-layer threshold.
+            Defaults to ``ParserConfig.min_text_chars`` (configured in
+            ``config.yaml``).
     """
+    threshold: int = (
+        min_text_chars if min_text_chars is not None else _get_parser_config().min_text_chars
+    )
     doc: fitz.Document = fitz.open(stream=file_bytes, filetype="pdf")
     sample: str = "".join(doc[i].get_text() for i in range(min(3, len(doc))))
     doc.close()
-    return "text" if len(sample.strip()) > _MIN_TEXT_CHARS else "vision"
+    return "text" if len(sample.strip()) > threshold else "vision"
 
 
 def extract_text_blocks(file_bytes: bytes) -> list[dict[str, Any]]:
@@ -89,7 +105,7 @@ def extract_text_blocks(file_bytes: bytes) -> list[dict[str, Any]]:
 
 def clean_and_chunk(
     blocks: list[dict[str, Any]],
-    max_chars: int = 1500,
+    max_chars: int | None = None,
 ) -> list[dict[str, Any]]:
     """Merge small blocks into chunks and attach heading hints.
 
@@ -100,6 +116,8 @@ def clean_and_chunk(
     Args:
         blocks: Output from :func:`extract_text_blocks`.
         max_chars: Soft max characters per chunk before forcing a split.
+            Defaults to ``ParserConfig.chunk_max_chars`` (configured in
+            ``config.yaml``).
 
     Returns:
         List of chunk dicts with keys: ``chunk_index``, ``page``,
@@ -107,6 +125,10 @@ def clean_and_chunk(
     """
     if not blocks:
         return []
+
+    effective_max_chars: int = (
+        max_chars if max_chars is not None else _get_parser_config().chunk_max_chars
+    )
 
     # Build per-page body-font lookup
     page_font_counter: dict[int, Counter[float]] = {}
@@ -142,7 +164,7 @@ def clean_and_chunk(
         max_font: float = max(block["font_sizes"]) if block["font_sizes"] else 0
         is_heading: bool = max_font > body_font.get(pg, 0) * 1.1
 
-        force_flush: bool = is_heading or (len(current_text) + len(text) > max_chars)
+        force_flush: bool = is_heading or (len(current_text) + len(text) > effective_max_chars)
 
         if force_flush and current_text.strip():
             chunks.append(flush(current_text, current_page, current_is_heading))

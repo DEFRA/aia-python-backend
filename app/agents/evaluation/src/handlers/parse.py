@@ -18,7 +18,7 @@ import boto3
 from pydantic import BaseModel
 
 from src.agents.schemas import DocumentParsedDetail
-from src.config import EventBridgeConfig, RedisConfig
+from src.config import CloudWatchConfig, EventBridgeConfig, RedisConfig
 from src.utils.document_parser import (
     clean_and_chunk,
     extract_text_blocks,
@@ -28,7 +28,7 @@ from src.utils.document_parser import (
 from src.utils.eventbridge import EventBridgePublisher
 from src.utils.exceptions import ScannedPdfError
 from src.utils.redis_client import (
-    TTL_CHUNKS,
+    get_cache_config,
     get_redis,
     key_chunks,
     key_receipt,
@@ -71,6 +71,15 @@ _redis_config: RedisConfig | None = None
 _publisher: EventBridgePublisher | None = None
 _s3: Any = None
 _cw: Any = None
+_cw_config: CloudWatchConfig | None = None
+
+
+def _get_cw_config() -> CloudWatchConfig:
+    """Return the module-level CloudWatchConfig singleton, creating on first call."""
+    global _cw_config  # noqa: PLW0603
+    if _cw_config is None:
+        _cw_config = CloudWatchConfig()
+    return _cw_config
 
 
 def _get_redis_config() -> RedisConfig:
@@ -103,9 +112,6 @@ def _get_cw() -> Any:
     if _cw is None:
         _cw = boto3.client("cloudwatch")
     return _cw
-
-
-_TTL_RECEIPT: int = 900  # 15 min — SQS receipt handle
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +151,7 @@ async def _emit_metric(name: str, value: float, unit: str = "Milliseconds") -> N
     await loop.run_in_executor(
         None,
         lambda: _get_cw().put_metric_data(
-            Namespace="Defra/Pipeline",
+            Namespace=_get_cw_config().namespace,
             MetricData=[{"MetricName": name, "Value": value, "Unit": unit}],
         ),
     )
@@ -229,7 +235,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             raise ValueError(f"Unsupported file extension: '{extension}' for s3_key={s3_key}")
 
         # 7. Write chunks to Redis
-        await redis_set_json(redis, cache_key, chunks, TTL_CHUNKS)
+        await redis_set_json(redis, cache_key, chunks, get_cache_config().ttl_chunks)
         logger.info(
             "Cached %d chunks: key=%s doc_id=%s",
             len(chunks),
@@ -239,7 +245,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     # 8. Store SQS receipt handle
     receipt_key: str = key_receipt(doc_id)
-    await redis.setex(receipt_key, _TTL_RECEIPT, record.receiptHandle)
+    await redis.setex(receipt_key, get_cache_config().ttl_receipt, record.receiptHandle)
 
     # 9. Publish DocumentParsed event
     detail: DocumentParsedDetail = DocumentParsedDetail(

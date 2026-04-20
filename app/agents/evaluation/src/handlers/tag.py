@@ -15,10 +15,10 @@ import anthropic
 
 from src.agents.schemas import DocumentParsedDetail, DocumentTaggedDetail, TaggedChunk
 from src.agents.tagging_agent import TaggingAgent
-from src.config import EventBridgeConfig, RedisConfig
+from src.config import CloudWatchConfig, EventBridgeConfig, RedisConfig, TaggingAgentConfig
 from src.utils.eventbridge import EventBridgePublisher
 from src.utils.redis_client import (
-    TTL_TAGGED,
+    get_cache_config,
     get_redis,
     key_chunks,
     key_tagged,
@@ -36,6 +36,24 @@ logger.setLevel(logging.INFO)
 _redis_config: RedisConfig | None = None
 _publisher: EventBridgePublisher | None = None
 _cw: Any = None
+_cw_config: CloudWatchConfig | None = None
+_tagging_config: TaggingAgentConfig | None = None
+
+
+def _get_cw_config() -> CloudWatchConfig:
+    """Return the module-level CloudWatchConfig singleton, creating on first call."""
+    global _cw_config  # noqa: PLW0603
+    if _cw_config is None:
+        _cw_config = CloudWatchConfig()
+    return _cw_config
+
+
+def _get_tagging_config() -> TaggingAgentConfig:
+    """Return the module-level TaggingAgentConfig singleton, creating on first call."""
+    global _tagging_config  # noqa: PLW0603
+    if _tagging_config is None:
+        _tagging_config = TaggingAgentConfig()
+    return _tagging_config
 
 
 def _get_redis_config() -> RedisConfig:
@@ -81,7 +99,7 @@ async def _emit_metric(name: str, value: float, unit: str = "Milliseconds") -> N
     await loop.run_in_executor(
         None,
         lambda: _get_cw().put_metric_data(
-            Namespace="Defra/Pipeline",
+            Namespace=_get_cw_config().namespace,
             MetricData=[{"MetricName": name, "Value": value, "Unit": unit}],
         ),
     )
@@ -150,12 +168,12 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
         # 4b. Run TaggingAgent
         client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic()
-        agent: TaggingAgent = TaggingAgent(client=client)
+        agent: TaggingAgent = TaggingAgent(client=client, config=_get_tagging_config())
         tagged_chunks: list[TaggedChunk] = await agent.tag(chunks)
 
         # 4c. Cache tagged output
         serialised: list[dict[str, Any]] = [tc.model_dump() for tc in tagged_chunks]
-        await redis_set_json(redis, tagged_cache_key, serialised, TTL_TAGGED)
+        await redis_set_json(redis, tagged_cache_key, serialised, get_cache_config().ttl_tagged)
         logger.info(
             "Cached %d tagged chunks: key=%s doc_id=%s",
             len(tagged_chunks),

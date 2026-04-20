@@ -1,0 +1,116 @@
+# Centralised operational configuration for the Defra evaluation pipeline.
+#
+# Precedence (highest wins): environment variables > values in this file > code defaults.
+# Secrets (API keys, DB credentials, Redis host) MUST NOT be placed in this file; they
+# are sourced from environment variables only.
+
+# --- Agent models ---
+agents:
+  security:
+    model: "claude-opus-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  gdpr:
+    model: "claude-opus-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  data:
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  risk:
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  ea:
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  solution:
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  tagging:
+    model: "claude-sonnet-4-6"
+    batch_size: 15
+    max_tokens: 4096
+    temperature: 0.0
+
+# --- Cache TTLs (seconds) ---
+cache:
+  ttl_chunks: 86400         # 24h - parsed content
+  ttl_tagged: 86400         # 24h - tagging output
+  ttl_sections: 3600        # 1h  - per-agent sections
+  ttl_questions: 3600       # 1h  - checklist questions
+  ttl_result: 3600          # 1h  - agent results
+  ttl_results_count: 1800   # 30m - Stage 7 fan-in counter
+  ttl_compiled: 3600        # 1h  - compiled report
+  ttl_stage8_count: 1800    # 30m - Stage 8 fan-in counter
+  ttl_receipt: 900          # 15m - SQS receipt handle
+
+# --- AWS infrastructure ---
+cloudwatch:
+  namespace: "Defra/Pipeline"
+
+eventbridge:
+  bus_name: "defra-pipeline"
+  source: "defra.pipeline"
+  region: "eu-west-2"
+
+# --- Pipeline constants ---
+pipeline:
+  agent_types:
+    - "security"
+    - "data"
+    - "risk"
+    - "ea"
+    - "solution"
+  sqs_inline_limit: 240000  # bytes - leave headroom below 256 KB
+  agent_tag_map:
+    security:
+      - "authentication"
+      - "authorisation"
+      - "encryption"
+      - "vulnerability_management"
+      - "secrets_management"
+      - "network_security"
+    data:
+      - "data_governance"
+      - "compliance"
+      - "audit_logging"
+    risk:
+      - "incident_response"
+      - "compliance"
+      - "audit_logging"
+    ea:
+      - "encryption"
+      - "network_security"
+      - "compliance"
+    solution:
+      - "authentication"
+      - "authorisation"
+      - "encryption"
+      - "vulnerability_management"
+      - "secrets_management"
+      - "network_security"
+      - "incident_response"
+      - "data_governance"
+      - "audit_logging"
+      - "compliance"
+
+# --- Document parser ---
+parser:
+  min_text_chars: 100       # threshold for text-based vs scanned PDF
+  chunk_max_chars: 1500     # soft max characters per chunk
+
+# --- Redis connection defaults (non-secret) ---
+redis:
+  port: 6379
+  ssl: true
+  db: 0
+  socket_timeout: 5.0
+  socket_connect_timeout: 3.0
+
+# --- Database connection defaults (non-secret) ---
+database:
+  port: 5432
