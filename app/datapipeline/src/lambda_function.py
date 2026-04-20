@@ -15,9 +15,9 @@ DB_PASSWORD = os.environ["DB_PASSWORD"]
 BEDROCK_REGION = os.environ.get["BEDROCK_REGION"]
 BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20240620-v1:0"  
 
-SHAREPOINT_TENANT_ID = os.environ["SHAREPOINT_TENANT_ID"]
-SHAREPOINT_CLIENT_ID = os.environ["SHAREPOINT_CLIENT_ID"]
-SHAREPOINT_CLIENT_SECRET = os.environ["SHAREPOINT_CLIENT_SECRET"]
+TENANT_ID = os.environ["SHAREPOINT_TENANT_ID"]
+CLIENT_ID = os.environ["SHAREPOINT_CLIENT_ID"]
+CLIENT_SECRET = os.environ["SHAREPOINT_CLIENT_SECRET"]
 
 # For client credentials scope; adjust if you use a different resource
 SHAREPOINT_SCOPE = "https://graph.microsoft.com/.default"
