@@ -1,0 +1,103 @@
+services:
+  localstack:
+    image: localstack/localstack:4.9.2
+    ports:
+      - "4566:4566" # LocalStack Gateway
+      - "4510-4559:4510-4559" # external services port range
+    env_file:
+      - .env
+    environment:
+      DEBUG: ${DEBUG:-1}
+      LS_LOG: WARN # Localstack DEBUG Level
+      SERVICES: s3,sqs,sns,firehose
+      LOCALSTACK_HOST: 127.0.0.1
+    volumes:
+      - "${TMPDIR:-/tmp}/localstack:/var/lib/localstack"
+      - ./scripts/start-localstack.sh:/etc/localstack/init/ready.d/start-localstack.sh
+    healthcheck:
+      test: ["CMD", "curl", "localhost:4566"]
+      interval: 5s
+      start_period: 5s
+      retries: 3
+    networks:
+      - cdp-tenant
+
+  postgres:
+    container_name: aia_documents
+    image: postgres:16-alpine
+    networks:
+      - cdp-tenant
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: aiauser
+      POSTGRES_PASSWORD: Admin123$
+      POSTGRES_DB: aia_documents
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiauser -d aia_documents"]
+      interval: 5s
+      start_period: 5s
+      retries: 5
+    restart: always
+
+  service:
+    build:
+      context: .
+      target: development
+    container_name: aia_service
+    ports:
+      - "${PORT:-8085}:${PORT:-8085}"
+      - "${PORT_DEBUG:-8086}:${PORT_DEBUG:-8086}"
+    links:
+      - "localstack:localstack"
+      - "postgres:postgres"
+    depends_on:
+      localstack:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      PORT: ${PORT:-8085}
+      PYTHON_ENV: development
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+      POSTGRES_URI: ${POSTGRES_URI:-postgresql://aiauser:Admin123$@postgres:5432/aia_documents}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-docsupload}
+      JWT_SECRET: ${JWT_SECRET:-aia-documents-secret-key-for-jwt-32-chars}
+      HOST: ${HOST:-0.0.0.0}
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /home/nonroot/app
+          ignore:
+            - README.md
+            - "**/*.md"
+            - "**/test_*.py"
+            - tests/**/*
+            - .git/**/*
+            - .venv/**/*
+            - .pytest_cache/**/*
+            - .ruff_cache/**/*
+            - .vscode/**/*
+            - .github/**/*
+            - requirements-dev.txt
+            - pytest.ini
+            - .pre-commit-config.yaml
+            - sonar-project.properties
+            - LICENCE
+        - action: rebuild
+          path: ./pyproject.toml
+          target: /home/nonroot/pyproject.toml
+    networks:
+      - cdp-tenant
+
+volumes:
+  postgres-data:
+
+networks:
+  cdp-tenant:
+    driver: bridge
