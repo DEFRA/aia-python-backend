@@ -20,6 +20,3 @@ files/*.html
 .ruff_cache/
 dist/
 *.egg-info/
-
-# Claude Code
-.claude/

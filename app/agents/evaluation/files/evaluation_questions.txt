@@ -1,0 +1,10 @@
+Does the document require unique user accounts and enforce Multi-Factor Authentication (MFA) for critical systems?
+Does the document specify least-privilege access using RBAC with quarterly access reviews and prompt removal of unused access?
+Are password requirements defined as 12+ characters, stored in approved password managers, and changed only upon suspected compromise?
+Do endpoints require automatic updates, approved antivirus/EDR, screen lock after 5 minutes, and encryption of devices and media?
+Does the document mandate secure networks for corporate access, require VPN for remote/public Wi-Fi, and prohibit unauthorized network devices?
+Are data classification levels defined, with data minimization practices and encryption of confidential data in transit and at rest?
+Does the document require use of approved file-sharing platforms and forbid personal cloud accounts?
+Are users instructed to handle unsolicited emails cautiously, verify identities, and report suspected phishing immediately?
+Does the document require ID badges in secure areas, securing workstations/documents, and reporting lost/stolen devices within 1 hour?
+Is there a requirement to immediately report security incidents and follow escalation procedures without self-remediation?
