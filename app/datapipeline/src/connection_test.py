@@ -4,13 +4,14 @@ import json
 import requests
 import msal
 import boto3
-
+from dotenv import load_dotenv
+load_dotenv()
  
-# ------------------------------
+# -------------------------------
 
 # CONFIGURATION (FILL THESE)
 
-# ------------------------------
+# -------------------------------
 # AWS credentials:
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -18,9 +19,11 @@ AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN")
 
 
 # SharePoint app registration details: 
-TENANT_ID= os.getenv("SHAREPOINT_TENANT_ID")
-CLIENT_ID= os.getenv("SHAREPOINT_CLIENT_ID")
-CLIENT_SECRET= os.getenv("SHAREPOINT_CLIENT_SECRET")
+TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID")
+CLIENT_ID = os.getenv("SHAREPOINT_CLIENT_ID")
+CLIENT_SECRET = os.getenv("SHAREPOINT_CLIENT_SECRET")
+SHAREPOINT_SITE_ID = ""
+
  
 # SharePoint site you were granted access to
 
