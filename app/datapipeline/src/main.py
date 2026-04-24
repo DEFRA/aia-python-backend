@@ -1,71 +1,85 @@
 import os
+import sys
 import json
 import uuid
 import requests
+import PyPDF2
+import msal
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-import msal
 from anthropic import Anthropic
+from anthropic import AnthropicBedrock
+
 
 # ---------------------------------------------------------
-# 1. Load environment variables
+# 1. Load environment variables and configuration
 # ---------------------------------------------------------
 load_dotenv()
 
-TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID")
-CLIENT_ID = os.getenv("SHAREPOINT_CLIENT_ID")
-CLIENT_SECRET = os.getenv("SHAREPOINT_CLIENT_SECRET")
-
+# AWS config:
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN")
 
- 
-SHAREPOINT_SITE = "https://defra.sharepoint.com/teams/Team3182"
-CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = "claude-3-5-sonnet-20240620"   # Claude 4.6 equivalent model family
+# LLM / Bedrock config:
+REGION = os.getenv("AWS_DEFAULT_REGION")
+MODEL_ID = os.getenv("MODEL_ID")
 
+# SharePoint config:
+TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID")
+CLIENT_ID = os.getenv("SHAREPOINT_CLIENT_ID")
+CLIENT_SECRET = os.getenv("SHAREPOINT_CLIENT_SECRET")
+#SHAREPOINT_SITE = "https://defra.sharepoint.com/teams/Team3182"
+#SITE_PATH = "/teams/Team3182"
+SHAREPOINT_SITE = "https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx"
+SITE_PATH = "/teams/Team3221"
+SHAREPOINT_HOSTNAME = "defra.sharepoint.com"
+
+
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+SCOPES = ["https://graph.microsoft.com/.default"]
+SITE_LOOKUP_URL = (
+    f"https://graph.microsoft.com/v1.0/sites/"
+    f"{SHAREPOINT_HOSTNAME}:{SITE_PATH}"
+)
 
 # ---------------------------------------------------------
 # 2. Acquire SharePoint Access Token using MSAL
 # ---------------------------------------------------------
 def get_sharepoint_token():
-    authority = f"https://login.microsoftonline.com/{TENANT_ID}"
-    scope = ["https://graph.microsoft.com/.default"]
-
+    
     app = msal.ConfidentialClientApplication(
-        CLIENT_ID,
-        authority=authority,
-        client_credential=CLIENT_SECRET
+        client_id=CLIENT_ID,
+        authority=AUTHORITY,
+        client_credential=CLIENT_SECRET,
     )
-
-    result = app.acquire_token_silent(scope, account=None)
-    if not result:
-        result = app.acquire_token_for_client(scopes=scope)
-
+ 
+    result = app.acquire_token_for_client(scopes=SCOPES) 
+   
     if "access_token" not in result:
-        raise Exception("Failed to obtain token: " + str(result))
-
+        print("❌ Failed to acquire access token")
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+ 
+    print("Access token acquired...")
     return result["access_token"]
-
 
 # ---------------------------------------------------------
 # 3. Read SharePoint site content (example: site title)
 # ---------------------------------------------------------
 def read_sharepoint_content():
-    token = get_sharepoint_token()
-
-    endpoint = f"{SHAREPOINT_SITE}/_api/web?$select=Title,Description"
+    access_token = get_sharepoint_token()  
 
     headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json;odata=nometadata"
-    }
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json"
+    } 
+    print("Accessing SharePoint site via Microsoft Graph...")
+    response = requests.get(SITE_LOOKUP_URL, headers=headers) 
 
-    response = requests.get(endpoint, headers=headers)
 
     if response.status_code != 200:
-        raise Exception(f"SharePoint API error: {response.text}")
+        raise requests.exceptions.RequestException(f"SharePoint API error: {response.text}")
 
     data = response.json()
 
@@ -79,73 +93,85 @@ def read_sharepoint_content():
 # ---------------------------------------------------------
 # 4. Generate evaluation questions using Claude
 # ---------------------------------------------------------
-def generate_questions_with_claude(text, url):
-    client = Anthropic(api_key=CLAUDE_API_KEY)
+def generate_questions_with_claude(url):
+    client = AnthropicBedrock()
 
-    system_prompt = (
-        "You generate evaluation questions from policy or documentation text. "
-        "Return STRICT JSON only. No commentary."
-    )
+    # ---------------------------------------------
+    # Prompt engineering - crafting a clear, specific prompt for question generation
+    # ---------------------------------------------
+    prompt = f"""
+    You are an AI that generates evaluation questions for validating documents 
+    against a reference policy. The reference policy is located at:
 
-    user_prompt = f"""
-Generate evaluation questions from the following SharePoint content.
+    {SHAREPOINT_SITE}
 
-Each question must include:
-- uuid
-- question
-- reference (infer a logical reference if unknown)
-- source_excerpt
-- timestamp (ISO format)
+    Your task:
+    1. Read and interpret the policy content.
+    2. Generate evaluation questions that help validate whether another document 
+    adheres to this policy.
+    3. For each question, include:
+    - A UUID
+    - A question
+    - A reference (page/section)
+    - A short source excerpt
+    - A timestamp (UTC)
+    4. Output ONLY JSON in the following format:
 
-Return JSON in this structure:
-
-{{
-  "uuid": "<root-uuid>",
-  "url": "{url}",
-  "category": "SharePoint Evaluation",
-  "details": [
     {{
-      "uuid": "<question-uuid>",
-      "question": "string",
-      "reference": "string",
-      "source_excerpt": "string",
-      "timestamp": "ISO-8601"
+    "uuid": "<root-uuid>",
+    "url": "{SHAREPOINT_SITE}",
+    "category": "Security",
+    "details": [
+        {{
+        "uuid": "<uuid>",
+        "question": "<question>",
+        "reference": "<reference>",
+        "source_excerpt": "<excerpt>",
+        "timestamp": "<timestamp>"
+        }}
+    ]
     }}
-  ]
-}}
-
-Here is the content:
-{text}
-"""
-
+    Ensure the questions are specific, policy‑aligned, and useful for validating 
+    completeness, correctness, and compliance.
+    """
+    # ---------------------------------------------
+    # Calling the Bedrock model with the crafted prompt
+    # ---------------------------------------------
     response = client.messages.create(
-        model=CLAUDE_MODEL,
+        model=MODEL_ID,
         max_tokens=2000,
-        temperature=0.2,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
+        messages=[{"role": "user", "content": prompt}]
     )
 
-    output = ""
-    for block in response.content:
-        if block.type == "text":
-            output += block.text
+    evaluation_questions = response.content[0].text
 
-    try:
-        return json.loads(output)
-    except json.JSONDecodeError:
-        return {"error": "Claude returned invalid JSON", "raw_output": output}
-
+    # ---------------------------------------------
+    # Printing the generated questions in JSON format
+    # ---------------------------------------------
+    print("\n=== GENERATED QUESTIONS JSON ===\n")
+    print(evaluation_questions )
 
 # ---------------------------------------------------------
-# 5. Main execution
+# 5. Generate a new UUID for each question
+# ---------------------------------------------------------
+def new_uuid():
+    return str(uuid.uuid4())
+
+# ---------------------------------------------------------
+# 6. Generate timestamp
+# ---------------------------------------------------------
+def timestamp():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+# ---------------------------------------------------------
+# 7. Main execution
 # ---------------------------------------------------------
 if __name__ == "__main__":
     print("Reading SharePoint content...")
     sharepoint_text = read_sharepoint_content()
+    
+    print("Generating evaluation...")
+    generate_questions_with_claude(SHAREPOINT_SITE)
 
-    print("Generating evaluation questions with Claude...")
-    result_json = generate_questions_with_claude(sharepoint_text, SHAREPOINT_SITE)
 
-    print("\nFinal JSON Output:\n")
-    print(json.dumps(result_json, indent=4))
+
