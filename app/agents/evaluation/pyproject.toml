@@ -20,9 +20,10 @@ max-statements = 50  # excludes docstrings; enforces Single Responsibility — s
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+warn_unused_ignores = false  # envs differ on whether 3rd-party stubs are installed
 
 [[tool.mypy.overrides]]
-module = ["tests.*", "src.tests.*"]
+module = ["tests.*", "src.tests.*", "*.tests.*"]
 ignore_errors = true
 
 [tool.pytest.ini_options]
