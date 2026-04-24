@@ -30,3 +30,13 @@ repos:
           - reportlab>=4.2.0
           - requests>=2.32.0
           - boto3>=1.34.0
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: bash -c 'ANTHROPIC_API_KEY=dummy DB_NAME=dummy DB_USER=dummy DB_PASSWORD=dummy REDIS_HOST=localhost pytest app/agents/evaluation/src/tests -x --tb=short'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
