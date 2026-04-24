@@ -1,4 +1,5 @@
 """Security assessment agent for document-based RAG evaluation."""
+
 import json
 import logging
 from typing import cast
@@ -13,7 +14,7 @@ from src.agents.prompts.security import (
 )
 from src.agents.schemas import AgentResult, AssessmentRow, FinalSummary, LLMResponseMeta
 from src.config import SecurityAgentConfig
-from src.utils.helpers import extract_json_array, strip_code_fences
+from src.utils.helpers import strip_code_fences
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -45,9 +46,7 @@ def _format_questions_block(questions: list[str]) -> str:
     Returns:
         A single string with each question on its own numbered line.
     """
-    return "\n".join(
-        f"{i}. {q}" for i, q in enumerate(questions, start=1)
-    )
+    return "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
 
 
 class SecurityAgent:
@@ -116,7 +115,7 @@ class SecurityAgent:
             security_block: dict[str, object] = payload["Security"]  # type: ignore[assignment]
             assessments: list[AssessmentRow] = [
                 AssessmentRow.model_validate(row)
-                for row in security_block["Assessments"]  # type: ignore[index]
+                for row in cast(list[object], security_block["Assessments"])
             ]
             final_summary: FinalSummary | None = (
                 FinalSummary.model_validate(security_block["Final_Summary"])

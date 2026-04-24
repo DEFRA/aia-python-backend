@@ -1,4 +1,5 @@
 """System prompt for the Security Assesssment Agent"""
+
 SECURITY_ASSESSMENT_SYSTEM_PROMPT: str = """You are a security assessment agent for enterprise architecture reviews.
 
 You will be given:

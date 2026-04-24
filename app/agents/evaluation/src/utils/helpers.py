@@ -1,4 +1,5 @@
 """Utility helpers for parsing LLM text responses."""
+
 import re
 
 
@@ -12,8 +13,8 @@ def strip_code_fences(text: str) -> str:
         The input text with leading and trailing code fences stripped.
     """
     text = text.strip()
-    text = re.sub(r'^```(?:json)?\s*\n?', '', text)
-    text = re.sub(r'\n?```\s*$', '', text)
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
     return text.strip()
 
 
@@ -32,17 +33,17 @@ def extract_json_array(text: str) -> str:
     Raises:
         ValueError: If no array opener is found or the array is unterminated.
     """
-    start: int = text.find('[')
+    start: int = text.find("[")
     if start == -1:
         raise ValueError("No JSON array found in response text")
 
     depth: int = 0
     for i, ch in enumerate(text[start:], start):
-        if ch == '[':
+        if ch == "[":
             depth += 1
-        elif ch == ']':
+        elif ch == "]":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
 
     raise ValueError("Unterminated JSON array in response text")

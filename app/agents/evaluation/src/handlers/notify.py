@@ -4,6 +4,7 @@ Triggered by EventBridge (ResultsPersisted + S3ObjectMoved). Sends notification,
 deletes SQS message, and publishes AssessmentComplete.
 Full implementation: plans/09-notify-lambda.md
 """
+
 from __future__ import annotations
 
 import asyncio

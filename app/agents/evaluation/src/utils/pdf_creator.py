@@ -1,8 +1,8 @@
-from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 
 # -----------------------------
 # SAMPLE JSON INPUT (replace with your actual object)
@@ -20,23 +20,23 @@ sample_json = {
             {
                 "Question": "Is authentication defined?",
                 "Coverage": "Green",
-                "Evidence": "Section 2.1 describes Azure AD SSO, OAuth2 token flows, and mandatory MFA for all privileged roles."
+                "Evidence": "Section 2.1 describes Azure AD SSO, OAuth2 token flows, and mandatory MFA for all privileged roles.",
             },
             {
                 "Question": "Is logging and monitoring implemented?",
                 "Coverage": "Amber",
-                "Evidence": "Section 4.3 states that logs are collected in Splunk, but monitoring rules for privileged access are still under development."
+                "Evidence": "Section 4.3 states that logs are collected in Splunk, but monitoring rules for privileged access are still under development.",
             },
             {
                 "Question": "Is data encrypted at rest and in transit?",
                 "Coverage": "Red",
-                "Evidence": "TLS noted; no at-rest encryption or KMS details provided."
-            }
+                "Evidence": "TLS noted; no at-rest encryption or KMS details provided.",
+            },
         ],
         "Final_Summary": {
             "Interpretation": "Minor gaps - needs remediation",
-            "Overall_Comments": "Strong alignment for authentication controls. Logging and monitoring require completion of alerting rules. Encryption at rest is not addressed and should be prioritized."
-        }
+            "Overall_Comments": "Strong alignment for authentication controls. Logging and monitoring require completion of alerting rules. Encryption at rest is not addressed and should be prioritized.",
+        },
     }
 }
 
@@ -46,11 +46,11 @@ sample_json = {
 if not isinstance(sample_json, dict) or len(sample_json) != 1:
     raise ValueError("Input JSON must have exactly one top-level key (e.g., 'Security').")
 
-main_section = next(iter(sample_json.keys()))          # e.g., "Security"
+main_section = next(iter(sample_json.keys()))  # e.g., "Security"
 section_data = sample_json[main_section]
 
-assessments = section_data.get("Assessments", [])
-summary = section_data.get("Final_Summary", {})
+assessments: list[dict[str, str]] = section_data.get("Assessments", [])  # type: ignore[assignment]
+summary: dict[str, str] = section_data.get("Final_Summary", {})  # type: ignore[assignment]
 
 # -----------------------------
 # PDF OUTPUT
@@ -58,19 +58,16 @@ summary = section_data.get("Final_Summary", {})
 file_name = f"{main_section}_Assessment.pdf"
 
 doc = SimpleDocTemplate(
-    file_name,
-    pagesize=A4,
-    leftMargin=36,
-    rightMargin=36,
-    topMargin=48,
-    bottomMargin=36
+    file_name, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=48, bottomMargin=36
 )
 
 styles = getSampleStyleSheet()
 
 # Styles
 h1 = ParagraphStyle("H1", parent=styles["Heading1"], fontSize=20, leading=24, spaceAfter=12)
-h2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=14, leading=18, spaceBefore=6, spaceAfter=6)
+h2 = ParagraphStyle(
+    "H2", parent=styles["Heading2"], fontSize=14, leading=18, spaceBefore=6, spaceAfter=6
+)
 body = ParagraphStyle("Body", parent=styles["BodyText"], fontSize=10, leading=14)
 
 wrap_style = ParagraphStyle(
@@ -113,17 +110,19 @@ data = [
     [
         Paragraph("Question", wrap_header),
         Paragraph("Coverage", wrap_header),
-        Paragraph("Evidence", wrap_header)
+        Paragraph("Evidence", wrap_header),
     ]
 ]
 
 # rows
 for item in assessments:
-    data.append([
-        Paragraph(item.get("Question", ""), wrap_style),
-        Paragraph(item.get("Coverage", ""), wrap_center),
-        Paragraph(item.get("Evidence", ""), wrap_style)
-    ])
+    data.append(
+        [
+            Paragraph(item.get("Question", ""), wrap_style),
+            Paragraph(item.get("Coverage", ""), wrap_center),
+            Paragraph(item.get("Evidence", ""), wrap_style),
+        ]
+    )
 
 # column widths
 col_widths = [2.2 * inch, 1.1 * inch, 4.0 * inch]
@@ -131,18 +130,20 @@ col_widths = [2.2 * inch, 1.1 * inch, 4.0 * inch]
 table = LongTable(data, colWidths=col_widths, repeatRows=1)
 
 # base styling
-table_style = TableStyle([
-    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F0F3F7")),
-    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ("FONTSIZE", (0, 0), (-1, -1), 9),
-    ('TOPPADDING', (0, 0), (-1, -1), 4),
-    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-])
+table_style = TableStyle(
+    [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F0F3F7")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+)
 
 # color-code Coverage column
 for i in range(1, len(data)):
-    coverage_value = assessments[i-1].get("Coverage", "").lower()
+    coverage_value = assessments[i - 1].get("Coverage", "").lower()
     if coverage_value == "green":
         bg = colors.HexColor("#D1FAE5")
         fg = colors.HexColor("#065F46")

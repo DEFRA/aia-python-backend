@@ -5,17 +5,17 @@ repos:
       - id: ruff
         name: ruff lint
         args: [--fix]
-        files: ^app/agents/evaluation/src/
+        files: ^app/agents/evaluation/(src/|tests/|main\.py$)
       - id: ruff-format
         name: ruff format
-        files: ^app/agents/evaluation/src/
+        files: ^app/agents/evaluation/(src/|tests/|main\.py$)
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.19.1
     hooks:
       - id: mypy
         name: mypy
-        files: ^app/agents/evaluation/src/
+        files: ^app/agents/evaluation/(src/|tests/|main\.py$)
         additional_dependencies:
           - anthropic==0.79.0
           - pydantic==2.12.5

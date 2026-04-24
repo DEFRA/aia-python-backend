@@ -30,13 +30,13 @@ jobs:
         run: pip install -r requirements-ci.txt
 
       - name: Ruff — lint
-        run: ruff check src/
+        run: ruff check src/ tests/ main.py
 
       - name: Ruff — format check
-        run: ruff format --check src/
+        run: ruff format --check src/ tests/ main.py
 
       - name: mypy — type check
-        run: mypy src/
+        run: mypy src/ tests/ main.py
 
       - name: pytest
         run: pytest -v --tb=short -x

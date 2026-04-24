@@ -8,8 +8,8 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
-from src.agents.security_agent import SecurityAgent
 from src.agents.schemas import AgentResult
+from src.agents.security_agent import SecurityAgent
 from src.config import DatabaseConfig, SecurityAgentConfig
 from src.db.questions_repo import fetch_questions_by_category
 from src.utils.pdf_creator_multipage import build_security_report
@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def _build_dataset(result: AgentResult) -> dict[str, dict[str, object]]:
+def _build_dataset(result: AgentResult) -> dict[str, object]:
     """Convert an AgentResult into the dict structure expected by build_security_report.
 
     Args:
@@ -59,7 +59,7 @@ async def run(document_path: str, output_pdf: str, category: str = "Security") -
     logger.info("Running assessment on '%s' (%d questions)...", document_path, len(questions))
     result: AgentResult = await agent.assess(document=document, questions=questions)
 
-    dataset: dict[str, dict[str, object]] = _build_dataset(result)
+    dataset: dict[str, object] = _build_dataset(result)
     build_security_report(datasets=[dataset], output_path=output_pdf)
     logger.info("PDF written to %s", output_pdf)
 
