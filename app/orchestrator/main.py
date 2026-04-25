@@ -2,7 +2,7 @@ import asyncio
 import signal
 import sys
 from app.core.dependencies import get_document_repository, get_s3_service, get_sqs_service, get_ingestor_service
-from app.utils.postgres import init_db, get_db_pool, close_postgres_pool
+from app.utils.postgres import init_db, get_postgres_pool, close_postgres_pool
 from app.utils.logger import get_logger
 from app.core.config import config
 
@@ -24,7 +24,7 @@ class DocumentWorker:
 
         logger.info("Initializing worker components...")
         await init_db()
-        pool = await get_db_pool()
+        pool = await get_postgres_pool()
         
         # Manual dependency injection for the standalone process
         from app.utils.app_context import AppContext
