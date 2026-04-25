@@ -5,6 +5,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from app.models.document_record import DocumentRecord
 from app.models.upload_request import UploadRequest
 from app.models.upload_response import UploadResponse
+from app.models.history_record import HistoryRecord
+from app.models.result_record import ResultRecord
 from app.services.upload_service import UploadService
 from app.core.dependencies import get_upload_service, verify_auth
 from app.utils.logger import get_logger
@@ -56,7 +58,7 @@ async def upload_document(
             errorMessage=messages.FILE_ALREADY_UPLOADED.format(file_name=fileName, user_id=user_id),
         )
 
-    s3_key = service.get_s3_key(user_id, doc_id, fileName)
+    s3_key = service.get_s3_key(doc_id, fileName)
 
     # --- Background S3 Upload ---
     file_bytes = await file.read()
@@ -67,13 +69,13 @@ async def upload_document(
 
 @router.get(
     "/fetchUploadHistory",
-    response_model=List[DocumentRecord],
+    response_model=List[HistoryRecord],
     summary="Fetch upload history for a user",
 )
 async def fetch_upload_history(
     auth: dict = Depends(verify_auth),
     service: UploadService = Depends(get_upload_service),
-) -> List[DocumentRecord]:
+) -> List[HistoryRecord]:
    
     user_id = auth["user_id"]
     logger.info("Fetching upload history for UserId=%s", user_id)
@@ -83,14 +85,14 @@ async def fetch_upload_history(
 
 @router.get(
     "/result",
-    response_model=DocumentRecord,
+    response_model=ResultRecord,
     summary="Fetch result for a specific document",
 )
 async def get_result(
     docID: str,
     auth: dict = Depends(verify_auth),
     service: UploadService = Depends(get_upload_service),
-) -> DocumentRecord:
+) -> ResultRecord:
 
     logger.info("Fetching result for docID=%s", docID)
     record = await service.fetch_result(docID)

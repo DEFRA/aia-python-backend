@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.utils.postgres import get_db_pool
 from app.core.dependencies import get_upload_service
-from app.main import app
+from app.api.main import app
 
 app.dependency_overrides[get_db_pool] = lambda: AsyncMock()
 
@@ -41,7 +41,7 @@ class TestUploadSuccess:
     def test_upload_returns_doc_id(self, mock_get_user, mock_auth):
         mock_service = AsyncMock()
         mock_service.process_upload_request.return_value = MOCK_DOC_ID
-        mock_service.get_s3_key.return_value = f"user123/{MOCK_DOC_ID}_test.pdf"
+        mock_service.get_s3_key.return_value = f"{MOCK_DOC_ID}_test.pdf"
         app.dependency_overrides[get_upload_service] = lambda: mock_service
 
         response = client.post(

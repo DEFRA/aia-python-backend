@@ -2,6 +2,8 @@ from typing import List, Optional
 
 from app.models.document_record import DocumentRecord
 from app.models.upload_request import UploadRequest
+from app.models.history_record import HistoryRecord
+from app.models.result_record import ResultRecord
 from app.core.enums import UploadStatus
 from app.repositories.document_repository import DocumentRepository
 from app.services.s3_service import S3Service
@@ -29,20 +31,20 @@ class UploadService:
         await self.repo.insert_document(request, doc_id, user_id)
         return doc_id
 
-    def get_s3_key(self, user_id: str, doc_id: str, file_name: str) -> str:
+    def get_s3_key(self, doc_id: str, file_name: str) -> str:
         """Encapsulates the S3 key naming convention."""
-        return f"{user_id}/{doc_id}_{file_name}"
+        return f"{doc_id}_{file_name}"
 
-    async def fetch_history(self, user_id: str) -> List[DocumentRecord]:
+    async def fetch_history(self, user_id: str) -> List[HistoryRecord]:
         return await self.repo.fetch_history(user_id)
 
-    async def fetch_result(self, doc_id: str) -> Optional[DocumentRecord]:
+    async def fetch_result(self, doc_id: str) -> Optional[ResultRecord]:
         return await self.repo.fetch_result(doc_id)
 
     async def process_background_upload(self, file_bytes: bytes, s3_key: str, doc_id: str) -> None:
         try:
             await self.s3_service.upload_file(file_bytes, s3_key)
-            status = UploadStatus.SUCCESS.value
+            status = UploadStatus.ANALYSING.value
         except Exception as exc:
             logger.exception("Background upload failed for doc_id=%s: %s", doc_id, exc)
             status = UploadStatus.FAILED.value

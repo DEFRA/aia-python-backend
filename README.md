@@ -47,7 +47,8 @@ Before setting up the project, ensure you have the following installed on your l
 - `app/api/`: Contains the FastAPI routers, endpoints, and authentication dependencies (`upload.py`, `health.py`, `upload_auth.py`).
 - `app/models/`: Pydantic models for request/response validation and Enums (`upload_request.py`, `upload_response.py`, `document_record.py`, `enums.py`).
 - `app/repositories/`: Houses the data access layer to isolate raw database queries from business logic (`document_repository.py`).
-- `app/services/`: Core business logic, such as `upload_service.py` (which coordinates workflows) and `s3_service.py` (which handles AWS interactions).
+- `app/services/`: Core business logic, such as `upload_service.py`, `s3_service.py`, and the new `ingestor_service.py` (which handles text extraction and queueing).
+- `app/worker.py`: The entry point for the background document ingestion worker.
 - `app/utils/`: Global utility functions spanning logging, database connection pooling, JWT authorization, and system contexts (`app_context.py`).
 - `app/core/`: The centralized heart of the application, containing configuration (`config.py`), global constants (`enums.py`), user-facing strings (`messages.py`), and DI providers (`dependencies.py`).
 - `scripts/`: Shell scripts that automate the development workflow (`start_dev_server.sh`, `start-localstack.sh`).
@@ -97,7 +98,11 @@ You can start the development server quickly using the provided shell script:
 ```
 Alternatively, you can run `uvicorn` directly from your activated virtual environment:
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8086 --reload
+# Start the API
+uvicorn app.api.main:app --host 127.0.0.1 --port 8086 --reload
+
+# Start the Orchestrator (in a separate terminal)
+PYTHONPATH=. python -m app.orchestrator.main
 ```
 
 The API will now be listening at `http://127.0.0.1:8086`.

@@ -4,6 +4,8 @@ import asyncpg
 
 from app.models.document_record import DocumentRecord
 from app.models.upload_request import UploadRequest
+from app.models.history_record import HistoryRecord
+from app.models.result_record import ResultRecord
 from app.core.enums import UploadStatus
 from app.utils.logger import get_logger
 from app.utils.app_context import AppContext
@@ -32,7 +34,7 @@ class DocumentRepository:
     ) -> str:
         uploaded_ts = self.context.get_current_timestamp()
         processed_ts = None
-        status = UploadStatus.ANALYSING.value
+        status = UploadStatus.UPLOADING.value
         result_json = None
 
         async with self.pool.acquire() as conn:
@@ -56,7 +58,77 @@ class DocumentRepository:
         logger.info("Inserted document %s for user %s", doc_id, user_id)
         return doc_id
 
-    async def fetch_history(self, user_id: str) -> List[DocumentRecord]:
+    async def claim_pending_documents(self, limit: int = 10) -> List[DocumentRecord]:
+        """
+        Atomically claims documents in 'Analysing' status by moving them to 'Processing'.
+        Uses FOR UPDATE SKIP LOCKED for high-concurrency safety.
+        """
+        async with self.pool.acquire() as conn:
+            # We use a CTE to claim and return the records in one atomic step
+            rows = await conn.fetch(
+                """
+                WITH claimed AS (
+                    SELECT doc_id
+                    FROM document_uploads
+                    WHERE status = $1
+                    ORDER BY uploaded_ts ASC
+                    LIMIT $2
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE document_uploads
+                SET status = $3
+                FROM claimed
+                WHERE document_uploads.doc_id = claimed.doc_id
+                RETURNING document_uploads.doc_id::text, user_id, template_type, file_name, status, uploaded_ts
+                """,
+                UploadStatus.ANALYSING.value,
+                limit,
+                UploadStatus.PROCESSING.value,
+            )
+
+        records = []
+        for row in rows:
+            records.append(
+                DocumentRecord(
+                    doc_id=row["doc_id"],
+                    user_id=row["user_id"],
+                    template_type=row["template_type"],
+                    file_name=row["file_name"],
+                    status=row["status"],
+                    uploaded_ts=row["uploaded_ts"]
+                )
+            )
+        return records
+
+    async def update_status(self, doc_id: str, status: str, result: Optional[dict] = None) -> None:
+        """Updates document status and optionally the result JSON."""
+        processed_ts = self.context.get_current_timestamp()
+        async with self.pool.acquire() as conn:
+            if result is not None:
+                await conn.execute(
+                    """
+                    UPDATE document_uploads
+                    SET status = $1, processed_ts = $2, result = $3::jsonb
+                    WHERE doc_id = $4::uuid
+                    """,
+                    status,
+                    processed_ts,
+                    json.dumps(result),
+                    doc_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE document_uploads
+                    SET status = $1, processed_ts = $2
+                    WHERE doc_id = $3::uuid
+                    """,
+                    status,
+                    processed_ts,
+                    doc_id,
+                )
+
+    async def fetch_history(self, user_id: str) -> List[HistoryRecord]:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -72,7 +144,7 @@ class DocumentRepository:
         records = []
         for row in rows:
             records.append(
-                DocumentRecord(
+                HistoryRecord(
                     doc_id=row["doc_id"],
                     template_type=row["template_type"],
                     file_name=row["file_name"],
@@ -82,11 +154,11 @@ class DocumentRepository:
             )
         return records
 
-    async def fetch_result(self, doc_id: str) -> Optional[DocumentRecord]:
+    async def fetch_result(self, doc_id: str) -> Optional[ResultRecord]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT file_name,result
+                SELECT file_name, result
                 FROM document_uploads
                 WHERE doc_id = $1::uuid
                 """,
@@ -97,20 +169,7 @@ class DocumentRepository:
             return None
 
         result_value = json.loads(row["result"]) if row["result"] else None
-        return DocumentRecord(
+        return ResultRecord(
             file_name=row["file_name"],
             result=result_value,
         )
-
-    async def update_status(self, doc_id: str, status: str) -> None:
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE document_uploads
-                SET status = $1, processed_ts = $2
-                WHERE doc_id = $3::uuid
-                """,
-                status,
-                self.context.get_current_timestamp(),
-                doc_id,
-            )
