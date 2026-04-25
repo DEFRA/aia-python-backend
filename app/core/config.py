@@ -1,6 +1,7 @@
 from typing import Optional
 from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.core.enums import LogLevel
 
 
 class AppConfig(BaseSettings):
@@ -19,6 +20,7 @@ class AppConfig(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8086
     log_config: Optional[str] = Field(None, alias="LOG_CONFIG")
+    log_level: LogLevel = Field(LogLevel.INFO, alias="LOG_LEVEL")
     http_proxy: Optional[HttpUrl] = Field(None, alias="HTTP_PROXY")
     tracing_header: str = Field("x-cdp-request-id", alias="TRACING_HEADER")
 
@@ -43,6 +45,7 @@ class AppConfig(BaseSettings):
             host = self.host
             port = self.port
             log_config = self.log_config
+            log_level = self.log_level
             http_proxy = self.http_proxy
             tracing_header = self.tracing_header
         return _App()

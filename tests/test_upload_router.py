@@ -1,13 +1,14 @@
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 from app.utils.postgres import get_db_pool
+from app.core.dependencies import get_upload_service
 from app.main import app
 
-app.dependency_overrides[get_db_pool] = lambda: _make_pool()
+app.dependency_overrides[get_db_pool] = lambda: AsyncMock()
 
 BASE_HEADERS = {
     "Authorization": "Bearer test-token",
@@ -30,32 +31,19 @@ MOCK_RECORD = {
 
 client = TestClient(app)
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_pool(is_duplicate: bool = False, doc_id: str = MOCK_DOC_ID, records=None):
-    """Return a mock asyncpg pool that satisfies the service layer calls."""
-    pool = MagicMock()
-
-    # check_duplicate
-    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
-    pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
-
-    return pool
-
-
 # ---------------------------------------------------------------------------
 # POST /api/upload — success
 # ---------------------------------------------------------------------------
 
 class TestUploadSuccess:
-    @patch("app.api.upload.service.check_duplicate", new_callable=AsyncMock, return_value=False)
-    @patch("app.api.upload.upload_file_to_s3", new_callable=AsyncMock)
-    @patch("app.api.upload.service.insert_document", new_callable=AsyncMock, return_value=MOCK_DOC_ID)
-    @patch("app.api.upload.uuid.uuid4", return_value=uuid.UUID(MOCK_DOC_ID))
-    def test_upload_returns_doc_id(self, mock_uuid, mock_insert, mock_s3, mock_dup):
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_upload_returns_doc_id(self, mock_get_user, mock_auth):
+        mock_service = AsyncMock()
+        mock_service.process_upload_request.return_value = MOCK_DOC_ID
+        mock_service.get_s3_key.return_value = f"user123/{MOCK_DOC_ID}_test.pdf"
+        app.dependency_overrides[get_upload_service] = lambda: mock_service
+
         response = client.post(
             "/api/upload",
             headers=BASE_HEADERS,
@@ -70,6 +58,8 @@ class TestUploadSuccess:
         assert body["docId"] == MOCK_DOC_ID
         assert body["statusCode"] == 200
         assert body["errorMessage"] == ""
+        
+        app.dependency_overrides.pop(get_upload_service, None)
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +67,13 @@ class TestUploadSuccess:
 # ---------------------------------------------------------------------------
 
 class TestUploadDuplicate:
-    @patch("app.api.upload.service.check_duplicate", new_callable=AsyncMock, return_value=True)
-    def test_duplicate_returns_400(self, mock_dup):
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_duplicate_returns_400(self, mock_get_user, mock_auth):
+        mock_service = AsyncMock()
+        mock_service.process_upload_request.return_value = None
+        app.dependency_overrides[get_upload_service] = lambda: mock_service
+
         response = client.post(
             "/api/upload",
             headers=BASE_HEADERS,
@@ -93,6 +88,8 @@ class TestUploadDuplicate:
         assert body["statusCode"] == 400
         assert body["docId"] == ""
         assert "test.pdf" in body["errorMessage"]
+        
+        app.dependency_overrides.pop(get_upload_service, None)
 
 
 # ---------------------------------------------------------------------------
@@ -130,19 +127,22 @@ class TestUploadAuth:
 # ---------------------------------------------------------------------------
 
 class TestFetchHistory:
-    @patch(
-        "app.api.upload.service.fetch_history",
-        new_callable=AsyncMock,
-        return_value=[],
-    )
-    def test_fetch_history_returns_list(self, mock_fetch):
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_fetch_history_returns_list(self, mock_get_user, mock_auth):
+        mock_service = AsyncMock()
+        mock_service.fetch_history.return_value = []
+        app.dependency_overrides[get_upload_service] = lambda: mock_service
+
         response = client.get(
             "/api/fetchUploadHistory",
             headers=BASE_HEADERS,
         )
         assert response.status_code == 200
         assert isinstance(response.json(), list)
-        mock_fetch.assert_called_once()
+        mock_service.fetch_history.assert_called_once()
+        
+        app.dependency_overrides.pop(get_upload_service, None)
 
     def test_fetch_history_no_auth_returns_401(self):
         response = client.get("/api/fetchUploadHistory")
@@ -154,17 +154,20 @@ class TestFetchHistory:
 # ---------------------------------------------------------------------------
 
 class TestGetResult:
-    @patch(
-        "app.api.upload.service.fetch_result",
-        new_callable=AsyncMock,
-        return_value=None,
-    )
-    def test_result_not_found_returns_404(self, mock_fetch):
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_result_not_found_returns_404(self, mock_get_user, mock_auth):
+        mock_service = AsyncMock()
+        mock_service.fetch_result.return_value = None
+        app.dependency_overrides[get_upload_service] = lambda: mock_service
+
         response = client.get(
             f"/api/result?docID={MOCK_DOC_ID}",
             headers=BASE_HEADERS,
         )
         assert response.status_code == 404
+        
+        app.dependency_overrides.pop(get_upload_service, None)
 
     def test_result_no_auth_returns_401(self):
         response = client.get(f"/api/result?docID={MOCK_DOC_ID}")

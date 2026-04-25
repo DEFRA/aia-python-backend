@@ -1,17 +1,17 @@
 import os
 from contextlib import asynccontextmanager
-from logging import getLogger
 
+from app.utils.logger import get_logger
 import uvicorn
 from fastapi import FastAPI
 
 from app.utils.postgres import close_postgres_pool, init_db
-from app.utils.tracing import TraceIdMiddleware
-from app.config import config
+# from app.utils.tracing import TraceIdMiddleware
+from app.core.config import config
 from app.api.health import router as health_router
 from app.api.upload import router as upload_router
 
-logger = getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Setup middleware
-app.add_middleware(TraceIdMiddleware)
+# app.add_middleware(TraceIdMiddleware)
 
 # Setup Routes
 app.include_router(health_router)
