@@ -53,8 +53,8 @@ class IngestorService:
                 # 3. Push to SQS
                 await self.sqs_service.send_task(record.doc_id, text)
                 
-                # 4. Update DB to INGESTED
-                await self.repo.update_status(record.doc_id, UploadStatus.INGESTED.value)
+                # 4. Update DB to QUEUED
+                await self.repo.update_status(record.doc_id, UploadStatus.QUEUED.value)
                 processed_count += 1
                 
             except Exception as e:

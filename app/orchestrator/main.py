@@ -16,6 +16,15 @@ class DocumentWorker:
         logger.info("Shutdown signal received. Stopping worker...")
         self.running = False
 
+    async def _cleanup_task(self, repo):
+        while self.running:
+            try:
+                await repo.cleanup_stuck_documents(timeout_minutes=config.app.worker_stuck_task_timeout_minutes)
+            except Exception as e:
+                logger.exception("Error in cleanup task: %s", str(e))
+            # Sleep for 5 minutes before checking again
+            await asyncio.sleep(300)
+
     async def run(self):
         # Register signals for graceful shutdown
         loop = asyncio.get_running_loop()
@@ -35,6 +44,7 @@ class DocumentWorker:
         ingestor = get_ingestor_service(repo, s3, sqs)
 
         logger.info("Worker started. Polling for documents...")
+        cleanup_bg_task = asyncio.create_task(self._cleanup_task(repo))
 
         while self.running:
             try:
@@ -51,6 +61,7 @@ class DocumentWorker:
                 await asyncio.sleep(10) # Sleep longer on error
 
         logger.info("Closing database pool...")
+        cleanup_bg_task.cancel()
         await close_postgres_pool()
         logger.info("Worker stopped.")
 

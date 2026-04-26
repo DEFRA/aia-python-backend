@@ -16,7 +16,7 @@ async def test_claim_pending_documents():
         "user_id": "user-1",
         "template_type": "type-1",
         "file_name": "file.docx",
-        "status": "Processing",
+        "status": "Claimed",
         "uploaded_ts": "2026-01-01"
     }
     conn.fetch.return_value = [mock_row]
@@ -30,7 +30,7 @@ async def test_claim_pending_documents():
     # Verify
     assert len(records) == 1
     assert records[0].doc_id == "doc-1"
-    assert records[0].status == "Processing"
+    assert records[0].status == "Claimed"
     
     # Verify SQL
     conn.fetch.assert_called_once()
@@ -50,11 +50,11 @@ async def test_update_status_with_result():
     repo = DocumentRepository(pool, context)
     
     # Execute
-    await repo.update_status("doc-1", "Ingested", result={"text": "hi"})
+    await repo.update_status("doc-1", "Queued", result={"text": "hi"})
     
     # Verify
     conn.execute.assert_called_once()
     args = conn.execute.call_args[0]
     assert "result = $3::jsonb" in args[0]
-    assert args[1] == "Ingested"
+    assert args[1] == "Queued"
     assert "hi" in args[3] # JSON string

@@ -30,6 +30,7 @@ class AppSettings(BaseModel):
     log_level: LogLevel = LogLevel.INFO
     http_proxy: Optional[HttpUrl] = None
     tracing_header: str = "x-cdp-request-id"
+    worker_stuck_task_timeout_minutes: int = 120
 
 class AppConfig(BaseSettings):
     # Flattened environment mappings
@@ -40,6 +41,7 @@ class AppConfig(BaseSettings):
     log_level: LogLevel = Field(LogLevel.INFO, alias="LOG_LEVEL")
     http_proxy: Optional[HttpUrl] = Field(None, alias="HTTP_PROXY")
     tracing_header: str = Field("x-cdp-request-id", alias="TRACING_HEADER")
+    worker_stuck_task_timeout_minutes: int = Field(120, alias="WORKER_STUCK_TASK_TIMEOUT_MINUTES")
 
     # AWS
     aws_region: str = Field("eu-west-2", alias="AWS_DEFAULT_REGION")
@@ -70,7 +72,8 @@ class AppConfig(BaseSettings):
         return AppSettings(
             env=self.env, host=self.host, port=self.port,
             log_config=self.log_config, log_level=self.log_level,
-            http_proxy=self.http_proxy, tracing_header=self.tracing_header
+            http_proxy=self.http_proxy, tracing_header=self.tracing_header,
+            worker_stuck_task_timeout_minutes=self.worker_stuck_task_timeout_minutes
         )
 
     @property

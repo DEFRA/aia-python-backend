@@ -1,5 +1,6 @@
 import json
 from typing import List, Optional
+from datetime import timedelta
 import asyncpg
 
 from app.models.document_record import DocumentRecord
@@ -42,8 +43,8 @@ class DocumentRepository:
                 """
                 INSERT INTO document_uploads
                     (doc_id, template_type, user_id, file_name, status,
-                     uploaded_ts, processed_ts, result)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                     uploaded_ts, processed_ts, status_updated_at, result)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
                 """,
                 doc_id,
                 request.templateType,
@@ -52,6 +53,7 @@ class DocumentRepository:
                 status,
                 uploaded_ts,
                 processed_ts,
+                uploaded_ts,
                 result_json,
             )
 
@@ -63,6 +65,7 @@ class DocumentRepository:
         Atomically claims documents in 'Analysing' status by moving them to 'Processing'.
         Uses FOR UPDATE SKIP LOCKED for high-concurrency safety.
         """
+        current_ts = self.context.get_current_timestamp()
         async with self.pool.acquire() as conn:
             # We use a CTE to claim and return the records in one atomic step
             rows = await conn.fetch(
@@ -76,14 +79,15 @@ class DocumentRepository:
                     FOR UPDATE SKIP LOCKED
                 )
                 UPDATE document_uploads
-                SET status = $3
+                SET status = $3, status_updated_at = $4
                 FROM claimed
                 WHERE document_uploads.doc_id = claimed.doc_id
                 RETURNING document_uploads.doc_id::text, user_id, template_type, file_name, status, uploaded_ts
                 """,
                 UploadStatus.ANALYSING.value,
                 limit,
-                UploadStatus.PROCESSING.value,
+                UploadStatus.CLAIMED.value,
+                current_ts,
             )
 
         records = []
@@ -108,7 +112,7 @@ class DocumentRepository:
                 await conn.execute(
                     """
                     UPDATE document_uploads
-                    SET status = $1, processed_ts = $2, result = $3::jsonb
+                    SET status = $1, processed_ts = $2, status_updated_at = $2, result = $3::jsonb
                     WHERE doc_id = $4::uuid
                     """,
                     status,
@@ -120,13 +124,44 @@ class DocumentRepository:
                 await conn.execute(
                     """
                     UPDATE document_uploads
-                    SET status = $1, processed_ts = $2
+                    SET status = $1, processed_ts = $2, status_updated_at = $2
                     WHERE doc_id = $3::uuid
                     """,
                     status,
                     processed_ts,
                     doc_id,
                 )
+
+    async def cleanup_stuck_documents(self, timeout_minutes: int = 15) -> int:
+        """
+        Resets 'Claimed' documents back to 'Analysing' if they have been stuck
+        for longer than `timeout_minutes`. This handles worker crashes during extraction.
+        Returns the number of documents reset.
+        """
+        current_ts = self.context.get_current_timestamp()
+        threshold_ts = current_ts - timedelta(minutes=timeout_minutes)
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE document_uploads
+                SET status = $1, status_updated_at = $2
+                WHERE status = $3 
+                  AND status_updated_at < $4
+                """,
+                UploadStatus.ANALYSING.value,
+                current_ts,
+                UploadStatus.CLAIMED.value,
+                threshold_ts
+            )
+            # asyncpg execute returns a string like "UPDATE 3"
+            try:
+                count = int(result.split()[1])
+            except (IndexError, ValueError):
+                count = 0
+            
+            if count > 0:
+                logger.warning("Reset %d stuck 'Claimed' documents back to 'Analysing'", count)
+            return count
 
     async def fetch_history(self, user_id: str) -> List[HistoryRecord]:
         async with self.pool.acquire() as conn:

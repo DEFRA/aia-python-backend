@@ -61,5 +61,10 @@ async def test_process_batch_success():
     assert processed == 1
     repo.claim_pending_documents.assert_called_once()
     s3.download_file.assert_called_once_with("123_test.docx")
+    
     sqs.send_task.assert_called_once()
-    repo.update_status.assert_called_with("123", "Ingested")
+    call_args = sqs.send_task.call_args[0]
+    assert call_args[0] == "123"
+    assert "Test content" in call_args[1]
+    
+    repo.update_status.assert_called_with("123", "Queued")

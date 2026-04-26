@@ -3,9 +3,10 @@ from enum import Enum
 class UploadStatus(str, Enum):
     UPLOADING = "Uploading"
     ANALYSING = "Analysing"
+    CLAIMED = "Claimed"
+    QUEUED = "Queued"
     PROCESSING = "Processing"
     SUCCESS = "Success"
-    INGESTED = "Ingested"
     FAILED = "Failed"
 
 class LogLevel(str, Enum):
