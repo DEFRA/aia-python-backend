@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    name: Lint, type-check, test
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app/agents/evaluation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: app/agents/evaluation/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Ruff — lint
+        run: ruff check src/ tests/ main.py
+
+      - name: Ruff — format check
+        run: ruff format --check src/ tests/ main.py
+
+      - name: mypy — type check
+        run: mypy src/ tests/ main.py
+
+      - name: pytest
+        run: pytest -v --tb=short -x
+        env:
+          # Provide dummy values so config classes that require env vars
+          # can be imported without raising ValidationError
+          ANTHROPIC_API_KEY: dummy
+          DB_NAME: dummy
+          DB_USER: dummy
+          DB_PASSWORD: dummy
+          REDIS_HOST: localhost

@@ -4,6 +4,7 @@ Triggered by EventBridge (ResultsCompiled). Moves the processed S3 object to the
 output prefix and publishes S3ObjectMoved.
 Full implementation: plans/08-persist-and-move-lambdas.md
 """
+
 from __future__ import annotations
 
 import asyncio

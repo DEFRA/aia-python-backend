@@ -8,11 +8,17 @@ __pycache__/
 .venv/
 venv/
 
+# VSCode
+.vscode/
+
 # Binary / large files
 files/*.pdf
 files/*.pptx
 files/*.docx
 files/*.html
+
+# Data files
+data/
 
 # Test / build artefacts
 .pytest_cache/
@@ -20,3 +26,9 @@ files/*.html
 .ruff_cache/
 dist/
 *.egg-info/
+
+# Claude Code
+.claude/
+
+# notebooks
+notebooks/

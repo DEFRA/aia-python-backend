@@ -1,7 +1,8 @@
 """ReportLab PDF builder for multi-section security assessment reports."""
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle, StyleSheet1
+from reportlab.lib.styles import ParagraphStyle, StyleSheet1, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
@@ -82,18 +83,30 @@ def build_security_report(
 
     styles: StyleSheet1 = getSampleStyleSheet()
 
-    h1: ParagraphStyle = ParagraphStyle("H1", parent=styles["Heading1"], fontSize=20, leading=24, spaceAfter=12)
-    h2: ParagraphStyle = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=14, leading=18, spaceBefore=6, spaceAfter=6)
-    body: ParagraphStyle = ParagraphStyle("Body", parent=styles["BodyText"], fontSize=10, leading=14)
-    wrap_style: ParagraphStyle = ParagraphStyle("CellWrap", fontName="Helvetica", fontSize=9, leading=12, wordWrap="CJK")
+    h1: ParagraphStyle = ParagraphStyle(
+        "H1", parent=styles["Heading1"], fontSize=20, leading=24, spaceAfter=12
+    )
+    h2: ParagraphStyle = ParagraphStyle(
+        "H2", parent=styles["Heading2"], fontSize=14, leading=18, spaceBefore=6, spaceAfter=6
+    )
+    body: ParagraphStyle = ParagraphStyle(
+        "Body", parent=styles["BodyText"], fontSize=10, leading=14
+    )
+    wrap_style: ParagraphStyle = ParagraphStyle(
+        "CellWrap", fontName="Helvetica", fontSize=9, leading=12, wordWrap="CJK"
+    )
     wrap_center: ParagraphStyle = ParagraphStyle("CellWrapCenter", parent=wrap_style, alignment=1)
-    wrap_header: ParagraphStyle = ParagraphStyle("HeaderWrap", parent=wrap_style, fontName="Helvetica-Bold")
+    wrap_header: ParagraphStyle = ParagraphStyle(
+        "HeaderWrap", parent=wrap_style, fontName="Helvetica-Bold"
+    )
 
     story: list[Flowable] = []
 
     for idx, dataset in enumerate(datasets, start=1):
         if not isinstance(dataset, dict) or len(dataset.keys()) != 1:
-            raise ValueError("Each dataset must contain exactly one top-level key (e.g. 'Security').")
+            raise ValueError(
+                "Each dataset must contain exactly one top-level key (e.g. 'Security')."
+            )
 
         top_key: str = next(iter(dataset.keys()))
         content: dict[str, object] = dataset[top_key]  # type: ignore[assignment]
@@ -123,23 +136,27 @@ def build_security_report(
         ]
 
         for a in assessments:
-            table_data.append([
-                Paragraph(a.get("Question", ""), wrap_style),
-                Paragraph(a.get("Coverage", ""), wrap_center),
-                Paragraph(a.get("Evidence", ""), wrap_style),
-            ])
+            table_data.append(
+                [
+                    Paragraph(a.get("Question", ""), wrap_style),
+                    Paragraph(a.get("Coverage", ""), wrap_center),
+                    Paragraph(a.get("Evidence", ""), wrap_style),
+                ]
+            )
 
         col_widths: list[float] = [2.2 * inch, 1.1 * inch, 4.0 * inch]
         tbl: LongTable = LongTable(table_data, colWidths=col_widths, repeatRows=1)
 
-        ts: TableStyle = TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F0F3F7")),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ])
+        ts: TableStyle = TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F0F3F7")),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
 
         for r in range(1, len(table_data)):
             cov: str = assessments[r - 1].get("Coverage", "")
@@ -170,9 +187,21 @@ if __name__ == "__main__":
     example1: dict[str, object] = {
         "Security": {
             "Assessments": [
-                {"Question": "Is authentication defined?", "Coverage": "Green", "Evidence": "SSO via Azure AD, OAuth2, MFA enforced."},
-                {"Question": "Is logging and monitoring implemented?", "Coverage": "Amber", "Evidence": "Logs centralised in Splunk; rules for privileged access in progress."},
-                {"Question": "Is data encrypted at rest and in transit?", "Coverage": "Red", "Evidence": "TLS noted; no at-rest encryption or KMS details provided."},
+                {
+                    "Question": "Is authentication defined?",
+                    "Coverage": "Green",
+                    "Evidence": "SSO via Azure AD, OAuth2, MFA enforced.",
+                },
+                {
+                    "Question": "Is logging and monitoring implemented?",
+                    "Coverage": "Amber",
+                    "Evidence": "Logs centralised in Splunk; rules for privileged access in progress.",
+                },
+                {
+                    "Question": "Is data encrypted at rest and in transit?",
+                    "Coverage": "Red",
+                    "Evidence": "TLS noted; no at-rest encryption or KMS details provided.",
+                },
             ],
             "Final_Summary": {
                 "Interpretation": "Minor gaps - needs remediation",
@@ -184,8 +213,16 @@ if __name__ == "__main__":
     example2: dict[str, object] = {
         "Privacy": {
             "Assessments": [
-                {"Question": "Are secrets managed securely?", "Coverage": "Amber", "Evidence": "Environment variables used; migration to Azure Key Vault planned."},
-                {"Question": "Is third-party risk assessed?", "Coverage": "Green", "Evidence": "Vendor risk assessments completed annually; ISO27001 alignment."},
+                {
+                    "Question": "Are secrets managed securely?",
+                    "Coverage": "Amber",
+                    "Evidence": "Environment variables used; migration to Azure Key Vault planned.",
+                },
+                {
+                    "Question": "Is third-party risk assessed?",
+                    "Coverage": "Green",
+                    "Evidence": "Vendor risk assessments completed annually; ISO27001 alignment.",
+                },
             ],
             "Final_Summary": {
                 "Interpretation": "Minor gaps - needs remediation",
@@ -194,5 +231,7 @@ if __name__ == "__main__":
         }
     }
 
-    outfile: str = build_security_report([example1, example2], output_path="Security_Assessment_Multi.pdf")
+    outfile: str = build_security_report(
+        [example1, example2], output_path="Security_Assessment_Multi.pdf"
+    )
     print(f"Created: {outfile}")
