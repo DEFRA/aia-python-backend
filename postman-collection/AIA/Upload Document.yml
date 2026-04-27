@@ -1,0 +1,35 @@
+info:
+  name: Upload Document
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: http://localhost:8086/api/v1/documents/upload
+  headers:
+    - name: Authorization
+      value: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY
+    - name: X-User-Id
+      value: TestUser123
+    - name: Accept
+      value: application/json
+  body:
+    type: multipart-form
+    data:
+      - name: templateType
+        type: text
+        value: SDA
+      - name: fileName
+        type: text
+        value: Hello World.docx
+      - name: file
+        type: file
+        value:
+          - /Users/nagarajansubbiah/Downloads/Hello World.docx
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
