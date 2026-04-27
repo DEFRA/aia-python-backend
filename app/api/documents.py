@@ -51,7 +51,9 @@ async def upload_document(
 
     s3_key = service.get_s3_key(doc_id, fileName)
     file_bytes = await file.read()
-    background_tasks.add_task(service.process_background_upload, file_bytes, s3_key, doc_id)
+    background_tasks.add_task(
+        service.process_background_upload, file_bytes, s3_key, doc_id, templateType
+    )
 
     return UploadResponse(documentId=doc_id, status=DocumentStatus.PROCESSING.value)
 
@@ -68,6 +70,7 @@ async def get_processing_status(
 ) -> dict:
     user_id = auth["user_id"]
     ids = await service.get_processing_document_ids(user_id)
+    logger.debug("Processing status userId=%s count=%d", user_id, len(ids))
     return {"processingDocumentIds": ids}
 
 
@@ -100,8 +103,10 @@ async def get_document(
     service: UploadService = Depends(get_upload_service),
 ) -> ResultRecord:
     user_id = auth["user_id"]
+    logger.debug("Document fetch userId=%s documentId=%s", user_id, document_id)
     record = await service.fetch_result(document_id, user_id)
     if record is None:
+        logger.warning("Document not found userId=%s documentId=%s", user_id, document_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=messages.DOC_NOT_FOUND.format(doc_id=document_id),
