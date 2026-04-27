@@ -1,94 +1,111 @@
 # AIA Backend Service
 
-The AIA Backend Service is a robust FastAPI application responsible for handling secure document uploads, JWT-based authentication, PostgreSQL database management, and asynchronous integrations with AWS services (S3 and SQS). 
+The AIA Backend Service is a FastAPI application responsible for secure document uploads, JWT-based authentication, PostgreSQL database management, and asynchronous AI assessment via AWS services (S3 and SQS).
 
 ## Core Functionality
 
-This service exposes several API endpoints to support document processing workflows:
+The service exposes the following API endpoints under the base path `/api/v1`:
 
-- **`POST /api/upload`**: Validates JWT authentication and header identity, ensures files aren't duplicated, writes initial tracking metadata into PostgreSQL (marked as `Analysing`), and asynchronously uploads the physical binary file to an AWS S3 bucket.
-- **`GET /api/fetchUploadHistory`**: Returns an authenticated user's entire historical log of uploaded documents, including current statuses and timestamps.
-- **`GET /api/result?docID=...`**: Fetches the processing results and current status for a specific document identifier.
-- **`GET /api/health`**: Simple health check endpoint for uptime monitoring and deployment readiness probes.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check (no auth) |
+| POST | `/api/v1/documents/upload` | Upload a document for AI assessment |
+| GET | `/api/v1/documents/{documentId}/status` | Poll processing status |
+| GET | `/api/v1/documents` | Paginated upload history |
+| GET | `/api/v1/documents/{documentId}` | Full result with markdown assessment |
+| GET | `/api/v1/users/me` | Authenticated user profile |
 
-Behind the scenes, uploaded files are queued via SQS for downstream processing, the results of which are updated back to the database.
+Full request/response contracts are documented in [docs/corebackend-api.md](docs/corebackend-api.md).
+
+## Document Status Lifecycle
+
+Uploaded documents move through three states:
+
+```
+PROCESSING  →  COMPLETE
+     ↘
+    ERROR
+```
+
+| Status | Terminal | Meaning |
+|--------|----------|---------|
+| `PROCESSING` | No | Upload received; AI assessment in progress |
+| `COMPLETE` | Yes | Assessment done; `resultMd` populated |
+| `ERROR` | Yes | Unrecoverable failure; `errorMessage` populated |
 
 ## Architecture
 
 ```mermaid
 graph TD
-    Client[Frontend Client] -->|Upload Request| Auth[Auth Layer / JWT Validation]
-    Auth --> API[FastAPI Backend]
-    
-    API -->|1. Insert Metadata| DB[(PostgreSQL RDS)]
-    API -->|2. Upload Binary| S3[AWS S3]
-    
-    S3 -.-> Orchestrator[Orchestrator]
-    Orchestrator -->|Push to Task Queue| TaskQueue[Task Queue SQS]
-    
-    TaskQueue -->|Consume Task| Agent[Agent Worker]
-    Agent -->|Push to Status Queue| StatusQueue[Status Queue SQS]
-    
+    Client[Frontend Client] -->|POST /documents/upload| Auth[Auth Layer / JWT Validation]
+    Auth --> API[CoreBackend - FastAPI]
+
+    API -->|1. Insert metadata, status=PROCESSING| DB[(PostgreSQL RDS)]
+    API -->|2. Upload binary async| S3[AWS S3]
+
+    S3 -.-> Orchestrator[Orchestrator Worker]
+    Orchestrator -->|Push task| TaskQueue[SQS: aia-tasks]
+
+    TaskQueue -->|Consume| AgentService[Agent Service]
+    AgentService -->|Push result| StatusQueue[SQS: aia-status]
+
     StatusQueue --> Orchestrator
-    Orchestrator -->|Update Results & Status| DB
+    Orchestrator -->|UPDATE status=COMPLETE/ERROR + resultMd| DB
+
+    Client -->|GET /documents/id/status| API
+    API -->|Read status| DB
 ```
 
-The application relies on an event-driven architecture. Once the FastAPI backend validates the client request, it persists tracking metadata in PostgreSQL and uploads the document to an S3 bucket. An **Orchestrator** detects the new document and pushes a job to the **Task Queue** (SQS). Downstream **Agents** consume from the Task Queue to perform intensive processing, after which they push the result to the **Status Queue**. Finally, the Orchestrator reads from the Status Queue and updates the final results back into the RDS database, which the client can poll.
-# AIA Backend Service
-
-The AIA Backend Service is a robust FastAPI application responsible for handling secure document uploads, JWT-based authentication, PostgreSQL database management, and asynchronous integrations with AWS services (S3 and SQS). 
-
-## Core Functionality
-
-This service exposes several API endpoints to support document processing workflows:
-
-- **`POST /api/upload`**: Validates JWT authentication and header identity, ensures files aren't duplicated, writes initial tracking metadata into PostgreSQL (marked as `Analysing`), and asynchronously uploads the physical binary file to an AWS S3 bucket.
-- **`GET /api/fetchUploadHistory`**: Returns an authenticated user's entire historical log of uploaded documents, including current statuses and timestamps.
-- **`GET /api/result?docID=...`**: Fetches the processing results and current status for a specific document identifier.
-- **`GET /api/health`**: Simple health check endpoint for uptime monitoring and deployment readiness probes.
-
-Behind the scenes, uploaded files are queued via SQS for downstream processing, the results of which are updated back to the database.
-
-## Architecture
-
-```mermaid
-graph TD
-    Client[Frontend Client] -->|Upload Request| Auth[Auth Layer / JWT Validation]
-    Auth --> API[FastAPI Backend]
-    
-    API -->|1. Insert Metadata| DB[(PostgreSQL RDS)]
-    API -->|2. Upload Binary| S3[AWS S3]
-    
-    S3 -.-> Orchestrator[Orchestrator]
-    Orchestrator -->|Push to Task Queue| TaskQueue[Task Queue SQS]
-    
-    TaskQueue -->|Consume Task| Agent[Agent Worker]
-    Agent -->|Push to Status Queue| StatusQueue[Status Queue SQS]
-    
-    StatusQueue --> Orchestrator
-    Orchestrator -->|Update Results & Status| DB
-```
-
-The application relies on an event-driven architecture. Once the FastAPI backend validates the client request, it persists tracking metadata in PostgreSQL and uploads the document to an S3 bucket. An **Orchestrator** detects the new document and pushes a job to the **Task Queue** (SQS). Downstream **Agents** consume from the Task Queue to perform intensive processing, after which they push the result to the **Status Queue**. Finally, the Orchestrator reads from the Status Queue and updates the final results back into the RDS database, which the client can poll.
+Once CoreBackend accepts the upload, it stores metadata in PostgreSQL (`status=PROCESSING`) and uploads the file to S3 asynchronously. The Orchestrator picks up the document, dispatches tasks to the **aia-tasks** SQS queue, and five specialist AI agents process it in parallel. Results flow back via **aia-status** and the Orchestrator writes the final markdown assessment to the database. The frontend polls the status endpoint until `COMPLETE` or `ERROR`.
 
 ## Prerequisites
 
-Before setting up the project, ensure you have the following installed on your local machine:
-- **Python 3.9+** (Virtual environment highly recommended)
-- **Docker & Docker Compose** (Required for local PostgreSQL and LocalStack)
+- **Python 3.9+** (virtual environment recommended)
+- **Docker & Docker Compose** (for local PostgreSQL and LocalStack)
 - **Git**
 
 ## Project Structure
 
-- `app/api/`: Contains the FastAPI routers, endpoints, and authentication dependencies (`upload.py`, `health.py`, `upload_auth.py`).
-- `app/models/`: Pydantic models for request/response validation and Enums (`upload_request.py`, `upload_response.py`, `document_record.py`, `enums.py`).
-- `app/repositories/`: Houses the data access layer to isolate raw database queries from business logic (`document_repository.py`).
-- `app/services/`: Core business logic, such as `upload_service.py`, `s3_service.py`, and the new `ingestor_service.py` (which handles text extraction and queueing).
-- `app/worker.py`: The entry point for the background document ingestion worker.
-- `app/utils/`: Global utility functions spanning logging, database connection pooling, JWT authorization, and system contexts (`app_context.py`).
-- `app/core/`: The centralized heart of the application, containing configuration (`config.py`), global constants (`enums.py`), user-facing strings (`messages.py`), and DI providers (`dependencies.py`).
-- `scripts/`: Shell scripts that automate the development workflow (`start_dev_server.sh`, `start-localstack.sh`).
-- `compose.yml`: Docker Compose configuration defining LocalStack (S3, SQS, SNS) and PostgreSQL for seamless local development.
+```
+app/
+├── api/
+│   ├── main.py          # FastAPI app, router registration, lifespan
+│   ├── documents.py     # /documents/* endpoints
+│   ├── users.py         # /users/me endpoint
+│   └── health.py        # /health endpoint
+├── core/
+│   ├── config.py        # Pydantic settings (env vars)
+│   ├── dependencies.py  # FastAPI DI providers
+│   ├── enums.py         # DocumentStatus (PROCESSING, COMPLETE, ERROR)
+│   └── messages.py      # User-facing error strings
+├── models/
+│   ├── upload_request.py
+│   ├── upload_response.py   # { documentId, status }
+│   ├── status_record.py     # { documentId, status, errorMessage, createdAt, completedAt }
+│   ├── history_record.py    # { documentId, originalFilename, templateType, status, ... }
+│   ├── result_record.py     # { ..., resultMd, errorMessage }
+│   ├── user_record.py       # { userId, email, name }
+│   └── document_record.py
+├── repositories/
+│   ├── document_repository.py  # document_uploads table queries
+│   └── user_repository.py      # users table queries + guest fallback
+├── services/
+│   ├── upload_service.py    # Upload, status, history, result
+│   ├── ingestor_service.py  # Claim → extract → SQS dispatch
+│   ├── s3_service.py
+│   └── sqs_service.py
+├── orchestrator/
+│   └── main.py          # DocumentWorker — polls DB, drives ingestion
+├── utils/
+│   ├── postgres.py      # Connection pool, schema init (document_uploads + users)
+│   ├── auth.py          # JWT validation (HS256)
+│   ├── app_context.py   # UUID + timestamp utilities
+│   └── logger.py
+├── main.py              # Uvicorn entry-point shim
+└── worker.py            # Orchestrator entry-point shim
+docs/
+└── corebackend-api.md   # Full API reference for frontend integration
+```
 
 ## Setup and Installation
 
@@ -98,84 +115,74 @@ git clone <repository-url>
 cd aia-backend
 ```
 
-### 2. Create and Activate a Virtual Environment
+### 2. Create and activate a virtual environment
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install Dependencies
-Install both the core application and development dependencies using `pip`:
+### 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-### 4. Environment Configuration
-The application relies on environment variables for configuration. Copy the example template to create your local `.env` file:
+### 4. Configure environment variables
 ```bash
 cp .env.example .env
+# Edit .env with your JWT_SECRET, POSTGRES_URI, S3/SQS config
 ```
-*Note: Make sure your `.env` contains valid secrets (e.g., `JWT_SECRET`) and correct connection URIs for PostgreSQL and LocalStack.*
 
 ## Running in Development
 
-### 1. Start Local Infrastructure
-The backend depends heavily on PostgreSQL and mocked AWS services. To spin these up locally using Docker:
+### 1. Start local infrastructure (PostgreSQL + LocalStack)
 ```bash
 docker compose up -d
 ```
-*Note: The Docker configuration automatically triggers `scripts/start-localstack.sh` upon initialization, which provisions the required S3 bucket (`docsupload`) and SQS queues (`task-queue`, `status-queue`).*
 
-### 2. Start the FastAPI Server
-You can start the development server quickly using the provided shell script:
+Docker Compose starts PostgreSQL and LocalStack. LocalStack initialises the `docsupload` S3 bucket and `task-queue` / `status-queue` SQS queues automatically via `scripts/start-localstack.sh`.
+
+### 2. Start the API server
 ```bash
-./scripts/start_dev_server.sh
-```
-Alternatively, you can run `uvicorn` directly from your activated virtual environment:
-```bash
-# Start the API
 uvicorn app.api.main:app --host 127.0.0.1 --port 8086 --reload
+```
 
-# Start the Orchestrator (in a separate terminal)
+### 3. Start the Orchestrator worker (separate terminal)
+```bash
 PYTHONPATH=. python -m app.orchestrator.main
 ```
 
-The API will now be listening at `http://127.0.0.1:8086`.
-You can view the auto-generated, interactive API documentation (Swagger UI) by navigating to `http://127.0.0.1:8086/docs` in your browser.
+The API will be available at `http://127.0.0.1:8086`.  
+Swagger UI (interactive docs): `http://127.0.0.1:8086/docs`
 
 ## Running Tests
 
-To run the automated test suite, make sure your virtual environment is activated and execute:
 ```bash
 PYTHONPATH=. pytest tests/
 ```
 
-## Testing and Verification
+## Verification and Debugging
 
-To verify the end-to-end flow manually, you can use the following commands to inspect the state of each component:
-
-### 1. Database (PostgreSQL)
-Check the status of your uploaded documents in the database:
+### Check document status in the database
 ```bash
-# Connect to PostgreSQL
 docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents
 
-# Query document status
-SELECT doc_id, file_name, status, uploaded_ts FROM document_uploads ORDER BY uploaded_ts DESC;
+-- Query document lifecycle
+SELECT doc_id, file_name, status, uploaded_ts, processed_ts
+FROM document_uploads
+ORDER BY uploaded_ts DESC;
+
+-- Check users table
+SELECT * FROM users;
 ```
 
-### 2. Storage (S3)
-Verify that the binary files are correctly stored in the local S3 bucket:
+### Check S3 uploads
 ```bash
 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
 aws s3 ls s3://docsupload --endpoint-url http://localhost:4566 --recursive
 ```
 
-### 3. Task Queue (SQS)
-Check for tasks generated by the Orchestrator for downstream workers:
-
-**To see the message count:**
+### Check SQS task queue
 ```bash
 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
 aws sqs get-queue-attributes \
@@ -184,27 +191,17 @@ aws sqs get-queue-attributes \
   --attribute-names ApproximateNumberOfMessages
 ```
 
-**To read/peek at messages:**
+### Reset local state
 ```bash
-AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
-aws sqs receive-message \
-  --queue-url http://localhost:4566/000000000000/task-queue \
-  --endpoint-url http://localhost:4566 \
-  --max-number-of-messages 10
-```
+# Clear database
+docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents \
+  -c "TRUNCATE document_uploads; TRUNCATE users CASCADE;"
 
-### 4. Cleanup and Reset
-To clear all data and start fresh:
-```bash
-# Clear Database
-docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents -c "TRUNCATE document_uploads;"
-
-# Clear S3 Bucket
+# Clear S3
 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
 aws s3 rm s3://docsupload --recursive --endpoint-url http://localhost:4566
 ```
 
-## Contributing to this project
+## Contributing
 
-Please ensure that you format your code and run the tests prior to submitting any pull requests. Maintain the separation of concerns by keeping routing logic in `api/` and business logic in `services/`.
-Please ensure that you format your code and run the tests prior to submitting any pull requests. Maintain the separation of concerns by keeping routing logic in `api/` and business logic in `services/`.
+Format code and run tests before submitting a pull request. Keep routing logic in `api/`, business logic in `services/`, and data access in `repositories/`.

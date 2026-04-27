@@ -1,13 +1,11 @@
 from enum import Enum
 
-class UploadStatus(str, Enum):
-    UPLOADING = "Uploading"
-    ANALYSING = "Analysing"
-    CLAIMED = "Claimed"
-    QUEUED = "Queued"
-    PROCESSING = "Processing"
-    SUCCESS = "Success"
-    FAILED = "Failed"
+
+class DocumentStatus(str, Enum):
+    PROCESSING = "PROCESSING"
+    COMPLETE = "COMPLETE"
+    ERROR = "ERROR"
+
 
 class LogLevel(str, Enum):
     DEBUG = "DEBUG"
