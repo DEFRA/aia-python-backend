@@ -1,111 +1,50 @@
-import json
-from datetime import datetime
-from logging import getLogger
 from typing import List, Optional
-import asyncpg
 
-from app.models.upload_models import DocumentRecord, UploadRequest
+from app.models.document_record import DocumentRecord
+from app.models.upload_request import UploadRequest
+from app.core.enums import UploadStatus
+from app.repositories.document_repository import DocumentRepository
+from app.services.s3_service import S3Service
+from app.utils.app_context import AppContext
+from app.utils.logger import get_logger
 
-logger = getLogger(__name__)
+logger = get_logger(__name__)
 
-async def check_duplicate(pool: asyncpg.Pool, user_id: str, file_name: str) -> bool:
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT doc_id FROM document_uploads WHERE user_id = $1 AND file_name = $2",
-            user_id,
-            file_name,
-        )
-    return row is not None
+class UploadService:
+    def __init__(self, repo: DocumentRepository, s3_service: S3Service, context: AppContext):
+        self.repo = repo
+        self.s3_service = s3_service
+        self.context = context
 
+    async def process_upload_request(self, request: UploadRequest, user_id: str) -> Optional[str]:
+        """
+        Validates duplicate, generates ID, and persists initial metadata.
+        Returns the new doc_id if successful, or None if duplicate.
+        """
+        is_duplicate = await self.repo.check_duplicate(user_id, request.fileName)
+        if is_duplicate:
+            return None
 
-async def insert_document(
-    pool: asyncpg.Pool,
-    request: UploadRequest,
-    doc_id: str,
-    user_id: str,
-) -> str:
-   
-    uploaded_ts = datetime.utcnow().astimezone()
-    processed_ts = None
-    status = "Analysing"
-    result_json = None
+        doc_id = self.context.generate_uuid()
+        await self.repo.insert_document(request, doc_id, user_id)
+        return doc_id
 
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO document_uploads
-                (doc_id, template_type, user_id, file_name, status,
-                 uploaded_ts, processed_ts, result)
-            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb)
-            """,
-            doc_id,
-            request.templateType,
-            user_id,
-            request.fileName,
-            status,
-            uploaded_ts,
-            processed_ts,
-            result_json,
-        )
+    def get_s3_key(self, user_id: str, doc_id: str, file_name: str) -> str:
+        """Encapsulates the S3 key naming convention."""
+        return f"{user_id}/{doc_id}_{file_name}"
 
-    logger.info("Inserted document %s for user %s", doc_id, user_id)
-    return doc_id
+    async def fetch_history(self, user_id: str) -> List[DocumentRecord]:
+        return await self.repo.fetch_history(user_id)
 
+    async def fetch_result(self, doc_id: str) -> Optional[DocumentRecord]:
+        return await self.repo.fetch_result(doc_id)
 
-async def fetch_history(pool: asyncpg.Pool, user_id: str) -> List[DocumentRecord]:
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT doc_id::text, template_type, user_id, file_name, status,
-                   uploaded_ts, processed_ts, result
-            FROM document_uploads
-            WHERE user_id = $1
-            ORDER BY uploaded_ts DESC
-            """,
-            user_id,
-        )
-
-    records = []
-    for row in rows:
-        result_value = json.loads(row["result"]) if row["result"] else None
-        records.append(
-            DocumentRecord(
-                doc_id=row["doc_id"],
-                template_type=row["template_type"],
-                user_id=row["user_id"],
-                file_name=row["file_name"],
-                status=row["status"],
-                uploaded_ts=row["uploaded_ts"],
-                processed_ts=row["processed_ts"],
-                result=result_value,
-            )
-        )
-    return records
-
-
-async def fetch_result(pool: asyncpg.Pool, doc_id: str) -> Optional[DocumentRecord]:
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT doc_id::text, template_type, user_id, file_name, status,
-                   uploaded_ts, processed_ts, result
-            FROM document_uploads
-            WHERE doc_id = $1::uuid
-            """,
-            doc_id,
-        )
-
-    if row is None:
-        return None
-
-    result_value = json.loads(row["result"]) if row["result"] else None
-    return DocumentRecord(
-        doc_id=row["doc_id"],
-        template_type=row["template_type"],
-        user_id=row["user_id"],
-        file_name=row["file_name"],
-        status=row["status"],
-        uploaded_ts=row["uploaded_ts"],
-        processed_ts=row["processed_ts"],
-        result=result_value,
-    )
+    async def process_background_upload(self, file_bytes: bytes, s3_key: str, doc_id: str) -> None:
+        try:
+            await self.s3_service.upload_file(file_bytes, s3_key)
+            status = UploadStatus.SUCCESS.value
+        except Exception as exc:
+            logger.exception("Background upload failed for doc_id=%s: %s", doc_id, exc)
+            status = UploadStatus.FAILED.value
+        
+        await self.repo.update_status(doc_id, status)

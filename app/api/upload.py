@@ -1,19 +1,17 @@
-import uuid
-from logging import getLogger
 from typing import List
 
-import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 
-from app.utils.postgres import get_db_pool
-from app.utils.s3 import upload_file_to_s3
-from app.config import config
-from app.api.upload_auth import verify_auth
-from app.models.upload_models import DocumentRecord, UploadRequest, UploadResponse
-from app.services import upload_service as service
+from app.models.document_record import DocumentRecord
+from app.models.upload_request import UploadRequest
+from app.models.upload_response import UploadResponse
+from app.services.upload_service import UploadService
+from app.core.dependencies import get_upload_service, verify_auth
+from app.utils.logger import get_logger
+from app.core.messages import messages
 
 router = APIRouter(prefix="/api", tags=["upload"])
-logger = getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @router.post(
@@ -28,46 +26,41 @@ async def upload_document(
     fileName: str = Form(...),
     # Binary file
     file: UploadFile = File(...),
-    # Auth + DB
+    # Auth + Service
     auth: dict = Depends(verify_auth),
-    pool: asyncpg.Pool = Depends(get_db_pool),
+    service: UploadService = Depends(get_upload_service),
 ) -> UploadResponse:
 
     user_id = auth["user_id"]
     logger.info("Upload request for userId=%s fileName=%s", user_id, fileName)
 
-    # --- Duplicate filename check ---
-    is_duplicate = await service.check_duplicate(pool, user_id, fileName)
-    if is_duplicate:
-        logger.warning("Duplicate file: userId=%s fileName=%s", user_id, fileName)
-        return UploadResponse(
-            docId="",
-            statusCode=status.HTTP_400_BAD_REQUEST,
-            errorMessage=f"A file named '{fileName}' has already been uploaded by user '{user_id}'.",
-        )
-
-    doc_id = str(uuid.uuid4())
-    s3_key = f"{user_id}/{doc_id}_{fileName}"
-
-    # --- Build Request Model ---
     upload_request = UploadRequest(
         templateType=templateType,
         fileName=fileName,
     )
 
-    # --- Insert into PostgreSQL ---
     try:
-        await service.insert_document(pool, upload_request, doc_id, user_id)
+        doc_id = await service.process_upload_request(upload_request, user_id)
     except Exception as exc:
         logger.exception("DB insert failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to record document metadata.",
+            detail=messages.DOC_METADATA_SAVE_FAILED,
         ) from exc
+
+    if not doc_id:
+        logger.warning("Duplicate file: userId=%s fileName=%s", user_id, fileName)
+        return UploadResponse(
+            docId="",
+            statusCode=status.HTTP_400_BAD_REQUEST,
+            errorMessage=messages.FILE_ALREADY_UPLOADED.format(file_name=fileName, user_id=user_id),
+        )
+
+    s3_key = service.get_s3_key(user_id, doc_id, fileName)
 
     # --- Background S3 Upload ---
     file_bytes = await file.read()
-    background_tasks.add_task(upload_file_to_s3, file_bytes, s3_key)
+    background_tasks.add_task(service.process_background_upload, file_bytes, s3_key, doc_id)
 
     return UploadResponse(docId=doc_id, statusCode=status.HTTP_200_OK)
 
@@ -79,12 +72,12 @@ async def upload_document(
 )
 async def fetch_upload_history(
     auth: dict = Depends(verify_auth),
-    pool: asyncpg.Pool = Depends(get_db_pool),
+    service: UploadService = Depends(get_upload_service),
 ) -> List[DocumentRecord]:
    
     user_id = auth["user_id"]
     logger.info("Fetching upload history for UserId=%s", user_id)
-    records = await service.fetch_history(pool, user_id)
+    records = await service.fetch_history(user_id)
     return records
 
 
@@ -96,14 +89,14 @@ async def fetch_upload_history(
 async def get_result(
     docID: str,
     auth: dict = Depends(verify_auth),
-    pool: asyncpg.Pool = Depends(get_db_pool),
+    service: UploadService = Depends(get_upload_service),
 ) -> DocumentRecord:
 
     logger.info("Fetching result for docID=%s", docID)
-    record = await service.fetch_result(pool, docID)
+    record = await service.fetch_result(docID)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document with docID '{docID}' not found.",
+            detail=messages.DOC_NOT_FOUND.format(doc_id=docID),
         )
     return record
