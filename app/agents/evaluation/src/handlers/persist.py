@@ -4,6 +4,7 @@ Triggered by EventBridge (ResultsCompiled). Persists assessment results to Postg
 and publishes ResultsPersisted.
 Full implementation: plans/08-persist-and-move-lambdas.md
 """
+
 from __future__ import annotations
 
 import asyncio

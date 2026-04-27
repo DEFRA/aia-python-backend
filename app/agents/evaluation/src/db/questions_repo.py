@@ -1,4 +1,5 @@
 """PostgreSQL repository for fetching checklist questions by category."""
+
 import logging
 
 import asyncpg

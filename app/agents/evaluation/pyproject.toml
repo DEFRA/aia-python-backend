@@ -8,7 +8,24 @@ select = ["E", "F", "I", "UP", "B", "SIM", "PLR"]
 [tool.ruff.lint.pylint]
 max-statements = 50  # excludes docstrings; enforces Single Responsibility — see CODING_GUIDE.md
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["PLR2004"]  # magic values are fine in test assertions
+"src/tests/**/*.py" = ["PLR2004"]
+"main.py" = ["PLR2004"]  # sys.argv index checks in CLI entry point
+"src/agents/prompts/*.py" = ["E501"]  # prompt strings are intentionally long
+"src/utils/pdf_creator_multipage.py" = ["E501"]  # example data dicts and ReportLab styles
+"src/utils/pdf_creator.py" = ["E501"]  # example data dicts and ReportLab styles
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+warn_unused_ignores = false  # envs differ on whether 3rd-party stubs are installed
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "src.tests.*", "*.tests.*"]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["src/tests"]

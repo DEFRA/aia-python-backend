@@ -17,7 +17,7 @@ def _make_config(batch_size: int | None = None) -> TaggingAgentConfig:
     """Build a ``TaggingAgentConfig`` for tests, optionally overriding batch_size."""
     if batch_size is None:
         return TaggingAgentConfig()
-    return TaggingAgentConfig(TAGGING_BATCH_SIZE=batch_size)
+    return TaggingAgentConfig(batch_size=batch_size)
 
 
 def _make_chunk(index: int, text: str = "sample text", page: int = 1) -> dict[str, Any]:

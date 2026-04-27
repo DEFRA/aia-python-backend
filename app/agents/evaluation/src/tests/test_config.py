@@ -15,12 +15,12 @@ def test_redis_config_defaults() -> None:
 
 
 def test_redis_config_custom_values() -> None:
-    """RedisConfig should accept overrides via env-style kwargs."""
+    """RedisConfig should accept overrides via kwargs."""
     config = RedisConfig(
-        REDIS_HOST="redis.example.com",
-        REDIS_PORT=6380,
-        REDIS_SSL=False,
-        REDIS_DB=2,
+        host="redis.example.com",
+        port=6380,
+        ssl=False,
+        db=2,
     )
     assert config.host == "redis.example.com"
     assert config.port == 6380
@@ -39,8 +39,8 @@ def test_eventbridge_config_defaults() -> None:
 def test_eventbridge_config_custom_values() -> None:
     """EventBridgeConfig should accept overrides."""
     config = EventBridgeConfig(
-        EVENTBRIDGE_BUS_NAME="custom-bus",
-        AWS_REGION="us-east-1",
+        bus_name="custom-bus",
+        region="us-east-1",
     )
     assert config.bus_name == "custom-bus"
     assert config.region == "us-east-1"

@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff
+        name: ruff lint
+        args: [--fix]
+        files: ^app/agents/evaluation/(src/|tests/|main\.py$)
+      - id: ruff-format
+        name: ruff format
+        files: ^app/agents/evaluation/(src/|tests/|main\.py$)
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        name: mypy
+        files: ^app/agents/evaluation/(src/|tests/|main\.py$)
+        args: [--config-file=app/agents/evaluation/pyproject.toml]
+        additional_dependencies:
+          - anthropic==0.79.0
+          - pydantic==2.12.5
+          - pydantic-settings==2.12.0
+          - PyYAML==6.0.3
+          - python-dotenv==1.2.1
+          - asyncpg>=0.29.0
+          - redis>=5.0.0
+          - PyMuPDF>=1.24.0
+          - python-docx==1.2.0
+          - reportlab>=4.2.0
+          - requests>=2.32.0
+          - boto3>=1.34.0
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: bash -c 'ANTHROPIC_API_KEY=dummy DB_NAME=dummy DB_USER=dummy DB_PASSWORD=dummy REDIS_HOST=localhost pytest app/agents/evaluation/src/tests -x --tb=short'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true

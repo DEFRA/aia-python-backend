@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 
 import fitz
-import pytest
 from docx import Document
 
 from src.utils.document_parser import (
@@ -14,7 +13,6 @@ from src.utils.document_parser import (
     get_pdf_strategy,
     parse_docx,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — build minimal in-memory PDF and DOCX fixtures
@@ -250,30 +248,36 @@ class TestParseDocx:
         assert "text" in c
 
     def test_heading_style_detected(self) -> None:
-        docx_bytes: bytes = _make_docx([
-            ("Heading 1", "My Title"),
-            ("Normal", "Body paragraph."),
-        ])
+        docx_bytes: bytes = _make_docx(
+            [
+                ("Heading 1", "My Title"),
+                ("Normal", "Body paragraph."),
+            ]
+        )
         chunks: list[dict] = parse_docx(docx_bytes)  # type: ignore[type-arg]
         assert chunks[0]["is_heading"] is True
         assert chunks[1]["is_heading"] is False
 
     def test_empty_paragraphs_skipped(self) -> None:
-        docx_bytes: bytes = _make_docx([
-            ("Normal", "Text"),
-            ("Normal", ""),
-            ("Normal", "More text"),
-        ])
+        docx_bytes: bytes = _make_docx(
+            [
+                ("Normal", "Text"),
+                ("Normal", ""),
+                ("Normal", "More text"),
+            ]
+        )
         chunks: list[dict] = parse_docx(docx_bytes)  # type: ignore[type-arg]
         texts: list[str] = [c["text"] for c in chunks]
         assert "" not in texts
 
     def test_chunk_index_sequential(self) -> None:
-        docx_bytes: bytes = _make_docx([
-            ("Normal", "First"),
-            ("Normal", "Second"),
-            ("Normal", "Third"),
-        ])
+        docx_bytes: bytes = _make_docx(
+            [
+                ("Normal", "First"),
+                ("Normal", "Second"),
+                ("Normal", "Third"),
+            ]
+        )
         chunks: list[dict] = parse_docx(docx_bytes)  # type: ignore[type-arg]
         indices: list[int] = [c["chunk_index"] for c in chunks]
         assert indices == list(range(len(indices)))

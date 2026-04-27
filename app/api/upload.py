@@ -14,6 +14,7 @@ from app.core.messages import messages
 
 router = APIRouter(prefix="/api", tags=["upload"])
 logger = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @router.post(
@@ -29,7 +30,9 @@ async def upload_document(
     # Binary file
     file: UploadFile = File(...),
     # Auth + Service
+    # Auth + Service
     auth: dict = Depends(verify_auth),
+    service: UploadService = Depends(get_upload_service),
     service: UploadService = Depends(get_upload_service),
 ) -> UploadResponse:
 
@@ -43,10 +46,12 @@ async def upload_document(
 
     try:
         doc_id = await service.process_upload_request(upload_request, user_id)
+        doc_id = await service.process_upload_request(upload_request, user_id)
     except Exception as exc:
         logger.exception("DB insert failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=messages.DOC_METADATA_SAVE_FAILED,
             detail=messages.DOC_METADATA_SAVE_FAILED,
         ) from exc
 
@@ -62,6 +67,7 @@ async def upload_document(
 
     # --- Background S3 Upload ---
     file_bytes = await file.read()
+    background_tasks.add_task(service.process_background_upload, file_bytes, s3_key, doc_id)
     background_tasks.add_task(service.process_background_upload, file_bytes, s3_key, doc_id)
 
     return UploadResponse(docId=doc_id, statusCode=status.HTTP_200_OK)
@@ -80,6 +86,7 @@ async def fetch_upload_history(
     user_id = auth["user_id"]
     logger.info("Fetching upload history for UserId=%s", user_id)
     records = await service.fetch_history(user_id)
+    records = await service.fetch_history(user_id)
     return records
 
 
@@ -96,9 +103,11 @@ async def get_result(
 
     logger.info("Fetching result for docID=%s", docID)
     record = await service.fetch_result(docID)
+    record = await service.fetch_result(docID)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=messages.DOC_NOT_FOUND.format(doc_id=docID),
             detail=messages.DOC_NOT_FOUND.format(doc_id=docID),
         )
     return record
