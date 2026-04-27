@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS document_uploads (
     status          TEXT NOT NULL,
     uploaded_ts     TIMESTAMPTZ NOT NULL,
     processed_ts    TIMESTAMPTZ,
+    status_updated_at TIMESTAMPTZ,
     result          JSONB
 );
 
@@ -42,6 +43,10 @@ async def init_db() -> None:
     pool = await get_postgres_pool()
     async with pool.acquire() as conn:
         await conn.execute(_CREATE_TABLE_SQL)
+        try:
+            await conn.execute("ALTER TABLE document_uploads ADD COLUMN status_updated_at TIMESTAMPTZ;")
+        except asyncpg.exceptions.DuplicateColumnError:
+            pass
     logger.info("PostgreSQL schema initialised")
 
 

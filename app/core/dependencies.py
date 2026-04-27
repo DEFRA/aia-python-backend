@@ -6,7 +6,9 @@ from app.utils.auth import AuthService
 from app.utils.app_context import AppContext
 from app.repositories.document_repository import DocumentRepository
 from app.services.s3_service import S3Service
+from app.services.sqs_service import SQSService
 from app.services.upload_service import UploadService
+from app.services.ingestor_service import IngestorService
 from app.core.config import config
 from app.utils.logger import get_logger
 from app.core.messages import messages
@@ -66,9 +68,19 @@ def get_document_repository(
 def get_s3_service() -> S3Service:
     return S3Service()
 
+def get_sqs_service() -> SQSService:
+    return SQSService()
+
 def get_upload_service(
     repo: DocumentRepository = Depends(get_document_repository),
     s3_service: S3Service = Depends(get_s3_service),
     context: AppContext = Depends(get_app_context)
 ) -> UploadService:
     return UploadService(repo, s3_service, context)
+
+def get_ingestor_service(
+    repo: DocumentRepository = Depends(get_document_repository),
+    s3_service: S3Service = Depends(get_s3_service),
+    sqs_service: SQSService = Depends(get_sqs_service),
+) -> IngestorService:
+    return IngestorService(repo, s3_service, sqs_service)

@@ -42,3 +42,17 @@ class S3Service:
 
         logger.info("Upload complete: s3://%s/%s", bucket_name, s3_key)
         return s3_key
+
+    async def download_file(
+        self,
+        s3_key: str,
+        bucket: Optional[str] = None,
+    ) -> bytes:
+        """Downloads a file from S3 and returns its bytes."""
+        bucket_name = bucket or config.s3.bucket_name
+        logger.info("Downloading s3://%s/%s", bucket_name, s3_key)
+
+        async with self._get_client() as client:
+            response = await client.get_object(Bucket=bucket_name, Key=s3_key)
+            async with response["Body"] as stream:
+                return await stream.read()
