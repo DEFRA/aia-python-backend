@@ -51,7 +51,9 @@ async def upload_document(
 
     s3_key = service.get_s3_key(doc_id, fileName)
     file_bytes = await file.read()
-    background_tasks.add_task(service.process_background_upload, file_bytes, s3_key, doc_id)
+    background_tasks.add_task(
+        service.process_background_upload, file_bytes, s3_key, doc_id, templateType
+    )
 
     return UploadResponse(documentId=doc_id, status=DocumentStatus.PROCESSING.value)
 

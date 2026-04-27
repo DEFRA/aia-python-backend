@@ -1,7 +1,20 @@
 from typing import Optional
-from pydantic import Field, HttpUrl, BaseModel
+
+from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from app.core.enums import LogLevel
+
+# ---------------------------------------------------------------------------
+# Template → agent-type mapping.
+# Add a new template type here to define which specialist agents run for it.
+# ---------------------------------------------------------------------------
+
+TEMPLATE_AGENTS: dict[str, list[str]] = {
+    "SDA": ["security", "technical", "both"],
+    #"CHEDP": ["security", "data", "risk", "ea", "solution"],
+}
+
 
 class AWSConfig(BaseModel):
     region: str = "eu-west-2"
@@ -9,18 +22,32 @@ class AWSConfig(BaseModel):
     secret_access_key: str = "test"
     endpoint_url: Optional[str] = None
 
+
 class S3Config(BaseModel):
     bucket_name: str = "docsupload"
 
+
 class SQSConfig(BaseModel):
-    task_queue_url: str = "http://localhost:4566/000000000000/task-queue"
+    task_queue_url: str = "http://localhost:4566/000000000000/aia-tasks"
+    status_queue_url: str = "http://localhost:4566/000000000000/aia-status"
+
 
 class DBConfig(BaseModel):
     uri: Optional[str] = None
 
+
 class AuthConfig(BaseModel):
     jwt_secret: str = "test_secret"
     user_id_header: str = "x-user-id"
+
+
+class OrchestratorConfig(BaseModel):
+    url: str = "http://localhost:8001"
+    port: int = 8001
+    agent_timeout_seconds: int = 480
+    default_agent_type: str = "general"
+    max_inline_bytes: int = 200_000  # stay well under SQS 256 KB limit
+
 
 class AppSettings(BaseModel):
     env: str = "dev"
@@ -32,8 +59,9 @@ class AppSettings(BaseModel):
     tracing_header: str = "x-cdp-request-id"
     worker_stuck_task_timeout_minutes: int = 120
 
+
 class AppConfig(BaseSettings):
-    # Flattened environment mappings
+    # Application
     env: str = Field("dev", alias="PYTHON_ENV")
     host: str = Field("127.0.0.1", alias="HOST")
     port: int = Field(8086, alias="PORT")
@@ -53,7 +81,8 @@ class AppConfig(BaseSettings):
     s3_bucket: str = Field("docsupload", alias="S3_BUCKET_NAME")
 
     # SQS
-    sqs_url: str = Field("http://localhost:4566/000000000000/task-queue", alias="TASK_QUEUE_URL")
+    sqs_task_url: str = Field("http://localhost:4566/000000000000/aia-tasks", alias="TASK_QUEUE_URL")
+    sqs_status_url: str = Field("http://localhost:4566/000000000000/aia-status", alias="STATUS_QUEUE_URL")
 
     # DB
     db_uri: Optional[str] = Field(None, alias="POSTGRES_URI")
@@ -62,25 +91,30 @@ class AppConfig(BaseSettings):
     jwt_secret: str = Field("test_secret", alias="JWT_SECRET")
     user_id_header: str = Field("x-user-id", alias="USER_ID_HEADER")
 
+    # Orchestrator
+    orchestrator_url: str = Field("http://localhost:8001", alias="ORCHESTRATOR_URL")
+    orchestrator_port: int = Field(8001, alias="ORCHESTRATOR_PORT")
+    orchestrator_agent_timeout: int = Field(480, alias="ORCHESTRATOR_AGENT_TIMEOUT_SECONDS")
+    orchestrator_default_agent_type: str = Field("general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE")
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True
     )
 
-    # Properties to maintain compatibility with legacy app.aws, app.s3, etc.
     @property
     def app(self) -> AppSettings:
         return AppSettings(
             env=self.env, host=self.host, port=self.port,
             log_config=self.log_config, log_level=self.log_level,
             http_proxy=self.http_proxy, tracing_header=self.tracing_header,
-            worker_stuck_task_timeout_minutes=self.worker_stuck_task_timeout_minutes
+            worker_stuck_task_timeout_minutes=self.worker_stuck_task_timeout_minutes,
         )
 
     @property
     def aws(self) -> AWSConfig:
         return AWSConfig(
             region=self.aws_region, access_key_id=self.aws_access_key,
-            secret_access_key=self.aws_secret_key, endpoint_url=self.aws_endpoint
+            secret_access_key=self.aws_secret_key, endpoint_url=self.aws_endpoint,
         )
 
     @property
@@ -89,7 +123,10 @@ class AppConfig(BaseSettings):
 
     @property
     def sqs(self) -> SQSConfig:
-        return SQSConfig(task_queue_url=self.sqs_url)
+        return SQSConfig(
+            task_queue_url=self.sqs_task_url,
+            status_queue_url=self.sqs_status_url,
+        )
 
     @property
     def db(self) -> DBConfig:
@@ -98,5 +135,23 @@ class AppConfig(BaseSettings):
     @property
     def auth(self) -> AuthConfig:
         return AuthConfig(jwt_secret=self.jwt_secret, user_id_header=self.user_id_header)
+
+    @property
+    def orchestrator(self) -> OrchestratorConfig:
+        return OrchestratorConfig(
+            url=self.orchestrator_url,
+            port=self.orchestrator_port,
+            agent_timeout_seconds=self.orchestrator_agent_timeout,
+            default_agent_type=self.orchestrator_default_agent_type,
+        )
+
+    @property
+    def templates(self) -> dict[str, list[str]]:
+        return TEMPLATE_AGENTS
+
+    def get_agent_types(self, template_type: str) -> list[str]:
+        """Return the agent types for a template. Falls back to default_agent_type when unknown."""
+        return self.templates.get(template_type, [self.orchestrator.default_agent_type])
+
 
 config = AppConfig()

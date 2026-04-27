@@ -1,51 +1,46 @@
 import io
-from typing import List
 
 import docx
 
-from app.core.enums import DocumentStatus
-from app.repositories.document_repository import DocumentRepository
-from app.services.s3_service import S3Service
-from app.services.sqs_service import SQSService
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class IngestorService:
-    def __init__(
-        self,
-        repo: DocumentRepository,
-        s3_service: S3Service,
-        sqs_service: SQSService,
-    ):
-        self.repo = repo
-        self.s3_service = s3_service
-        self.sqs_service = sqs_service
-
     def extract_text_from_docx(self, file_bytes: bytes) -> str:
-        doc = docx.Document(io.BytesIO(file_bytes))
-        return "\n".join(para.text for para in doc.paragraphs)
+        """
+        Extracts all readable text from a DOCX file, including paragraphs and tables.
 
-    async def process_batch(self, limit: int = 5) -> int:
-        records = await self.repo.claim_pending_documents(limit)
-        if not records:
-            return 0
+        Raises ValueError for empty input, unreadable files, or documents with no text.
+        """
+        if not file_bytes:
+            raise ValueError("Cannot extract text: file content is empty.")
 
-        processed_count = 0
-        for record in records:
-            try:
-                logger.info("Processing document: %s (%s)", record.doc_id, record.file_name)
-                s3_key = f"{record.doc_id}_{record.file_name}"
-                file_bytes = await self.s3_service.download_file(s3_key)
-                text = self.extract_text_from_docx(file_bytes)
-                await self.sqs_service.send_task(record.doc_id, text)
-                processed_count += 1
-            except Exception as exc:
-                logger.exception("Failed to ingest document %s: %s", record.doc_id, exc)
-                await self.repo.update_status(
-                    record.doc_id,
-                    DocumentStatus.ERROR.value,
-                    error_message=str(exc),
-                )
-        return processed_count
+        try:
+            doc = docx.Document(io.BytesIO(file_bytes))
+        except Exception as exc:
+            raise ValueError(f"Failed to open DOCX document: {exc}") from exc
+
+        lines: list[str] = []
+
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                lines.append(text)
+
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    text = cell.text.strip()
+                    if text:
+                        lines.append(text)
+
+        if not lines:
+            raise ValueError("DOCX file contains no extractable text content.")
+
+        extracted = "\n".join(lines)
+        logger.debug(
+            "Extracted %d chars from DOCX (%d bytes input)", len(extracted), len(file_bytes)
+        )
+        return extracted
