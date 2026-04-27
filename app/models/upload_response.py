@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
+
 class UploadResponse(BaseModel):
-    docId: str
-    statusCode: int
-    errorMessage: str = ""
+    documentId: str
+    status: str

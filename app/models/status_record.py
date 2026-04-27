@@ -3,10 +3,9 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-class HistoryRecord(BaseModel):
+class StatusRecord(BaseModel):
     documentId: str
-    originalFilename: str
-    templateType: str
     status: str
+    errorMessage: Optional[str] = None
     createdAt: datetime
     completedAt: Optional[datetime] = None

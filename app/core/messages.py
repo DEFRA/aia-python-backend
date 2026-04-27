@@ -1,5 +1,5 @@
 class AppMessages:
-    # Auth Messages
+    # Auth
     MISSING_USER_ID_HEADER = "Missing {header} header"
     MISSING_AUTH_HEADER = "Missing Authorization header"
     AUTH_IDENTITY_MISMATCH = "Forbidden: Identity mismatch"
@@ -8,10 +8,12 @@ class AppMessages:
     TOKEN_INVALID_SIGNATURE = "Invalid token: Signature verification failed"
     TOKEN_INVALID_FORMAT = "Invalid token: {error}"
     INTERNAL_AUTH_ERROR = "Internal authentication error"
-    
-    # Upload Messages
+
+    # Documents
     FILE_ALREADY_UPLOADED = "A file named '{file_name}' has already been uploaded by user '{user_id}'."
     DOC_METADATA_SAVE_FAILED = "Failed to record document metadata."
-    DOC_NOT_FOUND = "Document with docID '{doc_id}' not found."
+    DOC_NOT_FOUND = "Document '{doc_id}' not found."
+    USER_NOT_FOUND = "User not found."
+
 
 messages = AppMessages()

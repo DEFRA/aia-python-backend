@@ -1,38 +1,35 @@
 import os
 from contextlib import asynccontextmanager
 
-from app.utils.logger import get_logger
 import uvicorn
 from fastapi import FastAPI
 
-from app.utils.postgres import close_postgres_pool, init_db
-# from app.utils.tracing import TraceIdMiddleware
-from app.core.config import config
+from app.api.documents import router as documents_router
 from app.api.health import router as health_router
-from app.api.upload import router as upload_router
+from app.api.users import router as users_router
+from app.core.config import config
+from app.utils.logger import get_logger
+from app.utils.postgres import close_postgres_pool, init_db
 
 logger = get_logger(__name__)
+
+API_PREFIX = "/api/v1"
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Startup
     if config.db.uri:
         await init_db()
         logger.info("PostgreSQL initialised")
     yield
-    # Shutdown
     await close_postgres_pool()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="AIA CoreBackend", version="1.0.0", lifespan=lifespan)
 
-# Setup middleware
-# app.add_middleware(TraceIdMiddleware)
-
-# Setup Routes
 app.include_router(health_router)
-app.include_router(upload_router)
+app.include_router(documents_router, prefix=API_PREFIX)
+app.include_router(users_router, prefix=API_PREFIX)
 
 
 def main() -> None:  # pragma: no cover
@@ -44,7 +41,7 @@ def main() -> None:  # pragma: no cover
         os.environ.pop("HTTPS_PROXY", None)
 
     server_kwargs = {
-        "app": "app.main:app",
+        "app": "app.api.main:app",
         "host": config.app.host,
         "port": config.app.port,
         "reload": config.app.env == "development",
