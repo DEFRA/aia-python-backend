@@ -1,12 +1,9 @@
 from typing import List, Optional, Tuple
 
 from app.core.enums import DocumentStatus
-from app.models.document_record import DocumentRecord
 from app.models.history_record import HistoryRecord
 from app.models.result_record import ResultRecord
-from app.models.status_record import StatusRecord
 from app.models.upload_request import UploadRequest
-from app.models.upload_response import UploadResponse
 from app.repositories.document_repository import DocumentRepository
 from app.services.s3_service import S3Service
 from app.utils.app_context import AppContext
@@ -32,8 +29,8 @@ class UploadService:
     def get_s3_key(self, doc_id: str, file_name: str) -> str:
         return f"{doc_id}_{file_name}"
 
-    async def get_document_status(self, doc_id: str, user_id: str) -> Optional[StatusRecord]:
-        return await self.repo.get_document_status(doc_id, user_id)
+    async def get_processing_document_ids(self, user_id: str) -> list[str]:
+        return await self.repo.get_processing_document_ids(user_id)
 
     async def fetch_history(
         self, user_id: str, page: int = 1, limit: int = 20
@@ -48,7 +45,6 @@ class UploadService:
     ) -> None:
         try:
             await self.s3_service.upload_file(file_bytes, s3_key)
-            # Status stays PROCESSING — Orchestrator will set COMPLETE or ERROR
         except Exception as exc:
             logger.exception("Background S3 upload failed for doc_id=%s: %s", doc_id, exc)
             await self.repo.update_status(

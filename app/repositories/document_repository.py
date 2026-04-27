@@ -7,7 +7,6 @@ from app.core.enums import DocumentStatus
 from app.models.document_record import DocumentRecord
 from app.models.history_record import HistoryRecord
 from app.models.result_record import ResultRecord
-from app.models.status_record import StatusRecord
 from app.models.upload_request import UploadRequest
 from app.utils.app_context import AppContext
 from app.utils.logger import get_logger
@@ -75,31 +74,6 @@ class DocumentRepository:
                 doc_id,
             )
 
-    async def get_document_status(self, doc_id: str, user_id: str) -> Optional[StatusRecord]:
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT doc_id::text AS "documentId",
-                       status,
-                       error_message AS "errorMessage",
-                       uploaded_ts   AS "createdAt",
-                       processed_ts  AS "completedAt"
-                FROM document_uploads
-                WHERE doc_id = $1::uuid AND user_id = $2
-                """,
-                doc_id,
-                user_id,
-            )
-        if row is None:
-            return None
-        return StatusRecord(
-            documentId=row["documentId"],
-            status=row["status"],
-            errorMessage=row["errorMessage"],
-            createdAt=row["createdAt"],
-            completedAt=row["completedAt"],
-        )
-
     async def fetch_history(self, user_id: str, page: int = 1, limit: int = 20) -> tuple[List[HistoryRecord], int]:
         offset = (page - 1) * limit
         async with self.pool.acquire() as conn:
@@ -138,6 +112,20 @@ class DocumentRepository:
         total = total_row["total"] if total_row else 0
         return records, total
 
+    async def get_processing_document_ids(self, user_id: str) -> list[str]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT doc_id::text AS "documentId"
+                FROM document_uploads
+                WHERE user_id = $1 AND status = $2
+                ORDER BY uploaded_ts DESC
+                """,
+                user_id,
+                DocumentStatus.PROCESSING.value,
+            )
+        return [row["documentId"] for row in rows]
+
     async def fetch_result(self, doc_id: str, user_id: str) -> Optional[ResultRecord]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -147,7 +135,6 @@ class DocumentRepository:
                        template_type AS "templateType",
                        status,
                        result_md     AS "resultMd",
-                       result        AS "resultJson",
                        error_message AS "errorMessage",
                        uploaded_ts   AS "createdAt",
                        processed_ts  AS "completedAt"
@@ -159,18 +146,12 @@ class DocumentRepository:
             )
         if row is None:
             return None
-
-        # Use result_md if available; fall back to serialising legacy result JSONB
-        result_md = row["resultMd"]
-        if not result_md and row["resultJson"]:
-            result_md = json.dumps(json.loads(row["resultJson"]), indent=2)
-
         return ResultRecord(
             documentId=row["documentId"],
             originalFilename=row["originalFilename"],
             templateType=row["templateType"],
             status=row["status"],
-            resultMd=result_md,
+            resultMd=row["resultMd"],
             errorMessage=row["errorMessage"],
             createdAt=row["createdAt"],
             completedAt=row["completedAt"],

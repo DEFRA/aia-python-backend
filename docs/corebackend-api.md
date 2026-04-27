@@ -128,60 +128,30 @@ Capture `documentId` — it is the key used by all subsequent calls.
 
 ---
 
-### 3. Get Document Status
+### 3. Get Processing Status
 
 ```
-GET /api/v1/documents/{documentId}/status
+GET /api/v1/documents/status
 Authorization: Bearer <jwt>
 x-user-id: <userId>
 ```
 
-Lightweight polling endpoint. Call this repeatedly until a terminal status is received. Does **not** include `resultMd` — fetch the full result only when `COMPLETE`.
+Returns the list of document IDs that are still in `PROCESSING` state for the authenticated user. Poll this endpoint repeatedly; when the list is empty (or no longer contains a document you care about), call **Fetch Upload History** to get the final status of all documents.
 
-**Path parameter:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `documentId` | UUID string | Returned by the upload endpoint |
-
-**Response `200` — while processing:**
+**Response `200`:**
 ```json
 {
-  "documentId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "status": "PROCESSING",
-  "errorMessage": null,
-  "createdAt": "2026-04-27T10:00:00Z",
-  "completedAt": null
+  "processingDocumentIds": [
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "9b1e2c3d-4a5f-6789-bcde-0f1a2b3c4d5e"
+  ]
 }
 ```
 
-**Response `200` — on `COMPLETE`:**
+An empty array means no documents are currently being processed for this user:
 ```json
-{
-  "documentId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "status": "COMPLETE",
-  "errorMessage": null,
-  "createdAt": "2026-04-27T10:00:00Z",
-  "completedAt": "2026-04-27T10:01:45Z"
-}
+{ "processingDocumentIds": [] }
 ```
-
-**Response `200` — on `ERROR`:**
-```json
-{
-  "documentId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "status": "ERROR",
-  "errorMessage": "File upload to S3 failed.",
-  "createdAt": "2026-04-27T10:00:00Z",
-  "completedAt": "2026-04-27T10:00:08Z"
-}
-```
-
-**Error responses:**
-
-| Scenario | Code | `detail` value |
-|----------|------|----------------|
-| Document not found / not owned by user | `404` | `"Document '...' not found."` |
 
 ---
 
@@ -193,7 +163,7 @@ Authorization: Bearer <jwt>
 x-user-id: <userId>
 ```
 
-Returns a paginated list of all documents uploaded by the authenticated user, ordered by upload time descending. Does not include `resultMd`.
+Returns a paginated list of all documents uploaded by the authenticated user, ordered by upload time descending.
 
 **Query parameters:**
 
@@ -296,9 +266,9 @@ Returns the authenticated user's profile.
 |--------|------|------|---------|
 | `GET` | `/health` | None | `{ status }` |
 | `POST` | `/api/v1/documents/upload` | Required | `{ documentId, status }` — HTTP `202` |
-| `GET` | `/api/v1/documents/{documentId}/status` | Required | `StatusRecord` |
+| `GET` | `/api/v1/documents/status` | Required | `{ processingDocumentIds }` |
 | `GET` | `/api/v1/documents` | Required | Paginated `HistoryRecord` list |
-| `GET` | `/api/v1/documents/{documentId}` | Required | `ResultRecord` with `resultMd` |
+| `GET` | `/api/v1/documents/{documentId}` | Required | `ResultRecord` |
 | `GET` | `/api/v1/users/me` | Required | `UserRecord` |
 
 ---
@@ -315,12 +285,8 @@ export interface UploadResponse {
   status: DocumentStatus
 }
 
-export interface StatusRecord {
-  documentId: string
-  status: DocumentStatus
-  errorMessage: string | null
-  createdAt: string       // ISO 8601 UTC
-  completedAt: string | null
+export interface ProcessingStatusResponse {
+  processingDocumentIds: string[]
 }
 
 export interface HistoryRecord {
@@ -328,7 +294,7 @@ export interface HistoryRecord {
   originalFilename: string
   templateType: string
   status: DocumentStatus
-  createdAt: string
+  createdAt: string       // ISO 8601 UTC
   completedAt: string | null
 }
 
@@ -381,30 +347,32 @@ const uploadRes = await fetch(`${BASE_URL}/api/v1/documents/upload`, {
 })
 const { documentId } = await uploadRes.json() as UploadResponse
 
-// 2. Poll status
+// 2. Poll /documents/status until the uploaded documentId disappears from the list
 const POLL_INTERVAL_MS = 30_000
 const MAX_WAIT_MS = 600_000
-const TERMINAL: Set<DocumentStatus> = new Set(['COMPLETE', 'ERROR'])
 
-async function pollStatus(documentId: string): Promise<StatusRecord> {
+async function waitForCompletion(documentId: string): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < MAX_WAIT_MS) {
-    const res = await fetch(`${BASE_URL}/api/v1/documents/${documentId}/status`, {
+    const res = await fetch(`${BASE_URL}/api/v1/documents/status`, {
       headers: { Authorization: `Bearer ${jwt}`, 'x-user-id': userId },
     })
-    const record = await res.json() as StatusRecord
-    if (TERMINAL.has(record.status)) return record
+    const { processingDocumentIds } = await res.json() as ProcessingStatusResponse
+    if (!processingDocumentIds.includes(documentId)) return   // done (COMPLETE or ERROR)
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
   }
   throw new Error('Assessment timed out — the user can check history later.')
 }
 
-// 3. Fetch full result when COMPLETE
-const result = await fetch(`${BASE_URL}/api/v1/documents/${documentId}`, {
+await waitForCompletion(documentId)
+
+// 3. Fetch full result (includes resultMd when COMPLETE)
+const detailRes = await fetch(`${BASE_URL}/api/v1/documents/${documentId}`, {
   headers: { Authorization: `Bearer ${jwt}`, 'x-user-id': userId },
 })
-const { resultMd } = await result.json() as ResultRecord
-// render resultMd with react-markdown or similar
+const record = await detailRes.json() as ResultRecord
+// record.status is 'COMPLETE' or 'ERROR'
+// record.resultMd is the markdown assessment string (null if ERROR)
 ```
 
 ### Polling behaviour
@@ -415,7 +383,12 @@ const { resultMd } = await result.json() as ResultRecord
 | Max wait | 10 minutes | Covers worst-case 5-agent processing time |
 | Max polls | 20 | `600s ÷ 30s` |
 
-When 10 minutes elapse without a terminal status, stop polling and show:
+**Flow in words:**
+1. Upload → receive `documentId`.
+2. Poll `GET /documents/status` every 30 s; check whether your `documentId` is still in `processingDocumentIds`.
+3. When it disappears, call `GET /documents/{documentId}` (or `GET /documents` for the full list) to read the final `status` and `errorMessage`.
+
+When 10 minutes elapse and the document is still processing, stop polling and show:
 
 > *"This assessment is taking longer than expected. You can leave this page and check back in your history."*
 

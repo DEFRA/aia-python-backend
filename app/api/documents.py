@@ -1,11 +1,7 @@
-from typing import List
-
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.core.enums import DocumentStatus
-from app.models.history_record import HistoryRecord
 from app.models.result_record import ResultRecord
-from app.models.status_record import StatusRecord
 from app.models.upload_request import UploadRequest
 from app.models.upload_response import UploadResponse
 from app.services.upload_service import UploadService
@@ -60,24 +56,19 @@ async def upload_document(
     return UploadResponse(documentId=doc_id, status=DocumentStatus.PROCESSING.value)
 
 
+# NOTE: /status must be registered before /{document_id} so FastAPI does not
+# treat the literal string "status" as a document_id path parameter.
 @router.get(
-    "/{document_id}/status",
-    response_model=StatusRecord,
-    summary="Poll processing status of a document",
+    "/status",
+    summary="List documentIds still being processed for the authenticated user",
 )
-async def get_document_status(
-    document_id: str,
+async def get_processing_status(
     auth: dict = Depends(verify_auth),
     service: UploadService = Depends(get_upload_service),
-) -> StatusRecord:
+) -> dict:
     user_id = auth["user_id"]
-    record = await service.get_document_status(document_id, user_id)
-    if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=messages.DOC_NOT_FOUND.format(doc_id=document_id),
-        )
-    return record
+    ids = await service.get_processing_document_ids(user_id)
+    return {"processingDocumentIds": ids}
 
 
 @router.get(
@@ -101,9 +92,9 @@ async def fetch_upload_history(
 @router.get(
     "/{document_id}",
     response_model=ResultRecord,
-    summary="Fetch full assessment result for a completed document",
+    summary="Fetch metadata and status for a specific document",
 )
-async def get_document_result(
+async def get_document(
     document_id: str,
     auth: dict = Depends(verify_auth),
     service: UploadService = Depends(get_upload_service),
