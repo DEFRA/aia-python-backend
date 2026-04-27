@@ -53,6 +53,7 @@ class UploadService:
     ) -> None:
         try:
             await self.s3_service.upload_file(file_bytes, s3_key)
+            logger.info("S3 upload complete doc_id=%s s3_key=%s", doc_id, s3_key)
         except Exception as exc:
             logger.exception("S3 upload failed for doc_id=%s: %s", doc_id, exc)
             await self.repo.update_status(
