@@ -25,3 +25,6 @@ dist/
 .claude/
 CLAUDE.md
 CODING_GUIDE.md
+
+# MacOS
+.DS_Store
