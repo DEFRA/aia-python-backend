@@ -62,7 +62,7 @@ class TaggingAgent:
         return tagged
 
     async def _tag_batch(self, batch: list[dict[str, Any]]) -> list[TaggedChunk]:
-        """Send a single batch to Claude and parse the response.
+        """Send a single batch to the LLM and parse the response.
 
         Args:
             batch: Subset of chunks to tag in one API call.

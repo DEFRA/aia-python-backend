@@ -1,9 +1,9 @@
 """Configuration classes for the evaluation pipeline.
 
-Operational defaults (models, TTLs, pipeline constants) are loaded from
+Operational defaults (models, pipeline constants) are loaded from
 ``app/agents/evaluation/config.yaml``.  Secrets and deployment-specific values
-(API keys, DB credentials, Redis host) are sourced from environment variables
-only.  Precedence: environment variables > yaml values > code defaults.
+(API keys, DB credentials) are sourced from environment variables only.
+Precedence: environment variables > yaml values > code defaults.
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def _make_customise_sources(yaml_key: str) -> classmethod[Any, Any, Any]:
 class SecurityAgentConfig(BaseSettings):
     """Configuration for the SecurityAgent."""
 
-    model: str = Field(default="claude-opus-4-6", alias="SECURITY_MODEL")
+    model: str = Field(alias="SECURITY_MODEL")
     max_tokens: int = Field(default=4096, alias="SECURITY_MAX_TOKENS")
     temperature: float = Field(default=0.0, alias="SECURITY_TEMPERATURE")
     api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -155,7 +155,7 @@ class GovernanceAgentConfig(BaseSettings):
     so the two agents are interchangeable from the registry's perspective.
     """
 
-    model: str = Field(default="claude-opus-4-6", alias="GOVERNANCE_MODEL")
+    model: str = Field(alias="GOVERNANCE_MODEL")
     max_tokens: int = Field(default=4096, alias="GOVERNANCE_MAX_TOKENS")
     temperature: float = Field(default=0.0, alias="GOVERNANCE_TEMPERATURE")
     api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -167,7 +167,7 @@ class GovernanceAgentConfig(BaseSettings):
 class GDPRAgentConfig(BaseSettings):
     """Configuration for the GDPRComplianceAgent."""
 
-    model: str = Field(default="claude-opus-4-6", alias="GDPR_MODEL")
+    model: str = Field(alias="GDPR_MODEL")
     max_tokens: int = Field(default=4096, alias="GDPR_MAX_TOKENS")
     temperature: float = Field(default=0.0, alias="GDPR_TEMPERATURE")
     api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -179,7 +179,7 @@ class GDPRAgentConfig(BaseSettings):
 class TaggingAgentConfig(BaseSettings):
     """Configuration for the TaggingAgent (Stage 4)."""
 
-    model: str = Field(default="claude-sonnet-4-6", alias="TAGGING_MODEL")
+    model: str = Field(alias="TAGGING_MODEL")
     batch_size: int = Field(default=15, alias="TAGGING_BATCH_SIZE")
     max_tokens: int = Field(default=4096, alias="TAGGING_MAX_TOKENS")
     temperature: float = Field(default=0.0, alias="TAGGING_TEMPERATURE")
@@ -187,28 +187,6 @@ class TaggingAgentConfig(BaseSettings):
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
     settings_customise_sources = _make_customise_sources("agents.tagging")
-
-
-# ---------------------------------------------------------------------------
-# Cache TTL config
-# ---------------------------------------------------------------------------
-
-
-class CacheConfig(BaseSettings):
-    """Redis cache TTL values (seconds) used across the pipeline."""
-
-    ttl_chunks: int = Field(default=86_400, alias="CACHE_TTL_CHUNKS")
-    ttl_tagged: int = Field(default=86_400, alias="CACHE_TTL_TAGGED")
-    ttl_sections: int = Field(default=3_600, alias="CACHE_TTL_SECTIONS")
-    ttl_questions: int = Field(default=3_600, alias="CACHE_TTL_QUESTIONS")
-    ttl_result: int = Field(default=3_600, alias="CACHE_TTL_RESULT")
-    ttl_results_count: int = Field(default=1_800, alias="CACHE_TTL_RESULTS_COUNT")
-    ttl_compiled: int = Field(default=3_600, alias="CACHE_TTL_COMPILED")
-    ttl_stage8_count: int = Field(default=1_800, alias="CACHE_TTL_STAGE8_COUNT")
-    ttl_receipt: int = Field(default=900, alias="CACHE_TTL_RECEIPT")
-
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("cache")
 
 
 # ---------------------------------------------------------------------------
@@ -263,26 +241,44 @@ class ParserConfig(BaseSettings):
 
 
 # ---------------------------------------------------------------------------
-# Infrastructure configs
+# Local runner config (main.py)
 # ---------------------------------------------------------------------------
 
 
-class RedisConfig(BaseSettings):
-    """Connection settings for the ElastiCache Redis cluster.
+class LocalRunnerConfig(BaseSettings):
+    """Defaults for the local end-to-end runner (``main.py``).
 
-    ``host`` is env-only (secret / deployment-specific); non-secret defaults
-    (port, ssl, timeouts) are supplied by ``config.yaml``.
+    Drives the mock-SQS pipeline runner: which folder to read the input
+    document and assessment file from, which document to use by default,
+    where to write the combined output JSON, and how to map agent type
+    identifiers to the section keys that appear in the output.
     """
 
-    host: str = Field(alias="REDIS_HOST")
-    port: int = Field(default=6379, alias="REDIS_PORT")
-    ssl: bool = Field(default=True, alias="REDIS_SSL")
-    db: int = Field(default=0, alias="REDIS_DB")
-    socket_timeout: float = Field(default=5.0, alias="REDIS_SOCKET_TIMEOUT")
-    socket_connect_timeout: float = Field(default=3.0, alias="REDIS_SOCKET_CONNECT_TIMEOUT")
+    data_dir: str = Field(default="data", alias="LOCAL_RUNNER_DATA_DIR")
+    assessment_filename: str = Field(
+        default="sample_policy_assessment.json",
+        alias="LOCAL_RUNNER_ASSESSMENT_FILENAME",
+    )
+    default_input_filename: str = Field(
+        default="fictional_product_logistics_report.pdf",
+        alias="LOCAL_RUNNER_DEFAULT_INPUT_FILENAME",
+    )
+    output_filename_template: str = Field(
+        default="pipeline_output_{doc_id}.json",
+        alias="LOCAL_RUNNER_OUTPUT_FILENAME_TEMPLATE",
+    )
+    display_keys: dict[str, str] = Field(
+        default_factory=lambda: {"security": "Security", "governance": "Governance"},
+        alias="LOCAL_RUNNER_DISPLAY_KEYS",
+    )
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("redis")
+    settings_customise_sources = _make_customise_sources("local_runner")
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure configs
+# ---------------------------------------------------------------------------
 
 
 class EventBridgeConfig(BaseSettings):

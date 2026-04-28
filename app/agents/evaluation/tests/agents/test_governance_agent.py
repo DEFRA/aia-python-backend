@@ -64,7 +64,7 @@ def _make_mock_response(text: str) -> MagicMock:
     """Build a mock Anthropic Message with the supplied text body."""
     mock_response: MagicMock = MagicMock()
     mock_response.content = [MagicMock(text=text)]
-    mock_response.model = "claude-opus-4-6"
+    mock_response.model = "test-model"
     mock_response.usage = MagicMock(input_tokens=120, output_tokens=60)
     mock_response.stop_reason = "end_turn"
     return mock_response
@@ -106,7 +106,7 @@ async def test_governance_agent_assess_returns_agent_result() -> None:
 
 @pytest.mark.asyncio
 async def test_governance_agent_validates_reference_echo() -> None:
-    """If Claude echoes the wrong reference, the value flows through verbatim.
+    """If the LLM echoes the wrong reference, the value flows through verbatim.
 
     The agent does not silently rewrite the reference; downstream consumers
     rely on this behaviour to spot drift between the prompt contract and the

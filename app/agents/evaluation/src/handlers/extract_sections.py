@@ -1,9 +1,10 @@
 """Stage 5 -- Extract Sections Lambda handler.
 
-Triggered by EventBridge ``DocumentTagged``.  Reads tagged chunks from Redis,
-splits them into 5 agent-specific payloads, fetches agent-specific questions
-from the database (cached in Redis), and enqueues 5 SQS Tasks messages --
-one per specialist agent.  Large payloads are offloaded to S3.
+Triggered by EventBridge ``DocumentTagged``.  Resolves the tagged-chunks payload
+envelope (inline or S3), splits the chunks into agent-specific sections,
+fetches per-agent assessment questions, and enqueues one SQS Tasks message per
+specialist agent.  Section text larger than the SQS inline limit is offloaded
+to S3 in the same shape used by Stage 6.  No Redis state is kept.
 """
 
 from __future__ import annotations
@@ -16,32 +17,11 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
-
-from src.agents.schemas import DocumentTaggedDetail, QuestionItem
-from src.config import CloudWatchConfig, PipelineConfig, RedisConfig
+from src.agents.schemas import DocumentTaggedDetail
+from src.config import CloudWatchConfig, PipelineConfig
 from src.db.assessment_loader import load_assessment_from_file
 from src.handlers.agent import AgentTaskBody
-from src.utils.redis_client import (
-    get_cache_config,
-    get_redis,
-    key_questions,
-    redis_get_json,
-    redis_set_json,
-)
-
-
-class _CachedAssessment(BaseModel):
-    """Pydantic envelope for the Redis-cached `(questions, url)` payload.
-
-    Validates the whole cached object in one go on read-back, so neither the
-    inner `QuestionItem` list nor the per-category URL can drift away from
-    the contract enforced at write time.
-    """
-
-    questions: list[QuestionItem]
-    url: str
-
+from src.utils.payload_offload import resolve_payload
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -50,21 +30,12 @@ logger.setLevel(logging.INFO)
 # Module-level singletons (cold-start reuse)
 # ---------------------------------------------------------------------------
 
-_redis_config: RedisConfig | None = None
 _sqs: Any = None
 _s3: Any = None
 _cw: Any = None
 _cw_config: CloudWatchConfig | None = None
 _pipeline_config: PipelineConfig | None = None
 _agent_tag_map_cache: dict[str, frozenset[str]] | None = None
-
-
-def _get_redis_config() -> RedisConfig:
-    """Return the module-level RedisConfig singleton, creating on first call."""
-    global _redis_config  # noqa: PLW0603
-    if _redis_config is None:
-        _redis_config = RedisConfig()  # type: ignore[call-arg]
-    return _redis_config
 
 
 def _get_cw_config() -> CloudWatchConfig:
@@ -143,7 +114,7 @@ def extract_sections_for_agent(
 
     Args:
         tagged_chunks: List of tagged chunk dicts from the tagging stage.
-        agent_type: One of the 5 specialist agent types.
+        agent_type: One of the surviving specialist agent types.
 
     Returns:
         Filtered list preserving original chunk order.
@@ -193,42 +164,6 @@ def _sections_to_text(sections: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 # Async helpers
 # ---------------------------------------------------------------------------
-
-
-async def _load_assessment(
-    redis: Any,
-    agent_type: str,
-) -> tuple[list[QuestionItem], str]:
-    """Load ``(questions, category_url)`` with Redis cache-aside.
-
-    Source: ``src.db.assessment_loader.load_assessment_from_file`` (file-based
-    until the Postgres schema is finalised). Cached value shape:
-    ``{"questions": [...QuestionItem dumps...], "url": "..."}``.
-
-    Args:
-        redis: An ``aioredis.Redis`` instance.
-        agent_type: The agent type to fetch questions for.
-
-    Returns:
-        A ``(questions, category_url)`` tuple identical in shape to
-        ``load_assessment_from_file``.
-    """
-    cache_key: str = key_questions(agent_type)
-    cached: Any = await redis_get_json(redis, cache_key)
-    if cached is not None:
-        envelope: _CachedAssessment = _CachedAssessment.model_validate(cached)
-        return envelope.questions, envelope.url
-
-    items, url = load_assessment_from_file(agent_type)
-    envelope = _CachedAssessment(questions=items, url=url)
-    await redis_set_json(
-        redis,
-        cache_key,
-        envelope.model_dump(),
-        get_cache_config().ttl_questions,
-    )
-    logger.info("Cached %d questions for agent_type=%s", len(items), agent_type)
-    return items, url
 
 
 async def _emit_metric(
@@ -314,14 +249,15 @@ async def _send_sqs_message(
     )
 
 
-async def _enqueue_sqs_message(
+async def _enqueue_sqs_message(  # noqa: PLR0913
     payload: dict[str, Any],
     queue_url: str,
     sqs_client: Any,
     s3_client: Any,
     bucket: str,
+    inline_limit: int,
 ) -> None:
-    """Enqueue a single SQS message, offloading to S3 if too large.
+    """Enqueue a single SQS message, offloading the document text to S3 if too large.
 
     Args:
         payload: Full payload dict containing docId, agentType, document, etc.
@@ -329,20 +265,24 @@ async def _enqueue_sqs_message(
         sqs_client: A boto3 SQS client.
         s3_client: A boto3 S3 client (for large payload offload).
         bucket: S3 bucket name for payload storage.
+        inline_limit: Maximum inline body size in bytes.
     """
     message_body: str = json.dumps(payload)
     doc_id: str = payload["docId"]
     agent_type: str = payload["agentType"]
 
-    if len(message_body.encode("utf-8")) <= _get_pipeline_config().sqs_inline_limit:
+    if len(message_body.encode("utf-8")) <= inline_limit:
         await _send_sqs_message(sqs_client, queue_url, message_body)
-    else:
-        # Offload to S3
-        s3_key: str = f"payloads/{doc_id}/{agent_type}.json"
-        await _upload_payload_to_s3(s3_client, bucket, s3_key, message_body.encode("utf-8"))
+        return
 
-        # Send SQS message with S3 pointer instead of document
-        pointer_payload: dict[str, Any] = {
+    # Offload to S3 — the document text is what bloats the message
+    s3_key: str = f"payloads/{doc_id}/{agent_type}.json"
+    await _upload_payload_to_s3(s3_client, bucket, s3_key, message_body.encode("utf-8"))
+
+    # Re-validate through ``AgentTaskBody`` so the pointer message is a typed
+    # Pydantic-serialised payload (Pydantic Boundary Validation rule).
+    pointer_body: AgentTaskBody = AgentTaskBody.model_validate(
+        {
             "docId": doc_id,
             "agentType": agent_type,
             "s3PayloadKey": s3_key,
@@ -350,13 +290,14 @@ async def _enqueue_sqs_message(
             "categoryUrl": payload["categoryUrl"],
             "enqueuedAt": payload["enqueuedAt"],
         }
-        await _send_sqs_message(sqs_client, queue_url, json.dumps(pointer_payload))
-        logger.info(
-            "Large payload offloaded to S3: key=%s agent_type=%s doc_id=%s",
-            s3_key,
-            agent_type,
-            doc_id,
-        )
+    )
+    await _send_sqs_message(sqs_client, queue_url, pointer_body.model_dump_json())
+    logger.info(
+        "Large payload offloaded to S3: key=%s agent_type=%s doc_id=%s",
+        s3_key,
+        agent_type,
+        doc_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -374,10 +315,10 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     Flow:
         1. Validate EventBridge event via Pydantic.
-        2. Load tagged chunks from Redis.
-        3. For each of 5 agent types, extract sections and fetch questions.
-        4. Prepare all 5 payloads (fail-fast before any enqueue).
-        5. Enqueue all 5 SQS messages.
+        2. Resolve tagged chunks from the inline-or-S3 payload envelope.
+        3. For each agent type, extract sections and load questions.
+        4. Build all SQS Tasks payloads (fail-fast before any enqueue).
+        5. Enqueue all SQS Tasks messages (offloading section text to S3 if needed).
         6. Emit ``SectionCount`` CloudWatch metric per agent type.
 
     Args:
@@ -386,40 +327,35 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     Returns:
         Dict with ``statusCode`` 200 on success.
-
-    Raises:
-        RuntimeError: If tagged chunks cache key is missing from Redis.
     """
     start: float = time.monotonic()
 
     # 1. Validate EventBridge event
     detail: DocumentTaggedDetail = DocumentTaggedDetail.model_validate(event["detail"])
     doc_id: str = detail.docId
-    tagged_cache_key: str = detail.taggedCacheKey
 
-    logger.info("Stage 5 ExtractSections: doc_id=%s tagged_key=%s", doc_id, tagged_cache_key)
+    logger.info("Stage 5 ExtractSections: doc_id=%s", doc_id)
 
-    # 2. Get Redis connection and load tagged chunks
-    redis = await get_redis(_get_redis_config())
-    tagged_chunks: Any = await redis_get_json(redis, tagged_cache_key)
+    # 2. Resolve tagged-chunks payload envelope
+    bucket: str = os.environ["S3_BUCKET"]
+    s3_client: Any = _get_s3()
+    tagged_bytes: bytes = resolve_payload(
+        envelope=detail.payload.model_dump(),
+        s3_client=s3_client,
+        bucket=bucket,
+    )
+    tagged_chunks: list[dict[str, Any]] = json.loads(tagged_bytes)
 
-    if tagged_chunks is None:
-        raise RuntimeError(
-            f"Tagged chunks cache miss: key={tagged_cache_key} doc_id={doc_id}. "
-            "Stage 4 may not have completed."
-        )
-
-    # 3. Prepare all 5 payloads before enqueueing any
+    # 3. Build payloads for every agent type before enqueueing any
     enqueued_at: str = datetime.now(tz=UTC).isoformat()
     payloads: list[dict[str, Any]] = []
     section_counts: list[tuple[str, int]] = []
 
     for agent_type in _get_pipeline_config().agent_types:
         sections: list[dict[str, Any]] = extract_sections_for_agent(tagged_chunks, agent_type)
-        questions, category_url = await _load_assessment(redis, agent_type)
+        questions, category_url = load_assessment_from_file(agent_type)
         document_text: str = _sections_to_text(sections)
 
-        # Boundary validation: build the SQS body via the typed model.
         body: AgentTaskBody = AgentTaskBody(
             docId=doc_id,
             agentType=agent_type,
@@ -431,11 +367,10 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         payloads.append(body.model_dump(mode="json"))
         section_counts.append((agent_type, len(sections)))
 
-    # 4. Enqueue all 5 SQS messages
+    # 4. Enqueue all SQS messages
     queue_url: str = os.environ["SQS_TASKS_QUEUE_URL"]
-    bucket: str = os.environ.get("S3_BUCKET", "")
     sqs_client: Any = _get_sqs()
-    s3_client: Any = _get_s3()
+    inline_limit: int = _get_pipeline_config().sqs_inline_limit
 
     for payload in payloads:
         await _enqueue_sqs_message(
@@ -444,9 +379,10 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             sqs_client=sqs_client,
             s3_client=s3_client,
             bucket=bucket,
+            inline_limit=inline_limit,
         )
 
-    # 5. Emit SectionCount metrics
+    # 5. Emit metrics
     for agent_type, count in section_counts:
         await _emit_metric("SectionCount", float(count), agent_type=agent_type)
 
@@ -455,6 +391,6 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         "Stage 5 complete: doc_id=%s duration_ms=%.1f sections=%s",
         doc_id,
         duration_ms,
-        {at: c for at, c in section_counts},
+        dict(section_counts),
     )
     return {"statusCode": 200}

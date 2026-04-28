@@ -1,6 +1,8 @@
 # AWS Event-Driven Orchestration — Document Processing Pipeline
 
-End-to-end architecture using SQS, EventBridge, CloudWatch, and Redis Cache (ElastiCache).
+End-to-end architecture using SQS, EventBridge, S3, and CloudWatch. **No Redis** — every cross-stage handoff travels in the EventBridge event itself, with an inline-or-S3 envelope for payloads larger than the SQS / EventBridge limit.
+
+The evaluation pipeline consists of **four AWS Lambda functions** — Parse, Tag, Extract Sections, and Agent. Code lives in [`src/handlers/`](../src/handlers/). The web upload (FastAPI) and the S3 → EventBridge → SQS Tasks routing in front of Parse are not Lambdas; they are described here for context.
 
 ---
 
@@ -17,38 +19,37 @@ Instead of a central orchestrator, each stage publishes a completion event to a 
   "detail-type": "DocumentParsed",
   "detail": {
     "docId": "UUID-1234",
-    "s3Key": "in_progress/UUID-1234.pdf",
-    "timestamp": "2026-03-27T10:00:00Z"
+    "payload": { "inline": "[{...chunks...}]" }
   }
 }
 ```
+
+The `payload` field is a discriminated union: either `{"inline": "<json string>"}` (under 240 KB) or `{"s3Key": "state/{docId}/{stage}.json"}` (over 240 KB).  See [Inline-or-S3 payload offload](#inline-or-s3-payload-offload).
 
 ---
 
 ## Full Event Flow
 
 ```
-S3 upload
+S3 upload (or Ingestor service)
   → EventBridge (Object Created)
-    → SQS FIFO
-      → Parse Lambda        publishes: DocumentParsed
-        → Tagging Lambda    publishes: DocumentTagged
-          → Extract Lambda  publishes: SectionsReady ×5
-            → Agent ×5      each publishes: AgentComplete
-                            last one publishes: AllAgentsComplete
-              → Compile      publishes: DocumentCompiled
-                → Persist   publishes: ResultPersisted   ─┐
-                → S3 Move   publishes: DocumentMoved     ─┤ both → FinaliseReady
-                                                           ↓
-                                                     Notify + SQS.delete
-                                                           ↓
-                                                     PipelineComplete
+    → SQS Tasks queue   message body: {docId, s3Key}
+      → Parse Lambda    publishes: DocumentParsed   (payload: chunks)
+        → Tag Lambda    publishes: DocumentTagged   (payload: tagged chunks)
+          → Extract Sections Lambda
+                        fans out 2 SQS Tasks messages (one per agent type) directly to the Tasks queue
+            → Agent Lambda ×2 (parallel SQS invocations)
+                        each publishes: AgentStatusMessage to SQS Status queue
 ```
 
-- **Redis** holds intermediate state between every stage
-- **EventBridge** replaces all direct Lambda-to-Lambda calls
-- **CloudWatch** observes every transition
-- **SQS** anchors durability and ordering at the entry point
+Terminal output: one `AgentStatusMessage` per `(docId, agentType)` on the SQS Status queue. Consumption of that queue is the responsibility of an external front-end / downstream service and is **out of scope** for this codebase.
+
+Only **two events** travel on the EventBridge bus: `DocumentParsed` (Stage 3 → 4) and `DocumentTagged` (Stage 4 → 5). Stage 5 to Stage 6 hand-off is via SQS (the same Tasks queue), not EventBridge. Stage 6 publishes only to SQS Status. There is no `SectionsReady` or `AgentComplete` event in the live path (the corresponding Pydantic detail models exist in [`schemas.py`](../src/agents/schemas.py) for future observability hooks but no handler currently emits them).
+
+- **EventBridge** carries the two intra-pipeline event transitions (`DocumentParsed`, `DocumentTagged`)
+- **CloudWatch** observes every transition (per-stage duration metrics + SQS / Lambda standard metrics)
+- **SQS** anchors durability and ordering at the entry point, the Stage 5 → 6 fan-out, and the terminal output
+- **No Redis** — there is no shared cache or state store between stages
 
 ---
 
@@ -59,282 +60,182 @@ S3 upload
 ```
 S3 in_progress/  →  S3 EventBridge integration (native, no Lambda needed)
                  →  EventBridge rule: detail-type = "Object Created"
-                 →  SQS FIFO Queue  (MessageGroupId = "pipeline")
-                 →  Parse Lambda (polls SQS)
+                 →  SQS Tasks queue (FIFO, MessageGroupId = "pipeline")
+                 →  Parse Lambda (event-source mapping)
 ```
 
-- S3 natively sends events to EventBridge — no SNS/notification config required
-- SQS FIFO preserves **earliest-timestamp-first** ordering
-- The SQS **receipt handle** is captured by the Parse Lambda and stored in Redis for the full pipeline duration — the message stays invisible until Stage 9 explicitly deletes it
-- A **Dead Letter Queue (DLQ)** on the FIFO queue catches documents that fail after N retries
+- S3 natively sends events to EventBridge — no SNS/notification config required.
+- SQS FIFO preserves **earliest-timestamp-first** ordering.
+- The Lambda event-source mapping deletes the SQS message **automatically on successful invocation**. Failures propagate as exceptions and trigger SQS redelivery up to `maxReceiveCount`, then route to a DLQ.
+- A **Dead Letter Queue (DLQ)** catches messages that fail too many times.
 
-**CloudWatch alarm:** `DLQ depth > 0` → page on-call
+**CloudWatch alarm:** `DLQ depth > 0` → page on-call.
 
 ---
 
 ### Stage 3 — Parse (PDF / DOCX)
 
-Parse Lambda runs `extract_text_blocks()` + `clean_and_chunk()` for PDFs, or `python-docx` paragraph iteration for `.docx` files. Both paths produce the same chunk schema:
+`Parse Lambda` runs `extract_text_blocks()` + `clean_and_chunk()` for PDFs, or `python-docx` paragraph iteration for `.docx` files. Both paths produce the same chunk schema:
 
 ```json
 { "chunk_index", "page", "is_heading", "char_count", "text" }
 ```
 
-For `.docx`, paragraph style name (`Heading 1`, `Heading 2`, `Normal`) replaces font-size heuristics for `is_heading`. Section/paragraph index is used as a proxy for `page`.
+For `.docx`, paragraph style name (`Heading 1`, `Heading 2`, `Normal`) replaces font-size heuristics for `is_heading`.
 
-For scanned PDFs with no extractable text layer, fall back to **Amazon Textract** or Claude vision before chunking.
+For scanned PDFs with no extractable text layer, the Lambda raises `ScannedPdfError`.
 
-**Redis** caches parsed chunks keyed by content hash — not filename — so resubmissions skip the parse entirely:
-
-```
-KEY:   chunks:{sha256(file_bytes)}
-TTL:   24 hours
-VALUE: JSON array of chunk dicts
-```
-
-On success, Lambda stores the SQS receipt handle in Redis and publishes to EventBridge:
+The chunk list is wrapped in an inline-or-S3 payload envelope and published:
 
 ```json
 {
   "detail-type": "DocumentParsed",
-  "detail": { "docId": "...", "chunksCacheKey": "chunks:abc123" }
+  "detail": {
+    "docId": "...",
+    "payload": { "inline": "[{...chunks...}]" }
+  }
 }
 ```
 
-**CloudWatch:** Lambda duration metric + error rate alarm per stage function.
+If the chunks JSON exceeds 240 KB the helper writes them to `s3://{bucket}/state/{docId}/chunks.json` and emits `{"s3Key": "state/{docId}/chunks.json"}` instead.
+
+**EventBridge rule:** `detail-type = "DocumentParsed"` → `Tag Lambda`.
 
 ---
 
-### Stage 4 — Tagging Agent
+### Stage 4 — Tag (LLM Taxonomy Pass)
 
-Triggered by EventBridge rule matching `DocumentParsed`. Lambda reads chunks from Redis using `chunksCacheKey` and calls Claude with the tagging prompt and taxonomy.
+`Tag Lambda` reads the `DocumentParsed` event, resolves the inline-or-S3 payload to recover the chunks, and runs the **TaggingAgent** which calls the LLM in batches (default 15 chunks per call). Every chunk is enriched with:
 
-**Redis** caches the tagged output — this is the most expensive LLM call in the pipeline:
-
-```
-KEY:   tagged:{sha256(file_bytes)}
-TTL:   24 hours
+```json
+{ "relevant": true|false, "tags": ["authentication", "encryption", ...], "reason": "..." }
 ```
 
-If the document is resubmitted or tagging is re-run with the same content, the Claude call is skipped entirely.
+The full tagged-chunk schema is `TaggedChunk` in [`schemas.py`](../src/agents/schemas.py).
 
-Publishes:
+The output is wrapped in another inline-or-S3 envelope and published:
+
 ```json
 {
   "detail-type": "DocumentTagged",
-  "detail": { "docId": "...", "taggedCacheKey": "tagged:abc123" }
+  "detail": {
+    "docId": "...",
+    "payload": { "inline": "..." }   // or { "s3Key": "state/{docId}/tagged.json" }
+  }
 }
 ```
 
+**EventBridge rule:** `detail-type = "DocumentTagged"` → `Extract Sections Lambda`.
+
 ---
 
-### Stage 5 — Section Extraction
+### Stage 5 — Extract Sections (Fan-out)
 
-Triggered by `DocumentTagged`. Lambda reads tagged chunks from Redis and runs `extract_sections_for_agent()` for each of the five agent types. Each filtered payload — including the nearest preceding heading for section context — is written back to Redis:
+`Extract Sections Lambda` reads the `DocumentTagged` event and:
 
-```
-KEY:   sections:{docId}:security
-KEY:   sections:{docId}:data
-KEY:   sections:{docId}:risk
-KEY:   sections:{docId}:ea
-KEY:   sections:{docId}:solution
-TTL:   1 hour
-```
+1. Resolves the inline-or-S3 payload to recover tagged chunks.
+2. For each agent type in `pipeline.agent_types` (currently `security`, `governance`):
+   - Filters tagged chunks with `relevant=True` and at least one tag matching the agent's tag set (the `pipeline.agent_tag_map` in `config.yaml`).
+   - Re-attaches the nearest preceding heading for context.
+   - Loads checklist questions for that agent type via [`load_assessment_from_file`](../src/db/assessment_loader.py), which reads a JSON file from the data folder configured in `local_runner.assessment_filename`. The Postgres-backed equivalent ([`fetch_assessment_by_category`](../src/db/questions_repo.py)) is intentionally a `NotImplementedError` placeholder until the Postgres assessment schema lands.
+   - Builds an `AgentTaskBody` carrying `(docId, agentType, document, questions, categoryUrl, enqueuedAt)`.
+3. Sends one SQS Tasks message per agent. If any single message exceeds 240 KB the document text is offloaded to `s3://{bucket}/payloads/{docId}/{agentType}.json` and a pointer message with `s3PayloadKey` is sent instead.
 
-Lambda then publishes **one event per agent** to EventBridge:
+This is the **fan-out** point: from this stage onwards, two independent agent invocations run in parallel. The hand-off is via SQS (back onto the same Tasks queue), not EventBridge.
 
-```json
-{
-  "detail-type": "SectionsReady",
-  "detail": { "docId": "...", "agentType": "security" }
+---
+
+### Stage 6 — Specialist Agents (Parallel) — Terminal Stage
+
+`Agent Lambda` is one Lambda function that dispatches by `agentType`:
+
+```python
+AGENT_REGISTRY = {
+    "security":   SecurityAgent,
+    "governance": GovernanceAgent,
 }
 ```
 
-Five events fan out concurrently. Each is routed by an EventBridge rule to the same Agent Lambda with a different `agentType` — triggering all five agents in parallel.
+Triggered by SQS Tasks queue with batch size 1, so each invocation handles exactly one agent. The handler:
 
----
-
-### Stage 6 — Specialist Agents (Parallel)
-
-Each `SectionsReady` event triggers the Agent Lambda independently. Each invocation:
-
-1. Reads its sections from Redis (`sections:{docId}:{agentType}`)
-2. Pulls its checklist questions from PostgreSQL via **RDS Proxy**. Questions are cached in Redis to avoid repeated DB hits:
-   ```
-   KEY:   questions:{agentType}
-   TTL:   1 hour (invalidate on question table update)
-   ```
-3. Calls the Claude API with sections + questions
-4. Writes its result to Redis:
-   ```
-   KEY:   result:{docId}:{agentType}
-   TTL:   1 hour
-   ```
-5. Increments a Redis counter for this document:
-   ```
-   INCR   results_count:{docId}
-   ```
-6. If counter reaches 5 (all agents complete), publishes `AllAgentsComplete`
-7. Always publishes `AgentComplete` (for CloudWatch tracking)
-
-**PostgreSQL questions table:**
-```sql
-CREATE TABLE checklist_questions (
-    id          SERIAL PRIMARY KEY,
-    agent_type  TEXT NOT NULL,
-    question    TEXT NOT NULL,
-    active      BOOLEAN DEFAULT TRUE
-);
-```
-
-**CloudWatch:** Custom metric `AgentDuration` with `agentType` dimension — identifies the slowest agent.
-
----
-
-### Stage 7 — Compile Results
-
-Triggered by `AllAgentsComplete`. Lambda reads all five results from Redis:
-
-```
-result:{docId}:security
-result:{docId}:data
-result:{docId}:risk
-result:{docId}:ea
-result:{docId}:solution
-```
-
-Assembles the final `front_end_response` JSON:
+1. Validates the `AgentTaskBody`.
+2. Resolves the document text inline or by downloading from S3 (`s3PayloadKey`).
+3. Instantiates the registered agent and calls `await agent.assess(document, questions, category_url)`.
+4. Publishes one **AgentStatusMessage** to the SQS Status queue.
 
 ```json
 {
-  "docId": "UUID-1234",
-  "type": "Solution Design Team",
-  "generatedAt": "2026-03-27T10:00:00Z",
-  "content": [{ "type": "text", "text": "...markdown tables per agent..." }],
+  "docId": "...",
+  "agentType": "security",
   "status": "completed",
-  "processedAt": "2026-03-27T10:05:00Z"
+  "result": { "...AgentResult..." },
+  "durationMs": 4127.3,
+  "completedAt": "2026-04-28T10:00:00Z"
 }
 ```
 
-Publishes:
-```json
-{
-  "detail-type": "DocumentCompiled",
-  "detail": { "docId": "...", "compiledCacheKey": "compiled:UUID-1234" }
-}
-```
+On exception, the same shape is published with `status: "failed"` and `errorMessage` populated. The SQS Status queue is the **terminal output** of this pipeline; consuming it is the responsibility of a separate front-end / downstream service.
 
 ---
 
-### Stage 8 — Persist + Move (Concurrent)
+## Inline-or-S3 payload offload
 
-`DocumentCompiled` triggers **two** EventBridge rules simultaneously:
+[`src/utils/payload_offload.py`](../src/utils/payload_offload.py) provides two functions:
 
-**Rule A → Persist Lambda:**
-- Inserts compiled JSON into PostgreSQL `assessment_results` table
-- Publishes `ResultPersisted`
-
-```sql
-CREATE TABLE assessment_results (
-    doc_id        UUID PRIMARY KEY,
-    doc_type      TEXT,
-    generated_at  TIMESTAMPTZ,
-    processed_at  TIMESTAMPTZ,
-    status        TEXT,
-    result_json   JSONB
-);
+```python
+inline_or_s3(payload, doc_id, stage, s3_client, bucket, threshold=240_000) -> dict
+resolve_payload(envelope, s3_client, bucket) -> bytes
 ```
 
-**Rule B → S3 Move Lambda:**
-- Copies object from `in_progress/` to `completed/` or `error/`
-- Deletes original from `in_progress/`
-- Publishes `DocumentMoved`
+- Below the threshold: returns `{"inline": "<json string>"}`. No S3 write.
+- Above the threshold: writes `s3://{bucket}/state/{doc_id}/{stage}.json` and returns `{"s3Key": "..."}`.
 
-Both `ResultPersisted` and `DocumentMoved` must arrive before notifying the front-end. A Redis counter coordinates:
-
-```
-INCR   stage8_count:{docId}   → publishes FinaliseReady when count == 2
-```
-
----
-
-### Stage 9 — Notify + Pop Queue
-
-Triggered by `FinaliseReady`. Lambda:
-
-1. Publishes to **SNS** → front-end webhook or push event:
-   ```json
-   { "docId": "UUID-1234", "status": "completed" }
-   ```
-2. Reads the SQS receipt handle from Redis (`receipt:{docId}`) and calls `sqs.delete_message()` to remove the document from the queue
-3. Cleans up all Redis keys for this `docId`
-4. Publishes `PipelineComplete` — captured by CloudWatch for audit and duration tracking
-
-**Redis receipt handle key (written at Stage 3):**
-```
-KEY:   receipt:{docId}
-TTL:   matches SQS visibility timeout
-VALUE: SQS receipt handle string
-```
-
----
-
-## CloudWatch: Observability Layer
-
-| What to monitor | How |
-|-----------------|-----|
-| End-to-end duration per document | Log `PipelineStart` + `PipelineComplete` events; metric filter on `docId` |
-| Per-stage error rates | Lambda error metric per function; alarm on threshold |
-| DLQ depth | `ApproximateNumberOfMessagesVisible` alarm on DLQ → SNS alert |
-| Agent latency by type | Custom metric `AgentDuration` with `agentType` dimension |
-| Queue backlog | SQS `ApproximateNumberOfMessagesVisible` on main queue |
-| Redis memory pressure | ElastiCache `DatabaseMemoryUsagePercentage` alarm |
-| Pipeline health dashboard | CloudWatch Dashboard aggregating all of the above |
-
----
-
-## Redis Key Reference
-
-| Key | Written at | Read at | TTL |
-|-----|-----------|---------|-----|
-| `chunks:{content_hash}` | Stage 3 | Stage 3 (cache hit) | 24h |
-| `tagged:{content_hash}` | Stage 4 | Stage 4 (cache hit) | 24h |
-| `sections:{docId}:{agentType}` | Stage 5 | Stage 6 | 1h |
-| `questions:{agentType}` | Stage 6 | Stage 6 (cache hit) | 1h |
-| `result:{docId}:{agentType}` | Stage 6 | Stage 7 | 1h |
-| `results_count:{docId}` | Stage 6 (INCR) | Stage 6 | 1h |
-| `compiled:{docId}` | Stage 7 | Stage 8 | 1h |
-| `stage8_count:{docId}` | Stage 8 (INCR) | Stage 8 | 30m |
-| `receipt:{docId}` | Stage 3 | Stage 9 | SQS visibility timeout |
+The matching Pydantic discriminated union `PayloadEnvelope = InlinePayload | S3KeyPayload` lives in [`schemas.py`](../src/agents/schemas.py) so EventBridge detail models validate the envelope shape at the boundary.
 
 ---
 
 ## EventBridge Rules Reference
 
-| Rule | Matches | Target |
-|------|---------|--------|
-| `on-document-uploaded` | S3 Object Created in `in_progress/` | SQS FIFO Queue |
-| `on-document-parsed` | `DocumentParsed` | Tagging Lambda |
-| `on-document-tagged` | `DocumentTagged` | Extract Lambda |
-| `on-sections-ready` | `SectionsReady` | Agent Lambda (×5 concurrent) |
-| `on-all-agents-complete` | `AllAgentsComplete` | Compile Lambda |
-| `on-document-compiled-persist` | `DocumentCompiled` | Persist Lambda |
-| `on-document-compiled-move` | `DocumentCompiled` | S3 Move Lambda |
-| `on-finalise-ready` | `FinaliseReady` | Notify Lambda |
+The custom event bus is `defra-pipeline`, carrying exactly two rules:
+
+| Rule name | `detail-type` | Target | Detail Pydantic model |
+|---|---|---|---|
+| `pipeline-document-parsed` | `DocumentParsed` | `Tag Lambda` | `DocumentParsedDetail` |
+| `pipeline-document-tagged` | `DocumentTagged` | `Extract Sections Lambda` | `DocumentTaggedDetail` |
+
+Stage 5 fans out via SQS Tasks messages (not events), and Stage 6 publishes its result to SQS Status — the SQS Status queue is the terminal sink. Two further detail models exist in [`schemas.py`](../src/agents/schemas.py) (`SectionsReadyDetail`, `AgentCompleteDetail`) but **no handler currently publishes them**; they are reserved for future observability hooks.
 
 ---
 
-## AWS Services Summary
+## SQS Queues Reference
 
-| Stage | Services |
-|-------|----------|
-| 2 — Upload detection | S3 + EventBridge (native integration) + SQS FIFO + DLQ |
-| 3 — Parse | Lambda + ElastiCache (Redis) + Textract (scanned PDF fallback) |
-| 4 — Tagging | Lambda + Claude API + ElastiCache (Redis) |
-| 5 — Extract sections | Lambda + ElastiCache (Redis) + EventBridge fan-out |
-| 6 — Specialist agents | Lambda (parallel) + RDS PostgreSQL + RDS Proxy + ElastiCache (Redis) |
-| 7 — Compile | Lambda + ElastiCache (Redis) |
-| 8 — Persist + Move | Lambda (×2 concurrent) + RDS PostgreSQL + S3 |
-| 9 — Notify + pop queue | Lambda + SNS + SQS delete_message |
-| Observability | CloudWatch Metrics + Alarms + Logs + Dashboard |
-| State / caching | ElastiCache (Redis) — shared across all stages |
+| Queue | Producer | Consumer | Notes |
+|---|---|---|---|
+| `aia-tasks` (FIFO) | Web upload + Stage 5 fan-out | Stage 3 / Stage 6 (Lambda event-source mapping) | Auto-deletion on success |
+| `aia-status` | Stage 6 | External consumer (out of scope) | One message per `(docId, agentType)` |
+| `aia-dlq` | All queues | Operators | Catches poison messages |
+
+---
+
+## Terminal Output
+
+The pipeline ends at the SQS Status queue. This codebase publishes one `AgentStatusMessage` per `(docId, agentType)` and stops. Persisting results, building a compiled report, or moving the document to a "completed" S3 prefix are responsibilities of a separate front-end / downstream consumer and are out of scope for this repository.
+
+---
+
+## Why no Redis?
+
+The pipeline is purely forward-flowing — every cache key would be written once and read at most once. Removing Redis:
+
+- Eliminates an ElastiCache cluster.
+- Cuts a network hop per stage.
+- Simplifies handler code (no cache-aside, no fan-in counter).
+- Removes a class of cache-coherency bugs.
+
+Inter-stage state now travels in the EventBridge event itself, with S3 as the offload destination for payloads that exceed the 240 KB inline threshold. Determinism is preserved because re-runs simply re-parse and re-tag from scratch — both are tolerable to repeat once Redis is no longer in the path.
+
+---
+
+## Local development
+
+The same handler code can be exercised end-to-end without any AWS infrastructure via [`main.py`](../main.py). The local runner mocks both ends of the SQS pipeline (Tasks input as a Python `SqsRecordBody`, Status output as a JSON file in the data folder) and skips EventBridge / CloudWatch entirely. Bedrock is the only AWS service it actually calls. See the [evaluation `README.md`](../README.md) for the full local-vs-production breakdown.

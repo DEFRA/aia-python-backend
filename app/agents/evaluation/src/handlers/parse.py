@@ -1,14 +1,14 @@
 """Stage 3 -- Parse Lambda handler.
 
 Triggered by SQS (polling).  Downloads a PDF or DOCX from S3, parses it into
-chunks, caches them in Redis, stores the SQS receipt handle, and publishes a
-``DocumentParsed`` event to EventBridge.
+chunks, and publishes a ``DocumentParsed`` event whose ``payload`` envelope
+either inlines the chunks (small documents) or references an S3 offload key
+(large documents).  No Redis state is kept.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
 import time
@@ -18,7 +18,7 @@ import boto3
 from pydantic import BaseModel
 
 from src.agents.schemas import DocumentParsedDetail
-from src.config import CloudWatchConfig, EventBridgeConfig, RedisConfig
+from src.config import CloudWatchConfig, EventBridgeConfig
 from src.utils.document_parser import (
     clean_and_chunk,
     extract_text_blocks,
@@ -27,13 +27,7 @@ from src.utils.document_parser import (
 )
 from src.utils.eventbridge import EventBridgePublisher
 from src.utils.exceptions import ScannedPdfError
-from src.utils.redis_client import (
-    get_cache_config,
-    get_redis,
-    key_chunks,
-    key_receipt,
-    redis_set_json,
-)
+from src.utils.payload_offload import inline_or_s3
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -67,7 +61,6 @@ class SqsEvent(BaseModel):
 # Module-level singletons (cold-start reuse)
 # ---------------------------------------------------------------------------
 
-_redis_config: RedisConfig | None = None
 _publisher: EventBridgePublisher | None = None
 _s3: Any = None
 _cw: Any = None
@@ -80,14 +73,6 @@ def _get_cw_config() -> CloudWatchConfig:
     if _cw_config is None:
         _cw_config = CloudWatchConfig()
     return _cw_config
-
-
-def _get_redis_config() -> RedisConfig:
-    """Return the module-level RedisConfig singleton, creating on first call."""
-    global _redis_config  # noqa: PLW0603
-    if _redis_config is None:
-        _redis_config = RedisConfig()  # type: ignore[call-arg]
-    return _redis_config
 
 
 def _get_publisher() -> EventBridgePublisher:
@@ -157,6 +142,38 @@ async def _emit_metric(name: str, value: float, unit: str = "Milliseconds") -> N
     )
 
 
+def _parse_bytes(file_bytes: bytes, s3_key: str, doc_id: str) -> list[dict[str, Any]]:
+    """Parse a PDF or DOCX byte stream into chunks.
+
+    Args:
+        file_bytes: Raw document bytes.
+        s3_key: The original S3 key — used for the file extension.
+        doc_id: The document ID — used for error messages.
+
+    Returns:
+        A list of chunk dicts (the document_parser chunk schema).
+
+    Raises:
+        ScannedPdfError: If the PDF has no extractable text layer.
+        ValueError: If the file extension is unsupported.
+    """
+    extension: str = s3_key.rsplit(".", maxsplit=1)[-1].lower() if "." in s3_key else ""
+
+    if extension == "pdf":
+        strategy: str = get_pdf_strategy(file_bytes)
+        if strategy == "vision":
+            raise ScannedPdfError(
+                f"PDF has no extractable text layer: doc_id={doc_id} s3_key={s3_key}"
+            )
+        blocks: list[dict[str, Any]] = extract_text_blocks(file_bytes)
+        return clean_and_chunk(blocks)
+
+    if extension == "docx":
+        return parse_docx(file_bytes)
+
+    raise ValueError(f"Unsupported file extension: '{extension}' for s3_key={s3_key}")
+
+
 # ---------------------------------------------------------------------------
 # Lambda entry point
 # ---------------------------------------------------------------------------
@@ -173,12 +190,10 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     Flow:
         1. Validate SQS event via Pydantic.
         2. Download file bytes from S3.
-        3. Compute content hash for cache key.
-        4. Check Redis cache -- skip parsing on hit.
-        5. Parse PDF or DOCX into chunks.
-        6. Write chunks + receipt handle to Redis.
-        7. Publish ``DocumentParsed`` event.
-        8. Emit ``ParseDuration`` CloudWatch metric.
+        3. Parse PDF or DOCX into chunks (no cache; every invocation parses fresh).
+        4. Build the inline-or-S3 payload envelope.
+        5. Publish ``DocumentParsed`` event with the envelope.
+        6. Emit ``ParseDuration`` CloudWatch metric.
 
     Args:
         event: Raw SQS Lambda event dict.
@@ -206,56 +221,26 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     bucket: str = os.environ["S3_BUCKET"]
     file_bytes: bytes = await _download_s3(_get_s3(), bucket, s3_key)
 
-    # 3. Content hash
-    content_hash: str = hashlib.sha256(file_bytes).hexdigest()
-    cache_key: str = key_chunks(content_hash)
+    # 3. Parse
+    chunks: list[dict[str, Any]] = _parse_bytes(file_bytes, s3_key, doc_id)
+    logger.info("Parsed %d chunks: doc_id=%s", len(chunks), doc_id)
 
-    # 4. Get Redis connection
-    redis = await get_redis(_get_redis_config())
+    # 4. Build payload envelope (inline if small, S3 if large)
+    envelope: dict[str, Any] = inline_or_s3(
+        payload=chunks,
+        doc_id=doc_id,
+        stage="chunks",
+        s3_client=_get_s3(),
+        bucket=bucket,
+    )
 
-    # 5. Cache check
-    cached: str | None = await redis.get(cache_key)
-    if cached is not None:
-        logger.info("Cache hit for chunks: key=%s doc_id=%s", cache_key, doc_id)
-    else:
-        # 6. Parse based on extension
-        extension: str = s3_key.rsplit(".", maxsplit=1)[-1].lower() if "." in s3_key else ""
-
-        if extension == "pdf":
-            strategy: str = get_pdf_strategy(file_bytes)
-            if strategy == "vision":
-                raise ScannedPdfError(
-                    f"PDF has no extractable text layer: doc_id={doc_id} s3_key={s3_key}"
-                )
-            blocks: list[dict[str, Any]] = extract_text_blocks(file_bytes)
-            chunks: list[dict[str, Any]] = clean_and_chunk(blocks)
-        elif extension == "docx":
-            chunks = parse_docx(file_bytes)
-        else:
-            raise ValueError(f"Unsupported file extension: '{extension}' for s3_key={s3_key}")
-
-        # 7. Write chunks to Redis
-        await redis_set_json(redis, cache_key, chunks, get_cache_config().ttl_chunks)
-        logger.info(
-            "Cached %d chunks: key=%s doc_id=%s",
-            len(chunks),
-            cache_key,
-            doc_id,
-        )
-
-    # 8. Store SQS receipt handle
-    receipt_key: str = key_receipt(doc_id)
-    await redis.setex(receipt_key, get_cache_config().ttl_receipt, record.receiptHandle)
-
-    # 9. Publish DocumentParsed event
-    detail: DocumentParsedDetail = DocumentParsedDetail(
-        docId=doc_id,
-        chunksCacheKey=cache_key,
-        contentHash=content_hash,
+    # 5. Publish DocumentParsed event
+    detail: DocumentParsedDetail = DocumentParsedDetail.model_validate(
+        {"docId": doc_id, "payload": envelope}
     )
     await _get_publisher().publish("DocumentParsed", detail.model_dump(by_alias=True))
 
-    # 10. Emit metric
+    # 6. Emit metric
     duration_ms: float = (time.monotonic() - start) * 1000
     await _emit_metric("ParseDuration", duration_ms)
 

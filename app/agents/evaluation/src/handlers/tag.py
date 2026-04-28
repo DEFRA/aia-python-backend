@@ -1,30 +1,28 @@
 """Stage 4 -- Tag Lambda handler.
 
-Triggered by EventBridge (DocumentParsed). Tags document chunks with
-security/governance taxonomy labels and publishes a ``DocumentTagged`` event.
+Triggered by EventBridge ``DocumentParsed``.  Resolves parsed chunks from the
+event's payload envelope (inline or S3), tags them with security/governance
+taxonomy labels via the LLM, and publishes a ``DocumentTagged`` event with the
+tagged chunks carried in another payload envelope.  No Redis state is kept.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import time
 from typing import Any
 
 import anthropic
+import boto3
 
 from src.agents.schemas import DocumentParsedDetail, DocumentTaggedDetail, TaggedChunk
 from src.agents.tagging_agent import TaggingAgent
-from src.config import CloudWatchConfig, EventBridgeConfig, RedisConfig, TaggingAgentConfig
+from src.config import CloudWatchConfig, EventBridgeConfig, TaggingAgentConfig
 from src.utils.eventbridge import EventBridgePublisher
-from src.utils.redis_client import (
-    get_cache_config,
-    get_redis,
-    key_chunks,
-    key_tagged,
-    redis_get_json,
-    redis_set_json,
-)
+from src.utils.payload_offload import inline_or_s3, resolve_payload
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -33,8 +31,8 @@ logger.setLevel(logging.INFO)
 # Module-level singletons (cold-start reuse)
 # ---------------------------------------------------------------------------
 
-_redis_config: RedisConfig | None = None
 _publisher: EventBridgePublisher | None = None
+_s3: Any = None
 _cw: Any = None
 _cw_config: CloudWatchConfig | None = None
 _tagging_config: TaggingAgentConfig | None = None
@@ -52,16 +50,9 @@ def _get_tagging_config() -> TaggingAgentConfig:
     """Return the module-level TaggingAgentConfig singleton, creating on first call."""
     global _tagging_config  # noqa: PLW0603
     if _tagging_config is None:
-        _tagging_config = TaggingAgentConfig()
+        # ``model`` is populated from yaml / env via BaseSettings sources.
+        _tagging_config = TaggingAgentConfig()  # type: ignore[call-arg]
     return _tagging_config
-
-
-def _get_redis_config() -> RedisConfig:
-    """Return the module-level RedisConfig singleton, creating on first call."""
-    global _redis_config  # noqa: PLW0603
-    if _redis_config is None:
-        _redis_config = RedisConfig()  # type: ignore[call-arg]
-    return _redis_config
 
 
 def _get_publisher() -> EventBridgePublisher:
@@ -72,12 +63,18 @@ def _get_publisher() -> EventBridgePublisher:
     return _publisher
 
 
+def _get_s3() -> Any:
+    """Return the module-level S3 client singleton, creating on first call."""
+    global _s3  # noqa: PLW0603
+    if _s3 is None:
+        _s3 = boto3.client("s3")
+    return _s3
+
+
 def _get_cw() -> Any:
     """Return the module-level CloudWatch client singleton, creating on first call."""
     global _cw  # noqa: PLW0603
     if _cw is None:
-        import boto3
-
         _cw = boto3.client("cloudwatch")
     return _cw
 
@@ -120,13 +117,11 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     Flow:
         1. Validate EventBridge event via Pydantic.
-        2. Cache check -- if ``tagged:{content_hash}`` exists, skip Claude.
-        3. On cache miss:
-           a. Load chunks from Redis.
-           b. Create Anthropic client and run TaggingAgent.
-           c. Cache tagged output with TTL_TAGGED.
-        4. Publish ``DocumentTagged`` event.
-        5. Emit CloudWatch metrics (non-cached runs only).
+        2. Resolve chunks from the inline-or-S3 payload envelope.
+        3. Run the tagging agent against the chunks.
+        4. Build the tagged-chunks payload envelope (inline or S3).
+        5. Publish ``DocumentTagged`` event.
+        6. Emit CloudWatch metrics.
 
     Args:
         event: Raw EventBridge Lambda event dict.
@@ -134,65 +129,56 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     Returns:
         Dict with ``statusCode`` 200 on success.
-
-    Raises:
-        RuntimeError: If chunks cache key is missing from Redis.
     """
     start: float = time.monotonic()
 
     # 1. Validate EventBridge event
     detail: DocumentParsedDetail = DocumentParsedDetail.model_validate(event["detail"])
     doc_id: str = detail.docId
-    content_hash: str = detail.contentHash
 
-    logger.info("Stage 4 Tag: doc_id=%s content_hash=%s", doc_id, content_hash)
+    logger.info("Stage 4 Tag: doc_id=%s", doc_id)
 
-    # 2. Get Redis connection
-    redis = await get_redis(_get_redis_config())
+    bucket: str = os.environ["S3_BUCKET"]
+    s3_client: Any = _get_s3()
 
-    # 3. Cache check
-    tagged_cache_key: str = key_tagged(content_hash)
-    cached: Any = await redis_get_json(redis, tagged_cache_key)
+    # 2. Resolve chunks payload envelope
+    chunks_bytes: bytes = resolve_payload(
+        envelope=detail.payload.model_dump(),
+        s3_client=s3_client,
+        bucket=bucket,
+    )
+    chunks: list[dict[str, Any]] = json.loads(chunks_bytes)
 
-    if cached is not None:
-        logger.info("Cache hit for tagged output: key=%s doc_id=%s", tagged_cache_key, doc_id)
-    else:
-        # 4a. Load chunks from Redis
-        chunks_cache_key: str = key_chunks(content_hash)
-        chunks: list[dict[str, Any]] | None = await redis_get_json(redis, chunks_cache_key)
-        if chunks is None:
-            raise RuntimeError(
-                f"Chunks cache miss: key={chunks_cache_key} doc_id={doc_id}. "
-                "Stage 3 may not have completed."
-            )
+    # 3. Run TaggingAgent
+    client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic()
+    agent: TaggingAgent = TaggingAgent(client=client, config=_get_tagging_config())
+    tagged_chunks: list[TaggedChunk] = await agent.tag(chunks)
 
-        # 4b. Run TaggingAgent
-        client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic()
-        agent: TaggingAgent = TaggingAgent(client=client, config=_get_tagging_config())
-        tagged_chunks: list[TaggedChunk] = await agent.tag(chunks)
+    # 4. Build payload envelope for the tagged output
+    serialised: list[dict[str, Any]] = [tc.model_dump() for tc in tagged_chunks]
+    envelope: dict[str, Any] = inline_or_s3(
+        payload=serialised,
+        doc_id=doc_id,
+        stage="tagged",
+        s3_client=s3_client,
+        bucket=bucket,
+    )
 
-        # 4c. Cache tagged output
-        serialised: list[dict[str, Any]] = [tc.model_dump() for tc in tagged_chunks]
-        await redis_set_json(redis, tagged_cache_key, serialised, get_cache_config().ttl_tagged)
-        logger.info(
-            "Cached %d tagged chunks: key=%s doc_id=%s",
-            len(tagged_chunks),
-            tagged_cache_key,
-            doc_id,
-        )
-
-        # 5. Emit metrics (non-cached path only)
-        duration_ms: float = (time.monotonic() - start) * 1000
-        await _emit_metric("TaggingDuration", duration_ms)
-        await _emit_metric("TaggedChunkCount", float(len(tagged_chunks)), unit="Count")
-
-    # 6. Publish DocumentTagged event
-    tagged_detail: DocumentTaggedDetail = DocumentTaggedDetail(
-        docId=doc_id,
-        taggedCacheKey=tagged_cache_key,
-        contentHash=content_hash,
+    # 5. Publish DocumentTagged event
+    tagged_detail: DocumentTaggedDetail = DocumentTaggedDetail.model_validate(
+        {"docId": doc_id, "payload": envelope}
     )
     await _get_publisher().publish("DocumentTagged", tagged_detail.model_dump(by_alias=True))
 
-    logger.info("Stage 4 complete: doc_id=%s", doc_id)
+    # 6. Emit metrics
+    duration_ms: float = (time.monotonic() - start) * 1000
+    await _emit_metric("TaggingDuration", duration_ms)
+    await _emit_metric("TaggedChunkCount", float(len(tagged_chunks)), unit="Count")
+
+    logger.info(
+        "Stage 4 complete: doc_id=%s tagged=%d duration_ms=%.1f",
+        doc_id,
+        len(tagged_chunks),
+        duration_ms,
+    )
     return {"statusCode": 200}

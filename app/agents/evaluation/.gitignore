@@ -11,14 +11,15 @@ venv/
 # VSCode
 .vscode/
 
-# Binary / large files
-files/*.pdf
-files/*.pptx
-files/*.docx
-files/*.html
+# Ignore everything except the two committed inputs
+files/*
+!files/system_overview.md
+!files/aws_event_driven_orchestration.md
+!files/system_input_output_SQS.md
 
-# Data files
-data/
+# Data files — ignore everything except the committed input doc
+data/*
+!data/fictional_product_logistics_report.pdf
 
 # Test / build artefacts
 .pytest_cache/

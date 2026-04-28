@@ -1,9 +1,8 @@
 """Pydantic schemas for security assessment agent I/O and EventBridge detail payloads."""
 
-from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Reference(BaseModel):
@@ -48,7 +47,7 @@ class FinalSummary(BaseModel):
 
 
 class LLMResponseMeta(BaseModel):
-    """Metadata extracted from the raw Anthropic API response."""
+    """Metadata extracted from the raw LLM API response."""
 
     model: str
     input_tokens: int
@@ -77,24 +76,58 @@ class TaggedChunk(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# PayloadEnvelope — discriminated union for inline-or-S3 cross-stage handoff
+# ---------------------------------------------------------------------------
+
+
+class InlinePayload(BaseModel):
+    """A payload carried inline as a JSON-serialised string."""
+
+    inline: str
+
+    model_config = {"extra": "forbid"}
+
+
+class S3KeyPayload(BaseModel):
+    """A payload offloaded to S3 — the receiver dereferences this key."""
+
+    s3Key: str
+
+    model_config = {"extra": "forbid"}
+
+
+# Discriminated union: exactly one of ``inline`` or ``s3Key`` must be present.
+PayloadEnvelope = Annotated[
+    InlinePayload | S3KeyPayload,
+    Field(union_mode="left_to_right"),
+]
+
+
+# ---------------------------------------------------------------------------
 # EventBridge detail payload models — one per pipeline stage transition
 # ---------------------------------------------------------------------------
 
 
 class DocumentParsedDetail(BaseModel):
-    """Detail payload for the ``DocumentParsed`` event (Stage 3 -> 4)."""
+    """Detail payload for the ``DocumentParsed`` event (Stage 3 -> 4).
+
+    The ``payload`` envelope carries the parsed chunks either inline or via an
+    S3 reference (see ``src.utils.payload_offload``).
+    """
 
     docId: str
-    chunksCacheKey: str
-    contentHash: str
+    payload: PayloadEnvelope
 
 
 class DocumentTaggedDetail(BaseModel):
-    """Detail payload for the ``DocumentTagged`` event (Stage 4 -> 5)."""
+    """Detail payload for the ``DocumentTagged`` event (Stage 4 -> 5).
+
+    The ``payload`` envelope carries the tagged chunks either inline or via an
+    S3 reference (see ``src.utils.payload_offload``).
+    """
 
     docId: str
-    taggedCacheKey: str
-    contentHash: str
+    payload: PayloadEnvelope
 
 
 class SectionsReadyDetail(BaseModel):
@@ -108,61 +141,23 @@ class SectionsReadyDetail(BaseModel):
 
 
 class AgentCompleteDetail(BaseModel):
-    """Detail payload for the ``AgentComplete`` event (Stage 6 -> 7)."""
+    """Detail payload for the ``AgentComplete`` event (Stage 6 terminus marker)."""
 
     docId: str
     agentType: str
 
 
-class AllAgentsCompleteDetail(BaseModel):
-    """Detail payload for the ``AllAgentsComplete`` event (Stage 7 trigger)."""
-
-    docId: str
-
-
-class DocumentCompiledDetail(BaseModel):
-    """Detail payload for the ``DocumentCompiled`` event (Stage 7 -> 8)."""
-
-    docId: str
-    compiledCacheKey: str
-
-
-class ResultPersistedDetail(BaseModel):
-    """Detail payload for the ``ResultPersisted`` event (Stage 8a -> 9)."""
-
-    docId: str
-
-
-class DocumentMovedDetail(BaseModel):
-    """Detail payload for the ``DocumentMoved`` event (Stage 8b -> 9)."""
-
-    docId: str
-    destination: Literal["completed", "error"]
-
-
-class FinaliseReadyDetail(BaseModel):
-    """Detail payload for the ``FinaliseReady`` event (Stage 8 fan-in -> 9)."""
-
-    docId: str
-
-
-class PipelineCompleteDetail(BaseModel):
-    """Detail payload for the ``PipelineComplete`` event (Stage 9 terminal)."""
-
-    docId: str
-    status: Literal["completed", "error"]
-
-
 # ---------------------------------------------------------------------------
-# Stage 6 -> Stage 7 status message and Stage 7 compiled output
+# Stage 6 SQS Status queue terminal output
 # ---------------------------------------------------------------------------
 
 
 class AgentStatusMessage(BaseModel):
     """Status message published by Stage 6 agents to the SQS Status queue.
 
-    Consumed by the Stage 7 compile handler.  The ``result`` field is a
-    validated ``AgentResult`` on success, or ``None`` on failure.
+    Terminal output of the pipeline.  Consumed by an external front-end /
+    downstream service (out of scope for this codebase).  The ``result``
+    field is a validated ``AgentResult`` on success, or ``None`` on failure.
     """
 
     docId: str
@@ -172,29 +167,3 @@ class AgentStatusMessage(BaseModel):
     durationMs: float
     completedAt: str
     errorMessage: str | None = None
-
-
-class CompiledContentBlock(BaseModel):
-    """A single content block inside a ``CompiledResult``.
-
-    Mirrors the front-end contract where each block is a typed chunk of
-    rendered output (currently only markdown text).
-    """
-
-    type: Literal["text"]
-    text: str
-
-
-class CompiledResult(BaseModel):
-    """Compiled report payload produced by the Stage 7 compile handler.
-
-    Shape matches the front-end response contract -- a list of typed content
-    blocks plus scorecard and per-agent tables rendered into the first block.
-    """
-
-    docId: str
-    type: str
-    generatedAt: datetime
-    content: list[CompiledContentBlock]
-    status: Literal["completed", "error"]
-    processedAt: datetime

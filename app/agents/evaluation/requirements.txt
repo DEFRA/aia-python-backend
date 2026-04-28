@@ -5,7 +5,7 @@
 # AWS
 boto3>=1.34.0
 
-# Claude API
+# LLM provider SDK
 anthropic==0.79.0
 
 # Config and validation
@@ -17,9 +17,6 @@ python-dotenv==1.2.1
 # Database
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.0
-
-# Redis
-redis>=5.0.0
 
 # Document parsing
 PyMuPDF>=1.24.0
