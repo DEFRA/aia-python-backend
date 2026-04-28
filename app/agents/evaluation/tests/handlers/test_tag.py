@@ -1,4 +1,4 @@
-"""Tests for the Stage 4 Tag Lambda handler."""
+"""Tests for the Stage 4 Tag Lambda handler (Plan 11)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import fakeredis.aioredis as fakeredis
 import pytest
 from pydantic import ValidationError
 
@@ -15,19 +14,18 @@ from src.agents.schemas import DocumentParsedDetail
 
 def _make_event(
     doc_id: str = "doc-001",
-    content_hash: str = "abc123",
+    inline_chunks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a minimal EventBridge event dict for Stage 4."""
-    detail: DocumentParsedDetail = DocumentParsedDetail(
-        docId=doc_id,
-        chunksCacheKey=f"chunks:{content_hash}",
-        contentHash=content_hash,
+    chunks: list[dict[str, Any]] = inline_chunks if inline_chunks is not None else _sample_chunks()
+    detail: DocumentParsedDetail = DocumentParsedDetail.model_validate(
+        {"docId": doc_id, "payload": {"inline": json.dumps(chunks)}}
     )
     return {"detail": detail.model_dump(by_alias=True)}
 
 
 def _sample_chunks() -> list[dict[str, Any]]:
-    """Return sample parsed chunks as stored in Redis."""
+    """Return sample parsed chunks (Stage 3 output)."""
     return [
         {
             "chunk_index": 0,
@@ -40,7 +38,7 @@ def _sample_chunks() -> list[dict[str, Any]]:
 
 
 def _sample_tagged() -> list[dict[str, Any]]:
-    """Return sample tagged chunk dicts as stored in Redis."""
+    """Return sample tagged chunk dicts."""
     return [
         {
             "chunk_index": 0,
@@ -52,12 +50,6 @@ def _sample_tagged() -> list[dict[str, Any]]:
             "reason": "Covers MFA.",
         },
     ]
-
-
-@pytest.fixture
-def fake_redis() -> fakeredis.FakeRedis:
-    """Create a fresh fake Redis instance per test."""
-    return fakeredis.FakeRedis(decode_responses=True)
 
 
 # -------------------------------------------------------------------------
@@ -77,17 +69,9 @@ async def test_handler_validates_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cache_hit_skips_claude(fake_redis: fakeredis.FakeRedis) -> None:
-    """On a tagged cache hit, handler should skip Claude and still publish."""
+async def test_tag_handler_resolves_inline_chunks() -> None:
+    """The handler reads chunks via resolve_payload from the inline envelope."""
     event: dict[str, Any] = _make_event()
-    content_hash: str = "abc123"
-
-    # Pre-populate tagged cache
-    await fake_redis.setex(
-        f"tagged:{content_hash}",
-        86_400,
-        json.dumps(_sample_tagged()),
-    )
 
     published: list[dict[str, Any]] = []
 
@@ -97,57 +81,19 @@ async def test_cache_hit_skips_claude(fake_redis: fakeredis.FakeRedis) -> None:
     mock_publisher: MagicMock = MagicMock()
     mock_publisher.publish = _mock_publish
 
-    with (
-        patch("src.handlers.tag.get_redis", return_value=fake_redis),
-        patch("src.handlers.tag._get_redis_config", return_value=MagicMock()),
-        patch("src.handlers.tag._get_publisher", return_value=mock_publisher),
-    ):
-        from src.handlers.tag import _handler
-
-        result: dict[str, Any] = await _handler(event, {})
-
-    expected_status: int = 200
-    assert result["statusCode"] == expected_status
-    assert len(published) == 1
-    assert published[0]["detail_type"] == "DocumentTagged"
-
-
-@pytest.mark.asyncio
-async def test_cache_miss_calls_agent_and_caches(fake_redis: fakeredis.FakeRedis) -> None:
-    """On a cache miss, handler should call TaggingAgent, cache results, and publish."""
-    event: dict[str, Any] = _make_event()
-    content_hash: str = "abc123"
-
-    # Pre-populate chunks (Stage 3 output)
-    await fake_redis.setex(
-        f"chunks:{content_hash}",
-        86_400,
-        json.dumps(_sample_chunks()),
-    )
-
-    published: list[dict[str, Any]] = []
-
-    async def _mock_publish(detail_type: str, detail: dict[str, Any]) -> None:
-        published.append({"detail_type": detail_type, "detail": detail})
-
-    mock_publisher: MagicMock = MagicMock()
-    mock_publisher.publish = _mock_publish
-
-    # Mock the TaggingAgent
     from src.agents.schemas import TaggedChunk
 
     mock_tagged: list[TaggedChunk] = [TaggedChunk.model_validate(t) for t in _sample_tagged()]
-
     mock_agent: MagicMock = MagicMock()
     mock_agent.tag = AsyncMock(return_value=mock_tagged)
 
     with (
-        patch("src.handlers.tag.get_redis", return_value=fake_redis),
-        patch("src.handlers.tag._get_redis_config", return_value=MagicMock()),
         patch("src.handlers.tag._get_publisher", return_value=mock_publisher),
+        patch("src.handlers.tag._get_s3", return_value=MagicMock()),
         patch("src.handlers.tag.TaggingAgent", return_value=mock_agent),
         patch("src.handlers.tag.anthropic"),
         patch("src.handlers.tag._emit_metric", new_callable=AsyncMock),
+        patch.dict("os.environ", {"S3_BUCKET": "test-bucket"}),
     ):
         from src.handlers.tag import _handler
 
@@ -155,51 +101,117 @@ async def test_cache_miss_calls_agent_and_caches(fake_redis: fakeredis.FakeRedis
 
     expected_status: int = 200
     assert result["statusCode"] == expected_status
-
-    # Verify agent was called
+    # Tagging agent ran
     mock_agent.tag.assert_called_once()
-
-    # Verify result was cached in Redis
-    cached_raw: str | None = await fake_redis.get(f"tagged:{content_hash}")
-    assert cached_raw is not None
-    cached: list[dict[str, Any]] = json.loads(cached_raw)
-    assert len(cached) == 1
-    assert cached[0]["tags"] == ["authentication"]
-
-    # Verify event was published
+    # Inline payload published downstream
     assert len(published) == 1
     assert published[0]["detail_type"] == "DocumentTagged"
-    assert published[0]["detail"]["contentHash"] == content_hash
+    detail: dict[str, Any] = published[0]["detail"]
+    assert "payload" in detail
+    assert "inline" in detail["payload"]
 
 
 @pytest.mark.asyncio
-async def test_chunks_cache_miss_raises(fake_redis: fakeredis.FakeRedis) -> None:
-    """Handler should raise RuntimeError if chunks are not in Redis."""
-    event: dict[str, Any] = _make_event()
+async def test_tag_handler_resolves_s3_chunks() -> None:
+    """When the parsed-event envelope is s3Key, the handler downloads from S3."""
+    chunks_json: bytes = json.dumps(_sample_chunks()).encode("utf-8")
+
+    detail = DocumentParsedDetail.model_validate(
+        {"docId": "doc-s3", "payload": {"s3Key": "state/doc-s3/chunks.json"}}
+    )
+    event: dict[str, Any] = {"detail": detail.model_dump(by_alias=True)}
+
+    body_obj: Any = MagicMock()
+    body_obj.read.return_value = chunks_json
+    s3_client: Any = MagicMock()
+    s3_client.get_object.return_value = {"Body": body_obj}
+
+    async def _mock_publish(detail_type: str, detail: dict[str, Any]) -> None:
+        pass
+
+    mock_publisher: MagicMock = MagicMock()
+    mock_publisher.publish = _mock_publish
+
+    from src.agents.schemas import TaggedChunk
+
+    mock_tagged: list[TaggedChunk] = [TaggedChunk.model_validate(t) for t in _sample_tagged()]
+    mock_agent: MagicMock = MagicMock()
+    mock_agent.tag = AsyncMock(return_value=mock_tagged)
 
     with (
-        patch("src.handlers.tag.get_redis", return_value=fake_redis),
-        patch("src.handlers.tag._get_redis_config", return_value=MagicMock()),
+        patch("src.handlers.tag._get_publisher", return_value=mock_publisher),
+        patch("src.handlers.tag._get_s3", return_value=s3_client),
+        patch("src.handlers.tag.TaggingAgent", return_value=mock_agent),
+        patch("src.handlers.tag.anthropic"),
+        patch("src.handlers.tag._emit_metric", new_callable=AsyncMock),
+        patch.dict("os.environ", {"S3_BUCKET": "test-bucket"}),
     ):
         from src.handlers.tag import _handler
 
-        with pytest.raises(RuntimeError, match="Chunks cache miss"):
-            await _handler(event, {})
+        await _handler(event, {})
+
+    s3_client.get_object.assert_called_once_with(
+        Bucket="test-bucket", Key="state/doc-s3/chunks.json"
+    )
+    mock_agent.tag.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_handler_emits_metrics_on_cache_miss(
-    fake_redis: fakeredis.FakeRedis,
-) -> None:
+async def test_tag_handler_offloads_large_tagged_payload() -> None:
+    """When the tagged output exceeds the threshold, the event uses an s3Key envelope."""
+    event: dict[str, Any] = _make_event()
+
+    big_tagged_dicts: list[dict[str, Any]] = [
+        {
+            "chunk_index": i,
+            "page": 1,
+            "is_heading": False,
+            "text": "x" * 1000,
+            "relevant": True,
+            "tags": ["authentication"],
+            "reason": "padding",
+        }
+        for i in range(300)
+    ]
+
+    from src.agents.schemas import TaggedChunk
+
+    big_tagged: list[TaggedChunk] = [TaggedChunk.model_validate(t) for t in big_tagged_dicts]
+
+    mock_agent: MagicMock = MagicMock()
+    mock_agent.tag = AsyncMock(return_value=big_tagged)
+
+    s3_client: Any = MagicMock()
+
+    published: list[dict[str, Any]] = []
+
+    async def _mock_publish(detail_type: str, detail: dict[str, Any]) -> None:
+        published.append({"detail_type": detail_type, "detail": detail})
+
+    mock_publisher: MagicMock = MagicMock()
+    mock_publisher.publish = _mock_publish
+
+    with (
+        patch("src.handlers.tag._get_publisher", return_value=mock_publisher),
+        patch("src.handlers.tag._get_s3", return_value=s3_client),
+        patch("src.handlers.tag.TaggingAgent", return_value=mock_agent),
+        patch("src.handlers.tag.anthropic"),
+        patch("src.handlers.tag._emit_metric", new_callable=AsyncMock),
+        patch.dict("os.environ", {"S3_BUCKET": "test-bucket"}),
+    ):
+        from src.handlers.tag import _handler
+
+        await _handler(event, {})
+
+    assert len(published) == 1
+    assert published[0]["detail"]["payload"]["s3Key"] == "state/doc-001/tagged.json"
+    s3_client.put_object.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handler_emits_metrics() -> None:
     """Handler should emit TaggingDuration and TaggedChunkCount metrics."""
     event: dict[str, Any] = _make_event()
-    content_hash: str = "abc123"
-
-    await fake_redis.setex(
-        f"chunks:{content_hash}",
-        86_400,
-        json.dumps(_sample_chunks()),
-    )
 
     async def _mock_publish(detail_type: str, detail: dict[str, Any]) -> None:
         pass
@@ -216,18 +228,17 @@ async def test_handler_emits_metrics_on_cache_miss(
     mock_emit: AsyncMock = AsyncMock()
 
     with (
-        patch("src.handlers.tag.get_redis", return_value=fake_redis),
-        patch("src.handlers.tag._get_redis_config", return_value=MagicMock()),
         patch("src.handlers.tag._get_publisher", return_value=mock_publisher),
+        patch("src.handlers.tag._get_s3", return_value=MagicMock()),
         patch("src.handlers.tag.TaggingAgent", return_value=mock_agent),
         patch("src.handlers.tag.anthropic"),
         patch("src.handlers.tag._emit_metric", mock_emit),
+        patch.dict("os.environ", {"S3_BUCKET": "test-bucket"}),
     ):
         from src.handlers.tag import _handler
 
         await _handler(event, {})
 
-    # Should have been called twice: TaggingDuration + TaggedChunkCount
     expected_metric_calls: int = 2
     assert mock_emit.call_count == expected_metric_calls
     call_names: list[str] = [call.args[0] for call in mock_emit.call_args_list]

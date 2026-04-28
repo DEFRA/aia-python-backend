@@ -20,11 +20,14 @@ _SAMPLE_JSON: str = (
     "]}"
 )
 
+# Filename the loader expects (matches LocalRunnerConfig default).
+_ASSESSMENT_FILENAME: str = "sample_policy_assessment.json"
+
 
 @pytest.fixture
 def security_data_dir(tmp_path: Path) -> Path:
     """Write a synthetic Security-category JSON to ``tmp_path`` and return it."""
-    (tmp_path / "sample.json").write_text(_SAMPLE_JSON, encoding="utf-8")
+    (tmp_path / _ASSESSMENT_FILENAME).write_text(_SAMPLE_JSON, encoding="utf-8")
     return tmp_path
 
 
@@ -55,8 +58,8 @@ def test_unknown_category_raises_unknown_category_error(tmp_path: Path) -> None:
 
 
 def test_malformed_file_raises_validation_error(tmp_path: Path) -> None:
-    """A malformed JSON file in data_dir bubbles up as ValidationError."""
-    bad: Path = tmp_path / "broken.json"
+    """A malformed assessment file at the configured path raises ValidationError."""
+    bad: Path = tmp_path / _ASSESSMENT_FILENAME
     bad.write_text('{"not": "the right shape"}', encoding="utf-8")
 
     with pytest.raises(ValidationError):
@@ -65,7 +68,7 @@ def test_malformed_file_raises_validation_error(tmp_path: Path) -> None:
 
 def test_explicit_data_dir_with_valid_file(tmp_path: Path) -> None:
     """Passing data_dir with a valid file should load from there."""
-    sample = tmp_path / "sample.json"
+    sample = tmp_path / _ASSESSMENT_FILENAME
     sample.write_text(
         (
             '{"uuid": "u1", "url": "https://example.test/page", '

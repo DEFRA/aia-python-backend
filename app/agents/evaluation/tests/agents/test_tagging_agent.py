@@ -32,7 +32,7 @@ def _make_chunk(index: int, text: str = "sample text", page: int = 1) -> dict[st
 
 
 def _make_tagged_response(chunks: list[dict[str, Any]]) -> str:
-    """Build a JSON string mimicking Claude's tagging response."""
+    """Build a JSON string mimicking the LLM's tagging response."""
     items: list[dict[str, Any]] = [
         {
             "chunk_index": c["chunk_index"],
@@ -81,7 +81,7 @@ async def test_tag_returns_list_of_tagged_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_tag_batching_with_more_than_batch_size() -> None:
-    """tag() should call Claude once per batch when chunks exceed BATCH_SIZE."""
+    """tag() should call the LLM once per batch when chunks exceed BATCH_SIZE."""
     batch_size: int = 3
     chunks: list[dict[str, Any]] = [_make_chunk(i) for i in range(7)]
 
@@ -109,7 +109,7 @@ async def test_tag_batching_with_more_than_batch_size() -> None:
 
 @pytest.mark.asyncio
 async def test_tag_strips_code_fences() -> None:
-    """tag() should handle Claude responses wrapped in markdown code fences."""
+    """tag() should handle the LLM responses wrapped in markdown code fences."""
     chunks: list[dict[str, Any]] = [_make_chunk(0)]
     inner: str = _make_tagged_response(chunks)
     fenced: str = f"```json\n{inner}\n```"
@@ -124,7 +124,7 @@ async def test_tag_strips_code_fences() -> None:
 
 @pytest.mark.asyncio
 async def test_tag_uses_temperature_zero() -> None:
-    """tag() should call Claude with temperature=0.0 for deterministic output."""
+    """tag() should call the LLM with temperature=0.0 for deterministic output."""
     chunks: list[dict[str, Any]] = [_make_chunk(0)]
     response_text: str = _make_tagged_response(chunks)
     client: MagicMock = _mock_client(response_text)
@@ -138,7 +138,7 @@ async def test_tag_uses_temperature_zero() -> None:
 
 @pytest.mark.asyncio
 async def test_tag_empty_chunks_returns_empty() -> None:
-    """tag() with an empty list should return an empty list without calling Claude."""
+    """tag() with an empty list should return an empty list without calling the LLM."""
     client: MagicMock = MagicMock()
     client.messages.create = AsyncMock()
 

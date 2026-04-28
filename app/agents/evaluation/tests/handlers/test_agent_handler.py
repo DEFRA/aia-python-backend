@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from src.agents.schemas import (
     AgentResult,
+    AgentStatusMessage,
     AssessmentRow,
     FinalSummary,
     LLMResponseMeta,
@@ -49,7 +50,7 @@ _SAMPLE_RESULT: AgentResult = AgentResult(
         ),
     ],
     metadata=LLMResponseMeta(
-        model="claude-sonnet-4-6",
+        model="test-model",
         input_tokens=100,
         output_tokens=50,
         stop_reason="end_turn",
@@ -201,11 +202,11 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("SQS_STATUS_QUEUE_URL", "https://sqs.example.com/status")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    sent_messages: list[dict[str, Any]] = []
+    sent_messages: list[AgentStatusMessage] = []
     mock_agent_cls: MagicMock = _make_mock_agent()
 
-    async def mock_send(sqs_client: Any, queue_url: str, message_body: dict[str, Any]) -> None:
-        sent_messages.append(message_body)
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
+        sent_messages.append(message)
 
     async def mock_emit(
         name: str, value: float, unit: str = "Milliseconds", agent_type: str = ""
@@ -227,10 +228,16 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
 
     assert result == {"statusCode": 200}
     assert len(sent_messages) == 1
-    assert sent_messages[0]["status"] == "completed"
-    assert sent_messages[0]["agentType"] == "security"
-    assert sent_messages[0]["docId"] == "doc-001"
-    assert "result" in sent_messages[0]
+    assert sent_messages[0].status == "completed"
+    assert sent_messages[0].agentType == "security"
+    assert sent_messages[0].docId == "doc-001"
+    assert sent_messages[0].result is not None
+    # Round-trip the JSON serialisation through the schema to prove the
+    # published body is a valid ``AgentStatusMessage`` (Pydantic Boundary rule).
+    round_trip: AgentStatusMessage = AgentStatusMessage.model_validate_json(
+        sent_messages[0].model_dump_json()
+    )
+    assert round_trip.status == "completed"
     mock_agent_cls.assert_called_once()
 
     # Verify the agent instance was called with typed QuestionItem objects and category_url
@@ -247,11 +254,11 @@ async def test_handler_dispatches_to_governance_agent(monkeypatch: pytest.Monkey
     monkeypatch.setenv("SQS_STATUS_QUEUE_URL", "https://sqs.example.com/status")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    sent_messages: list[dict[str, Any]] = []
+    sent_messages: list[AgentStatusMessage] = []
     mock_agent_cls: MagicMock = _make_mock_agent()
 
-    async def mock_send(sqs_client: Any, queue_url: str, message_body: dict[str, Any]) -> None:
-        sent_messages.append(message_body)
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
+        sent_messages.append(message)
 
     async def mock_emit(
         name: str, value: float, unit: str = "Milliseconds", agent_type: str = ""
@@ -273,8 +280,8 @@ async def test_handler_dispatches_to_governance_agent(monkeypatch: pytest.Monkey
 
     assert result == {"statusCode": 200}
     assert len(sent_messages) == 1
-    assert sent_messages[0]["status"] == "completed"
-    assert sent_messages[0]["agentType"] == "governance"
+    assert sent_messages[0].status == "completed"
+    assert sent_messages[0].agentType == "governance"
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +302,10 @@ async def test_handler_resolves_s3_payload(monkeypatch: pytest.MonkeyPatch) -> N
         downloaded_keys.append(key)
         return "Document from S3"
 
-    sent_messages: list[dict[str, Any]] = []
+    sent_messages: list[AgentStatusMessage] = []
 
-    async def mock_send(sqs_client: Any, queue_url: str, message_body: dict[str, Any]) -> None:
-        sent_messages.append(message_body)
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
+        sent_messages.append(message)
 
     async def mock_emit(
         name: str, value: float, unit: str = "Milliseconds", agent_type: str = ""
@@ -327,7 +334,7 @@ async def test_handler_resolves_s3_payload(monkeypatch: pytest.MonkeyPatch) -> N
         await _handler(event, {})
 
     assert downloaded_keys == ["payloads/doc-001.txt"]
-    assert sent_messages[0]["status"] == "completed"
+    assert sent_messages[0].status == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -343,13 +350,13 @@ async def test_handler_publishes_failure_on_agent_exception(
     monkeypatch.setenv("SQS_STATUS_QUEUE_URL", "https://sqs.example.com/status")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    sent_messages: list[dict[str, Any]] = []
+    sent_messages: list[AgentStatusMessage] = []
     mock_agent_cls: MagicMock = _make_mock_agent(
-        side_effect=ValueError("Claude returned garbage"),
+        side_effect=ValueError("LLM returned garbage"),
     )
 
-    async def mock_send(sqs_client: Any, queue_url: str, message_body: dict[str, Any]) -> None:
-        sent_messages.append(message_body)
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
+        sent_messages.append(message)
 
     async def mock_emit(
         name: str, value: float, unit: str = "Milliseconds", agent_type: str = ""
@@ -371,9 +378,16 @@ async def test_handler_publishes_failure_on_agent_exception(
 
     assert result == {"statusCode": 200}
     assert len(sent_messages) == 1
-    assert sent_messages[0]["status"] == "failed"
-    assert sent_messages[0]["agentType"] == "security"
-    assert "Claude returned garbage" in sent_messages[0]["errorMessage"]
+    assert sent_messages[0].status == "failed"
+    assert sent_messages[0].agentType == "security"
+    assert sent_messages[0].errorMessage is not None
+    assert "LLM returned garbage" in sent_messages[0].errorMessage
+    # Round-trip through the schema: failure messages also serialise/parse cleanly.
+    round_trip: AgentStatusMessage = AgentStatusMessage.model_validate_json(
+        sent_messages[0].model_dump_json()
+    )
+    assert round_trip.status == "failed"
+    assert round_trip.result is None
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +404,7 @@ async def test_handler_emits_success_metrics(monkeypatch: pytest.MonkeyPatch) ->
     emitted_metrics: list[dict[str, Any]] = []
     mock_agent_cls: MagicMock = _make_mock_agent()
 
-    async def mock_send(sqs_client: Any, queue_url: str, message_body: dict[str, Any]) -> None:
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
         pass
 
     async def mock_emit(
@@ -430,7 +444,7 @@ async def test_handler_emits_failure_metrics(monkeypatch: pytest.MonkeyPatch) ->
     emitted_metrics: list[dict[str, Any]] = []
     mock_agent_cls: MagicMock = _make_mock_agent(side_effect=RuntimeError("boom"))
 
-    async def mock_send(sqs_client: Any, queue_url: str, message_body: dict[str, Any]) -> None:
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
         pass
 
     async def mock_emit(
@@ -475,3 +489,64 @@ async def test_handler_raises_on_unknown_agent_type(
 
     with pytest.raises(ValueError, match="Unknown agent type"):
         await _handler(event, {})
+
+
+# ---------------------------------------------------------------------------
+# Plan 11 — terminal SQS Status output, no EventBridge / Redis side effects
+# ---------------------------------------------------------------------------
+
+
+def test_agent_module_imports_no_redis_or_eventbridge() -> None:
+    """Plan 11: agent.py must not pull in the redis_client or EventBridge publisher."""
+    from pathlib import Path
+
+    import src.handlers.agent as agent_module
+
+    source: str = Path(agent_module.__file__).read_text(encoding="utf-8")
+    assert "redis_client" not in source
+    assert "EventBridgePublisher" not in source
+    assert "publish_event" not in source
+
+
+@pytest.mark.asyncio
+async def test_agent_handler_emits_status_message_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On success the handler publishes exactly one SQS Status message and nothing else."""
+    monkeypatch.setenv("SQS_STATUS_QUEUE_URL", "https://sqs.example.com/status")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    sent_messages: list[AgentStatusMessage] = []
+    mock_agent_cls: MagicMock = _make_mock_agent()
+
+    async def mock_send(sqs_client: Any, queue_url: str, message: AgentStatusMessage) -> None:
+        sent_messages.append(message)
+
+    async def mock_emit(
+        name: str, value: float, unit: str = "Milliseconds", agent_type: str = ""
+    ) -> None:
+        pass
+
+    with (
+        patch("src.handlers.agent._send_status_message", side_effect=mock_send),
+        patch("src.handlers.agent._emit_metric", side_effect=mock_emit),
+        patch("src.handlers.agent._get_sqs", return_value=MagicMock()),
+        patch("src.handlers.agent._get_cw", return_value=MagicMock()),
+        patch.dict(AGENT_REGISTRY, {"security": mock_agent_cls}),
+        patch("src.handlers.agent.anthropic") as mock_anthropic_mod,
+    ):
+        mock_anthropic_mod.AsyncAnthropic.return_value = MagicMock()
+
+        event: dict[str, Any] = _build_sqs_event(agent_type="security")
+        result: dict[str, Any] = await _handler(event, {})
+
+    assert result == {"statusCode": 200}
+    assert len(sent_messages) == 1
+    msg: AgentStatusMessage = sent_messages[0]
+    assert msg.status == "completed"
+    assert msg.agentType == "security"
+    assert msg.docId == "doc-001"
+    # Verify the published JSON deserialises back into a valid ``AgentStatusMessage``
+    # — exercises the full Pydantic-boundary round-trip.
+    rebuilt: AgentStatusMessage = AgentStatusMessage.model_validate_json(msg.model_dump_json())
+    assert rebuilt == msg

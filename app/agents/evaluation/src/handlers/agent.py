@@ -2,15 +2,15 @@
 
 Triggered by SQS Tasks queue (batch size = 1). Resolves the agent type from
 the message body, runs the specialist agent, and publishes the result to the
-SQS Status queue. Catches agent exceptions and publishes failure status rather
-than letting them propagate -- the downstream compile stage needs visibility
-of both successes and failures.
+SQS Status queue -- the terminal output of the pipeline. Catches agent
+exceptions and publishes a failure status message rather than letting them
+propagate, so external consumers see one Status message per ``(docId, agentType)``
+regardless of outcome.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -23,7 +23,7 @@ import boto3
 from pydantic import BaseModel
 
 from src.agents.governance_agent import GovernanceAgent
-from src.agents.schemas import AgentResult, QuestionItem
+from src.agents.schemas import AgentResult, AgentStatusMessage, QuestionItem
 from src.agents.security_agent import SecurityAgent
 from src.config import (
     CloudWatchConfig,
@@ -192,21 +192,22 @@ async def _download_s3_payload(s3_client: Any, bucket: str, key: str) -> str:
 async def _send_status_message(
     sqs_client: Any,
     queue_url: str,
-    message_body: dict[str, Any],
+    message: AgentStatusMessage,
 ) -> None:
-    """Send a message to the SQS Status queue via ``run_in_executor``.
+    """Send a typed status message to the SQS Status queue via ``run_in_executor``.
 
     Args:
         sqs_client: A boto3 SQS client.
         queue_url: URL of the SQS Status queue.
-        message_body: JSON-serialisable dict to send as the message body.
+        message: Validated ``AgentStatusMessage`` (serialised at this boundary).
     """
+    body_json: str = message.model_dump_json()
     loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         lambda: sqs_client.send_message(
             QueueUrl=queue_url,
-            MessageBody=json.dumps(message_body),
+            MessageBody=body_json,
         ),
     )
 
@@ -323,14 +324,14 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         completed_at: str = datetime.now(tz=UTC).isoformat()
 
         # 5. Publish success to SQS Status queue
-        status_message: dict[str, Any] = {
-            "docId": doc_id,
-            "agentType": agent_type,
-            "status": "completed",
-            "result": result.model_dump(),
-            "durationMs": round(duration_ms, 1),
-            "completedAt": completed_at,
-        }
+        status_message: AgentStatusMessage = AgentStatusMessage(
+            docId=doc_id,
+            agentType=agent_type,
+            status="completed",
+            result=result,
+            durationMs=round(duration_ms, 1),
+            completedAt=completed_at,
+        )
         await _send_status_message(_get_sqs(), status_queue_url, status_message)
 
         # 7. Emit success metrics
@@ -344,8 +345,9 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             duration_ms,
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — Plan 11: any agent failure is funnelled to the SQS Status queue (terminal sink); we never want to crash the Lambda and trigger SQS retry on a deterministic LLM/parse error.
         duration_ms = (time.monotonic() - start) * 1000
+        completed_at = datetime.now(tz=UTC).isoformat()
 
         # 6. Publish failure to SQS Status queue
         logger.error(
@@ -354,12 +356,15 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             agent_type,
             exc,
         )
-        failure_message: dict[str, Any] = {
-            "docId": doc_id,
-            "agentType": agent_type,
-            "status": "failed",
-            "errorMessage": str(exc),
-        }
+        failure_message: AgentStatusMessage = AgentStatusMessage(
+            docId=doc_id,
+            agentType=agent_type,
+            status="failed",
+            result=None,
+            durationMs=round(duration_ms, 1),
+            completedAt=completed_at,
+            errorMessage=str(exc),
+        )
         await _send_status_message(_get_sqs(), status_queue_url, failure_message)
 
         # 7. Emit failure metrics

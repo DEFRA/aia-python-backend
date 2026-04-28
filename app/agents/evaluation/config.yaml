@@ -1,8 +1,8 @@
 # Centralised operational configuration for the Defra evaluation pipeline.
 #
 # Precedence (highest wins): environment variables > values in this file > code defaults.
-# Secrets (API keys, DB credentials, Redis host) MUST NOT be placed in this file; they
-# are sourced from environment variables only.
+# Secrets (API keys, DB credentials) MUST NOT be placed in this file; they are sourced
+# from environment variables only.
 
 # --- Agent models ---
 agents:
@@ -23,18 +23,6 @@ agents:
     batch_size: 15
     max_tokens: 4096
     temperature: 0.0
-
-# --- Cache TTLs (seconds) ---
-cache:
-  ttl_chunks: 86400         # 24h - parsed content
-  ttl_tagged: 86400         # 24h - tagging output
-  ttl_sections: 3600        # 1h  - per-agent sections
-  ttl_questions: 3600       # 1h  - checklist questions
-  ttl_result: 3600          # 1h  - agent results
-  ttl_results_count: 1800   # 30m - Stage 7 fan-in counter
-  ttl_compiled: 3600        # 1h  - compiled report
-  ttl_stage8_count: 1800    # 30m - Stage 8 fan-in counter
-  ttl_receipt: 900          # 15m - SQS receipt handle
 
 # --- AWS infrastructure ---
 cloudwatch:
@@ -77,14 +65,16 @@ parser:
   min_text_chars: 100       # threshold for text-based vs scanned PDF
   chunk_max_chars: 1500     # soft max characters per chunk
 
-# --- Redis connection defaults (non-secret) ---
-redis:
-  port: 6379
-  ssl: true
-  db: 0
-  socket_timeout: 5.0
-  socket_connect_timeout: 3.0
-
 # --- Database connection defaults (non-secret) ---
 database:
   port: 5432
+
+# --- Local runner (main.py end-to-end driver) ---
+local_runner:
+  data_dir: "data"
+  assessment_filename: "sample_policy_assessment.json"
+  default_input_filename: "fictional_product_logistics_report.pdf"
+  output_filename_template: "pipeline_output_{doc_id}.json"
+  display_keys:
+    security: "Security"
+    governance: "Governance"

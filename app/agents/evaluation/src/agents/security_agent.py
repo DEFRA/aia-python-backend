@@ -63,9 +63,9 @@ def _format_questions_block(questions: list[QuestionItem]) -> str:
 
 
 class SecurityAgent:
-    """Async Claude agent that assesses a document against a security checklist.
+    """Async LLM agent that assesses a document against a security checklist.
 
-    Sends a document and a set of checklist questions to Claude and parses
+    Sends a document and a set of checklist questions to the LLM and parses
     the structured JSON response into typed Pydantic models.
     """
 
@@ -103,8 +103,8 @@ class SecurityAgent:
             and API response metadata.
 
         Raises:
-            APIError: If the Anthropic API call fails.
-            ValueError: If the Claude response cannot be parsed into the expected schema.
+            APIError: If the LLM API call fails.
+            ValueError: If the LLM response cannot be parsed into the expected schema.
         """
         user_content: str = SECURITY_ASSESSMENT_USER_TEMPLATE.format(
             document=document,
@@ -121,7 +121,7 @@ class SecurityAgent:
                 messages=[{"role": "user", "content": user_content}],
             )
         except APIError as exc:
-            logger.error("Claude API error during assessment: %s", exc)
+            logger.error("LLM API error during assessment: %s", exc)
             raise
 
         meta: LLMResponseMeta = _extract_response_meta(response, self.agent_config.model)
@@ -142,7 +142,7 @@ class SecurityAgent:
             )
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.error(
-                "Failed to parse Claude response. raw_text=%.200s error=%s",
+                "Failed to parse LLM response. raw_text=%.200s error=%s",
                 raw_text,
                 exc,
             )

@@ -67,9 +67,9 @@ def _format_questions_block(questions: list[QuestionItem]) -> str:
 
 
 class GovernanceAgent:
-    """Async Claude agent that assesses a document against an information-governance checklist.
+    """Async LLM agent that assesses a document against an information-governance checklist.
 
-    Sends a document and a set of governance checklist questions to Claude and parses
+    Sends a document and a set of governance checklist questions to the LLM and parses
     the structured JSON response into typed Pydantic models. Covers UK GDPR,
     DPA 2018, and public-sector records-management requirements.
     """
@@ -108,8 +108,8 @@ class GovernanceAgent:
             and API response metadata.
 
         Raises:
-            APIError: If the Anthropic API call fails.
-            ValueError: If the Claude response cannot be parsed into the expected schema.
+            APIError: If the LLM API call fails.
+            ValueError: If the LLM response cannot be parsed into the expected schema.
         """
         user_content: str = GOVERNANCE_ASSESSMENT_USER_TEMPLATE.format(
             document=document,
@@ -126,7 +126,7 @@ class GovernanceAgent:
                 messages=[{"role": "user", "content": user_content}],
             )
         except APIError as exc:
-            logger.error("Claude API error during assessment: %s", exc)
+            logger.error("LLM API error during assessment: %s", exc)
             raise
 
         meta: LLMResponseMeta = _extract_response_meta(response, self.agent_config.model)
@@ -147,7 +147,7 @@ class GovernanceAgent:
             )
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.error(
-                "Failed to parse Claude response. raw_text=%.200s error=%s",
+                "Failed to parse LLM response. raw_text=%.200s error=%s",
                 raw_text,
                 exc,
             )

@@ -1,4 +1,4 @@
-"""Tests for src/handlers/parse.py — Stage 3 Parse Lambda handler."""
+"""Tests for src/handlers/parse.py — Stage 3 Parse Lambda handler (Plan 11)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import fakeredis.aioredis as fakeredis_aio
 import fitz
 import pytest
 
@@ -89,30 +88,30 @@ class TestSqsEventValidation:
 
 @pytest.mark.asyncio
 class TestParseHandler:
-    """Integration tests for the parse handler _handler function."""
+    """Integration tests for the parse handler `_handler` function."""
 
-    async def test_pdf_parsed_and_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Happy path: PDF downloaded, parsed, cached in Redis, event published."""
+    async def test_parse_handler_publishes_event_with_inline_chunks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Small parsed output is carried inline in the DocumentParsed event."""
         pdf_bytes: bytes = _make_text_pdf()
-        fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
-        # Mock S3 download
         async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return pdf_bytes
 
         published: list[dict[str, Any]] = []
-
         mock_publisher = MagicMock()
         mock_publisher.publish = AsyncMock(
             side_effect=lambda dt, d: published.append({"detail_type": dt, "detail": d})
         )
 
+        s3_client = MagicMock()  # never called for inline path
+
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
-        monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
         monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: mock_publisher)
+        monkeypatch.setattr("src.handlers.parse._get_s3", lambda: s3_client)
         monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
-        monkeypatch.setenv("REDIS_HOST", "localhost")
 
         from src.handlers.parse import _handler
 
@@ -120,21 +119,30 @@ class TestParseHandler:
         result: dict[str, Any] = await _handler(event, {})
 
         assert result["statusCode"] == 200
-        # Event was published
         assert len(published) == 1
         assert published[0]["detail_type"] == "DocumentParsed"
+        detail: dict[str, Any] = published[0]["detail"]
+        assert detail["docId"] == "doc-001"
+        # Payload envelope is inline (small parse)
+        assert "payload" in detail
+        assert "inline" in detail["payload"]
+        assert "s3Key" not in detail["payload"]
+        # No Redis fields any more
+        assert "chunksCacheKey" not in detail
+        assert "contentHash" not in detail
+        # No S3 offload occurred
+        s3_client.put_object.assert_not_called()
 
-    async def test_cache_hit_skips_parsing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When chunks are already cached, parsing is skipped."""
-        pdf_bytes: bytes = _make_text_pdf()
-        fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
+    async def test_parse_handler_offloads_large_chunks_to_s3(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Large parsed output is offloaded to S3 via the s3Key envelope."""
+        pdf_bytes: bytes = _make_text_pdf("Lorem ipsum dolor. ")
 
-        # Pre-populate cache
-        import hashlib
-
-        content_hash: str = hashlib.sha256(pdf_bytes).hexdigest()
-        cache_key: str = f"chunks:{content_hash}"
-        await fake_redis.setex(cache_key, 3600, json.dumps([{"chunk_index": 0, "text": "cached"}]))
+        # Force the offload path by patching the parser to emit a huge payload.
+        big_chunks: list[dict[str, Any]] = [
+            {"chunk_index": i, "page": 1, "text": "x" * 1000} for i in range(300)
+        ]
 
         async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return pdf_bytes
@@ -145,20 +153,30 @@ class TestParseHandler:
             side_effect=lambda dt, d: published.append({"detail_type": dt, "detail": d})
         )
 
+        s3_client = MagicMock()
+        s3_client.put_object = MagicMock()
+
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
-        monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
         monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: mock_publisher)
+        monkeypatch.setattr("src.handlers.parse._get_s3", lambda: s3_client)
         monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
+        # Bypass real PDF parsing — return the big synthetic chunks
+        monkeypatch.setattr("src.handlers.parse.get_pdf_strategy", lambda b: "text")
+        monkeypatch.setattr("src.handlers.parse.extract_text_blocks", lambda b: [])
+        monkeypatch.setattr("src.handlers.parse.clean_and_chunk", lambda blocks: big_chunks)
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
-        monkeypatch.setenv("REDIS_HOST", "localhost")
 
         from src.handlers.parse import _handler
 
-        event: dict[str, Any] = _make_sqs_event()
+        event: dict[str, Any] = _make_sqs_event(s3_key="uploads/big.pdf", doc_id="big-doc")
         result: dict[str, Any] = await _handler(event, {})
 
         assert result["statusCode"] == 200
-        assert len(published) == 1
+        # Envelope used s3Key, not inline
+        detail: dict[str, Any] = published[0]["detail"]
+        assert "s3Key" in detail["payload"]
+        assert detail["payload"]["s3Key"] == "state/big-doc/chunks.json"
+        s3_client.put_object.assert_called_once()
 
     async def test_scanned_pdf_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A scanned PDF (no text layer) raises ScannedPdfError."""
@@ -167,17 +185,14 @@ class TestParseHandler:
         blank_bytes: bytes = blank_doc.tobytes()
         blank_doc.close()
 
-        fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
-
         async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return blank_bytes
 
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
-        monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
         monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: MagicMock())
+        monkeypatch.setattr("src.handlers.parse._get_s3", lambda: MagicMock())
         monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
-        monkeypatch.setenv("REDIS_HOST", "localhost")
 
         from src.handlers.parse import _handler
 
@@ -188,17 +203,15 @@ class TestParseHandler:
 
     async def test_unsupported_extension_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A non-PDF/DOCX file extension raises ValueError."""
-        fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
         async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return b"not a real file"
 
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
-        monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
         monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: MagicMock())
+        monkeypatch.setattr("src.handlers.parse._get_s3", lambda: MagicMock())
         monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
-        monkeypatch.setenv("REDIS_HOST", "localhost")
 
         from src.handlers.parse import _handler
 
@@ -208,9 +221,8 @@ class TestParseHandler:
             await _handler(event, {})
 
     async def test_docx_parsed_successfully(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """DOCX files are parsed via parse_docx."""
+        """DOCX files are parsed via parse_docx and emitted in the inline envelope."""
         docx_bytes: bytes = _make_docx_bytes()
-        fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
         async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return docx_bytes
@@ -222,11 +234,10 @@ class TestParseHandler:
         )
 
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
-        monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
         monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: mock_publisher)
+        monkeypatch.setattr("src.handlers.parse._get_s3", lambda: MagicMock())
         monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
-        monkeypatch.setenv("REDIS_HOST", "localhost")
 
         from src.handlers.parse import _handler
 
@@ -236,29 +247,4 @@ class TestParseHandler:
         assert result["statusCode"] == 200
         assert len(published) == 1
         assert published[0]["detail_type"] == "DocumentParsed"
-
-    async def test_receipt_handle_stored_in_redis(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The SQS receipt handle is written to Redis for later deletion."""
-        pdf_bytes: bytes = _make_text_pdf()
-        fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
-
-        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
-            return pdf_bytes
-
-        mock_publisher = MagicMock()
-        mock_publisher.publish = AsyncMock()
-
-        monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
-        monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
-        monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: mock_publisher)
-        monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
-        monkeypatch.setenv("S3_BUCKET", "test-bucket")
-        monkeypatch.setenv("REDIS_HOST", "localhost")
-
-        from src.handlers.parse import _handler
-
-        event: dict[str, Any] = _make_sqs_event(doc_id="doc-receipt-test")
-        await _handler(event, {})
-
-        stored: str | None = await fake_redis.get("receipt:doc-receipt-test")
-        assert stored == "test-receipt-handle-abc"
+        assert "inline" in published[0]["detail"]["payload"]
