@@ -147,6 +147,23 @@ class SecurityAgentConfig(BaseSettings):
     settings_customise_sources = _make_customise_sources("agents.security")
 
 
+class GovernanceAgentConfig(BaseSettings):
+    """Configuration for the GovernanceAgent.
+
+    Drives the UK information-governance assessment (DPA 2018, UK GDPR,
+    public-sector records management). Mirrors ``SecurityAgentConfig``
+    so the two agents are interchangeable from the registry's perspective.
+    """
+
+    model: str = Field(default="claude-opus-4-6", alias="GOVERNANCE_MODEL")
+    max_tokens: int = Field(default=4096, alias="GOVERNANCE_MAX_TOKENS")
+    temperature: float = Field(default=0.0, alias="GOVERNANCE_TEMPERATURE")
+    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+    settings_customise_sources = _make_customise_sources("agents.governance")
+
+
 class GDPRAgentConfig(BaseSettings):
     """Configuration for the GDPRComplianceAgent."""
 
@@ -157,54 +174,6 @@ class GDPRAgentConfig(BaseSettings):
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
     settings_customise_sources = _make_customise_sources("agents.gdpr")
-
-
-class DataAgentConfig(BaseSettings):
-    """Configuration for the DataAgent."""
-
-    model: str = Field(default="claude-sonnet-4-6", alias="DATA_MODEL")
-    max_tokens: int = Field(default=4096, alias="DATA_MAX_TOKENS")
-    temperature: float = Field(default=0.0, alias="DATA_TEMPERATURE")
-    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("agents.data")
-
-
-class RiskAgentConfig(BaseSettings):
-    """Configuration for the RiskAgent."""
-
-    model: str = Field(default="claude-sonnet-4-6", alias="RISK_MODEL")
-    max_tokens: int = Field(default=4096, alias="RISK_MAX_TOKENS")
-    temperature: float = Field(default=0.0, alias="RISK_TEMPERATURE")
-    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("agents.risk")
-
-
-class EAAgentConfig(BaseSettings):
-    """Configuration for the EAAgent."""
-
-    model: str = Field(default="claude-sonnet-4-6", alias="EA_MODEL")
-    max_tokens: int = Field(default=4096, alias="EA_MAX_TOKENS")
-    temperature: float = Field(default=0.0, alias="EA_TEMPERATURE")
-    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("agents.ea")
-
-
-class SolutionAgentConfig(BaseSettings):
-    """Configuration for the SolutionAgent."""
-
-    model: str = Field(default="claude-sonnet-4-6", alias="SOLUTION_MODEL")
-    max_tokens: int = Field(default=4096, alias="SOLUTION_MAX_TOKENS")
-    temperature: float = Field(default=0.0, alias="SOLUTION_TEMPERATURE")
-    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("agents.solution")
 
 
 class TaggingAgentConfig(BaseSettings):
@@ -265,7 +234,7 @@ class PipelineConfig(BaseSettings):
     """Pipeline-wide constants (agent types, SQS limits, tag routing)."""
 
     agent_types: list[str] = Field(
-        default_factory=lambda: ["security", "data", "risk", "ea", "solution"],
+        default_factory=lambda: ["security", "governance"],
         alias="PIPELINE_AGENT_TYPES",
     )
     sqs_inline_limit: int = Field(default=240_000, alias="PIPELINE_SQS_INLINE_LIMIT")

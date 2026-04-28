@@ -1,6 +1,8 @@
 """Tests for RedisConfig and EventBridgeConfig."""
 
-from src.config import EventBridgeConfig, RedisConfig
+import pytest
+
+from src.config import EventBridgeConfig, GovernanceAgentConfig, PipelineConfig, RedisConfig
 
 
 def test_redis_config_defaults() -> None:
@@ -44,3 +46,29 @@ def test_eventbridge_config_custom_values() -> None:
     )
     assert config.bus_name == "custom-bus"
     assert config.region == "us-east-1"
+
+
+def test_pipeline_config_default_agent_types() -> None:
+    """PipelineConfig should default ``agent_types`` to the two surviving agents.
+
+    The yaml file overrides this default with the same list, but the field
+    default itself is the contract: any caller building a ``PipelineConfig``
+    in isolation (e.g. inside a test) must see the new two-agent set.
+    """
+    config: PipelineConfig = PipelineConfig.model_construct()
+    assert config.agent_types == ["security", "governance"]
+
+
+def test_governance_agent_config_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GovernanceAgentConfig should read GOVERNANCE_* env vars via Pydantic aliases."""
+    monkeypatch.setenv("GOVERNANCE_MODEL", "claude-test-model")
+    monkeypatch.setenv("GOVERNANCE_MAX_TOKENS", "2048")
+    monkeypatch.setenv("GOVERNANCE_TEMPERATURE", "0.5")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    config: GovernanceAgentConfig = GovernanceAgentConfig()
+
+    assert config.model == "claude-test-model"
+    assert config.max_tokens == 2048
+    assert config.temperature == 0.5
+    assert config.api_key == "test-key"

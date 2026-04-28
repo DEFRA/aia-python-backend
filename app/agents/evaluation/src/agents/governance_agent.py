@@ -1,4 +1,8 @@
-"""Solution design specialist agent for document-based assessment."""
+"""Information governance assessment agent.
+
+Mirrors ``SecurityAgent`` exactly: the only differences are the prompt module,
+the config class, and the top-level JSON key (``"Governance"``).
+"""
 
 import json
 import logging
@@ -8,9 +12,18 @@ import anthropic
 from anthropic import APIError
 from anthropic.types import Message, TextBlock
 
-from src.agents.prompts.solution import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
-from src.agents.schemas import AgentResult, AssessmentRow, FinalSummary, LLMResponseMeta
-from src.config import SolutionAgentConfig
+from src.agents.prompts.governance import (
+    GOVERNANCE_ASSESSMENT_SYSTEM_PROMPT,
+    GOVERNANCE_ASSESSMENT_USER_TEMPLATE,
+)
+from src.agents.schemas import (
+    AgentResult,
+    AssessmentRow,
+    FinalSummary,
+    LLMResponseMeta,
+    QuestionItem,
+)
+from src.config import GovernanceAgentConfig
 from src.utils.helpers import strip_code_fences
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -34,29 +47,37 @@ def _extract_response_meta(response: Message, model: str) -> LLMResponseMeta:
     )
 
 
-def _format_questions_block(questions: list[str]) -> str:
-    """Format a list of questions into a numbered string block.
+def _format_questions_block(questions: list[QuestionItem]) -> str:
+    """Format checklist items into a numbered XML block.
+
+    Each item is rendered as ``<question reference="...">...</question>`` so the
+    LLM sees the per-question reference identifier alongside the question text
+    and can echo it back into the output ``Reference`` field.
 
     Args:
-        questions: Ordered list of checklist question strings.
+        questions: Ordered list of ``QuestionItem`` objects.
 
     Returns:
         A single string with each question on its own numbered line.
     """
-    return "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
+    return "\n".join(
+        f'{i}. <question reference="{item.reference}">{item.question}</question>'
+        for i, item in enumerate(questions, start=1)
+    )
 
 
-class SolutionAgent:
-    """Async Claude agent that assesses a document against a solution design checklist.
+class GovernanceAgent:
+    """Async Claude agent that assesses a document against an information-governance checklist.
 
-    Sends a document and a set of checklist questions to Claude and parses
-    the structured JSON response into typed Pydantic models.
+    Sends a document and a set of governance checklist questions to Claude and parses
+    the structured JSON response into typed Pydantic models. Covers UK GDPR,
+    DPA 2018, and public-sector records-management requirements.
     """
 
     def __init__(
         self,
         client: anthropic.AsyncAnthropic,
-        agent_config: SolutionAgentConfig,
+        agent_config: GovernanceAgentConfig,
     ) -> None:
         """Initialise the agent with an Anthropic client and configuration.
 
@@ -65,18 +86,22 @@ class SolutionAgent:
             agent_config: Configuration controlling model, token limit, and temperature.
         """
         self.client: anthropic.AsyncAnthropic = client
-        self.agent_config: SolutionAgentConfig = agent_config
+        self.agent_config: GovernanceAgentConfig = agent_config
 
     async def assess(
         self,
         document: str,
-        questions: list[str],
+        questions: list[QuestionItem],
+        category_url: str,
     ) -> AgentResult:
-        """Run a solution design assessment of a document against a checklist.
+        """Run a governance assessment of a document against a checklist.
 
         Args:
             document: Full text of the document to assess.
-            questions: Ordered list of checklist questions to evaluate against.
+            questions: Ordered list of ``QuestionItem`` objects pairing each
+                checklist question with its authoritative reference identifier.
+            category_url: Category-level reference URL echoed into every
+                assessment row's ``Reference.url`` field.
 
         Returns:
             An AgentResult containing per-question assessments, a final summary,
@@ -86,9 +111,10 @@ class SolutionAgent:
             APIError: If the Anthropic API call fails.
             ValueError: If the Claude response cannot be parsed into the expected schema.
         """
-        user_content: str = USER_PROMPT_TEMPLATE.format(
+        user_content: str = GOVERNANCE_ASSESSMENT_USER_TEMPLATE.format(
             document=document,
             questions=_format_questions_block(questions),
+            category_url=category_url,
         )
 
         try:
@@ -96,11 +122,11 @@ class SolutionAgent:
                 model=self.agent_config.model,
                 max_tokens=self.agent_config.max_tokens,
                 temperature=self.agent_config.temperature,
-                system=SYSTEM_PROMPT,
+                system=GOVERNANCE_ASSESSMENT_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APIError as exc:
-            logger.error("Claude API error during solution assessment: %s", exc)
+            logger.error("Claude API error during assessment: %s", exc)
             raise
 
         meta: LLMResponseMeta = _extract_response_meta(response, self.agent_config.model)
@@ -109,14 +135,14 @@ class SolutionAgent:
         try:
             cleaned: str = strip_code_fences(raw_text)
             payload: dict[str, object] = json.loads(cleaned)
-            solution_block: dict[str, object] = payload["Solution"]  # type: ignore[assignment]
+            governance_block: dict[str, object] = payload["Governance"]  # type: ignore[assignment]
             assessments: list[AssessmentRow] = [
                 AssessmentRow.model_validate(row)
-                for row in solution_block["Assessments"]  # type: ignore[attr-defined]
+                for row in cast(list[object], governance_block["Assessments"])
             ]
             final_summary: FinalSummary | None = (
-                FinalSummary.model_validate(solution_block["Final_Summary"])
-                if "Final_Summary" in solution_block
+                FinalSummary.model_validate(governance_block["Final_Summary"])
+                if "Final_Summary" in governance_block
                 else None
             )
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
@@ -128,7 +154,7 @@ class SolutionAgent:
             raise ValueError(f"Could not parse assessment response: {exc}") from exc
 
         logger.info(
-            "Solution assessment complete: %d questions, %d input / %d output tokens",
+            "Assessment complete: %d questions, %d input / %d output tokens",
             len(assessments),
             meta.input_tokens,
             meta.output_tokens,

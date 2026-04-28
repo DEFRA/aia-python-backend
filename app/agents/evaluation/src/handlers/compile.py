@@ -56,11 +56,8 @@ logger.setLevel(logging.INFO)
 # ---------------------------------------------------------------------------
 
 AGENT_DISPLAY_NAMES: dict[str, str] = {
-    "security": "Security Policy",
-    "data": "Data Policy",
-    "risk": "Risk & Compliance Policy",
-    "ea": "Enterprise Architecture",
-    "solution": "Solution Designs",
+    "security": "Security",
+    "governance": "Information Governance",
 }
 
 _RATING_ICONS: dict[str, str] = {
@@ -257,8 +254,8 @@ def _overall_label(red: int, amber: int, green: int) -> str:
 def _infer_doc_type(results: dict[str, AgentResult | None]) -> str:
     """Derive the document type label for the compiled report.
 
-    Uses the solution agent's interpretation text when available; falls back
-    to ``"Security Assessment"`` when the solution agent failed or produced
+    Uses the security agent's interpretation text when available; falls back
+    to ``"Security Assessment"`` when the security agent failed or produced
     no summary.
 
     Args:
@@ -267,10 +264,10 @@ def _infer_doc_type(results: dict[str, AgentResult | None]) -> str:
     Returns:
         A short document-type label for the front-end response.
     """
-    solution: AgentResult | None = results.get("solution")
-    if solution is None or solution.final_summary is None:
+    security: AgentResult | None = results.get("security")
+    if security is None or security.final_summary is None:
         return _DEFAULT_DOC_TYPE
-    interpretation: str = solution.final_summary.Interpretation.strip()
+    interpretation: str = security.final_summary.Interpretation.strip()
     if not interpretation:
         return _DEFAULT_DOC_TYPE
     return interpretation

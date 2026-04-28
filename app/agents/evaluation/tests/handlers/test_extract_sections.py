@@ -34,7 +34,7 @@ def _make_event(
 
 
 def _sample_tagged_chunks() -> list[dict[str, Any]]:
-    """Return sample tagged chunks covering multiple agent types."""
+    """Return sample tagged chunks covering both surviving agent types."""
     return [
         {
             "chunk_index": 0,
@@ -58,7 +58,7 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
             "chunk_index": 2,
             "page": 2,
             "is_heading": True,
-            "text": "Data Governance Section",
+            "text": "Records of Processing",
             "relevant": False,
             "tags": [],
             "reason": None,
@@ -67,19 +67,19 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
             "chunk_index": 3,
             "page": 2,
             "is_heading": False,
-            "text": "Data classification policy is enforced.",
+            "text": "ROPA maintained per Article 30.",
             "relevant": True,
-            "tags": ["data_governance"],
-            "reason": "Covers data classification.",
+            "tags": ["records_of_processing"],
+            "reason": "Covers ROPA.",
         },
         {
             "chunk_index": 4,
             "page": 3,
             "is_heading": False,
-            "text": "Compliance audit runs quarterly.",
+            "text": "Retention schedule reviewed annually.",
             "relevant": True,
-            "tags": ["compliance"],
-            "reason": "Covers compliance.",
+            "tags": ["data_retention"],
+            "reason": "Covers retention.",
         },
         {
             "chunk_index": 5,
@@ -94,7 +94,7 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
             "chunk_index": 6,
             "page": 4,
             "is_heading": True,
-            "text": "Incident Response",
+            "text": "Encryption",
             "relevant": False,
             "tags": [],
             "reason": None,
@@ -103,10 +103,10 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
             "chunk_index": 7,
             "page": 4,
             "is_heading": False,
-            "text": "IR plan tested annually.",
+            "text": "TLS 1.3 enforced on all endpoints.",
             "relevant": True,
-            "tags": ["incident_response"],
-            "reason": "Covers IR.",
+            "tags": ["encryption"],
+            "reason": "Covers encryption.",
         },
     ]
 
@@ -143,15 +143,16 @@ class TestExtractSectionsForAgent:
         texts: list[str] = [c["text"] for c in result]
         assert "MFA is enforced for all users." in texts
 
-    def test_security_agent_excludes_data_governance_only(self) -> None:
-        """Security agent should not include chunks tagged only with data_governance."""
+    def test_security_agent_excludes_governance_only_chunks(self) -> None:
+        """Security agent should not include chunks tagged only with governance tags."""
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
         result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "security")
 
         texts: list[str] = [c["text"] for c in result]
-        assert "Data classification policy is enforced." not in texts
+        assert "ROPA maintained per Article 30." not in texts
+        assert "Retention schedule reviewed annually." not in texts
 
     def test_heading_injection(self) -> None:
         """The nearest preceding heading should be included before a matched chunk."""
@@ -206,38 +207,28 @@ class TestExtractSectionsForAgent:
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
-        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "solution")
+        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "security")
 
         indices: list[int] = [c["chunk_index"] for c in result]
         assert indices == sorted(indices)
 
-    def test_data_agent_gets_compliance_and_data_governance(self) -> None:
-        """Data agent should include data_governance and compliance tagged chunks."""
+    def test_governance_agent_gets_records_and_retention(self) -> None:
+        """Governance agent should include records_of_processing and data_retention chunks."""
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
-        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "data")
+        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "governance")
 
         body_texts: list[str] = [c["text"] for c in result if not c.get("is_heading")]
-        assert "Data classification policy is enforced." in body_texts
-        assert "Compliance audit runs quarterly." in body_texts
-
-    def test_risk_agent_includes_incident_response(self) -> None:
-        """Risk agent should include incident_response tagged chunks."""
-        from src.handlers.extract_sections import extract_sections_for_agent
-
-        chunks: list[dict[str, Any]] = _sample_tagged_chunks()
-        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "risk")
-
-        body_texts: list[str] = [c["text"] for c in result if not c.get("is_heading")]
-        assert "IR plan tested annually." in body_texts
+        assert "ROPA maintained per Article 30." in body_texts
+        assert "Retention schedule reviewed annually." in body_texts
 
     def test_irrelevant_chunks_excluded(self) -> None:
         """Chunks with relevant=False should never appear in output."""
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
-        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "solution")
+        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "security")
 
         texts: list[str] = [c["text"] for c in result if not c.get("is_heading")]
         assert "Irrelevant paragraph about office layout." not in texts
@@ -338,11 +329,11 @@ class TestHandler:
                 await _handler(event, {})
 
     @pytest.mark.asyncio
-    async def test_enqueues_five_sqs_messages(
+    async def test_extract_sections_fans_out_to_two_agents(
         self,
         fake_redis: fakeredis.FakeRedis,
     ) -> None:
-        """Handler should enqueue exactly 5 SQS messages, one per agent type."""
+        """Handler should enqueue exactly 2 SQS messages: one per surviving agent."""
         event: dict[str, Any] = _make_event()
 
         await fake_redis.setex(
@@ -393,7 +384,7 @@ class TestHandler:
 
             result: dict[str, Any] = await _handler(event, {})
 
-        expected_count: int = 5
+        expected_count: int = 2
         assert len(sent_messages) == expected_count
         expected_status: int = 200
         assert result["statusCode"] == expected_status
@@ -402,7 +393,7 @@ class TestHandler:
         for msg in sent_messages:
             body: dict[str, Any] = json.loads(msg["MessageBody"])
             agent_types_sent.add(body["agentType"])
-        assert agent_types_sent == {"security", "data", "risk", "ea", "solution"}
+        assert agent_types_sent == {"security", "governance"}
 
     @pytest.mark.asyncio
     async def test_payload_contains_category_url_and_typed_questions(
@@ -610,7 +601,7 @@ class TestHandler:
 
             await _handler(event, {})
 
-        for agent_type in ["security", "data", "risk", "ea", "solution"]:
+        for agent_type in ["security", "governance"]:
             cached: str | None = await fake_redis.get(f"questions:{agent_type}")
             assert cached is not None, f"Expected questions cached for {agent_type}"
 
@@ -675,5 +666,5 @@ class TestHandler:
 
         metric_calls: list[str] = [call.args[0] for call in mock_emit.call_args_list]
         section_count_calls: list[str] = [m for m in metric_calls if m == "SectionCount"]
-        expected_metric_count: int = 5
+        expected_metric_count: int = 2
         assert len(section_count_calls) == expected_metric_count

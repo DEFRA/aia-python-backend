@@ -22,19 +22,13 @@ import anthropic
 import boto3
 from pydantic import BaseModel
 
-from src.agents.data_agent import DataAgent
-from src.agents.ea_agent import EAAgent
-from src.agents.risk_agent import RiskAgent
+from src.agents.governance_agent import GovernanceAgent
 from src.agents.schemas import AgentResult, QuestionItem
 from src.agents.security_agent import SecurityAgent
-from src.agents.solution_agent import SolutionAgent
 from src.config import (
     CloudWatchConfig,
-    DataAgentConfig,
-    EAAgentConfig,
-    RiskAgentConfig,
+    GovernanceAgentConfig,
     SecurityAgentConfig,
-    SolutionAgentConfig,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -49,9 +43,9 @@ logger.setLevel(logging.INFO)
 class SpecialistAgentConfig(Protocol):
     """Structural type for any specialist agent's Pydantic config.
 
-    All five specialist agent configs expose ``api_key``, ``model``,
-    ``max_tokens`` and ``temperature``; declaring them here removes the need
-    for ``Any`` annotations at the dispatch site.
+    Every specialist agent config (``SecurityAgentConfig``, ``GovernanceAgentConfig``)
+    exposes ``api_key``, ``model``, ``max_tokens`` and ``temperature``; declaring
+    them here removes the need for ``Any`` annotations at the dispatch site.
     """
 
     api_key: str
@@ -85,18 +79,12 @@ SpecialistConfigFactory = Callable[..., SpecialistAgentConfig]
 
 AGENT_REGISTRY: dict[str, SpecialistAgentFactory] = {
     "security": SecurityAgent,
-    "data": DataAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
-    "risk": RiskAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
-    "ea": EAAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
-    "solution": SolutionAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
+    "governance": GovernanceAgent,
 }
 
 CONFIG_REGISTRY: dict[str, SpecialistConfigFactory] = {
     "security": SecurityAgentConfig,
-    "data": DataAgentConfig,
-    "risk": RiskAgentConfig,
-    "ea": EAAgentConfig,
-    "solution": SolutionAgentConfig,
+    "governance": GovernanceAgentConfig,
 }
 
 # ---------------------------------------------------------------------------

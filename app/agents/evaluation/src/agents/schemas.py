@@ -104,7 +104,7 @@ class SectionsReadyDetail(BaseModel):
     """
 
     docId: str
-    agentType: Literal["security", "data", "risk", "ea", "solution"]
+    agentType: Literal["security", "governance"]
 
 
 class AgentCompleteDetail(BaseModel):

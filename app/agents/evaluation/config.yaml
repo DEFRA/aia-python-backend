@@ -10,24 +10,12 @@ agents:
     model: "claude-opus-4-6"
     max_tokens: 4096
     temperature: 0.0
-  gdpr:
+  governance:
     model: "claude-opus-4-6"
     max_tokens: 4096
     temperature: 0.0
-  data:
-    model: "claude-sonnet-4-6"
-    max_tokens: 4096
-    temperature: 0.0
-  risk:
-    model: "claude-sonnet-4-6"
-    max_tokens: 4096
-    temperature: 0.0
-  ea:
-    model: "claude-sonnet-4-6"
-    max_tokens: 4096
-    temperature: 0.0
-  solution:
-    model: "claude-sonnet-4-6"
+  gdpr:
+    model: "claude-opus-4-6"
     max_tokens: 4096
     temperature: 0.0
   tagging:
@@ -61,10 +49,7 @@ eventbridge:
 pipeline:
   agent_types:
     - "security"
-    - "data"
-    - "risk"
-    - "ea"
-    - "solution"
+    - "governance"
   sqs_inline_limit: 240000  # bytes - leave headroom below 256 KB
   agent_tag_map:
     security:
@@ -74,29 +59,18 @@ pipeline:
       - "vulnerability_management"
       - "secrets_management"
       - "network_security"
-    data:
-      - "data_governance"
-      - "compliance"
-      - "audit_logging"
-    risk:
-      - "incident_response"
-      - "compliance"
-      - "audit_logging"
-    ea:
-      - "encryption"
-      - "network_security"
-      - "compliance"
-    solution:
-      - "authentication"
-      - "authorisation"
-      - "encryption"
-      - "vulnerability_management"
-      - "secrets_management"
-      - "network_security"
-      - "incident_response"
-      - "data_governance"
-      - "audit_logging"
-      - "compliance"
+    governance:
+      - "data_protection"
+      - "records_of_processing"
+      - "data_retention"
+      - "data_subject_rights"
+      - "lawful_basis"
+      - "privacy_notice"
+      - "dpia"
+      - "data_sharing"
+      - "ig_governance"
+      - "audit_trail"
+      - "information_classification"
 
 # --- Document parser ---
 parser:
