@@ -1,63 +1,49 @@
-"""PostgreSQL repository for fetching checklist questions by category."""
+"""Postgres reader stub for per-category assessment input.
+
+The Postgres schema for the assessment input table is TBC. Until the layout is
+finalised, callers should use ``src.db.assessment_loader.load_assessment_from_file``;
+this module preserves the agreed async signature so the swap-over at
+``handlers/extract_sections.py`` and ``main.py`` is a one-line change.
+
+When implemented, the function is expected to read from a categories table
+(carrying the per-category SharePoint reference URL) joined to a questions
+table (one row per checklist question with its authoritative reference text)
+and return ``(list[QuestionItem], category_url)`` -- exactly the shape produced
+by the file-based loader today.
+"""
+
+from __future__ import annotations
+
 import logging
 
-import asyncpg
+from src.agents.schemas import QuestionItem
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-# Expected table schema:
-#
-#   CREATE TABLE checklist_questions (
-#       id          SERIAL PRIMARY KEY,
-#       category    VARCHAR(100) NOT NULL,
-#       question    TEXT         NOT NULL
-#   );
 
-
-async def fetch_questions_by_category(
+async def fetch_assessment_by_category(
     dsn: str,
     category: str,
-) -> list[str]:
-    """Fetch all checklist questions for a given category from PostgreSQL.
+) -> tuple[list[QuestionItem], str]:
+    """Fetch ``(questions, category_url)`` for a category from Postgres.
+
+    The Postgres schema is TBC. Until the table layout is finalised, callers
+    should use ``src.db.assessment_loader.load_assessment_from_file``. This
+    stub preserves the agreed signature so the swap-over is a one-line
+    change at the call sites in ``extract_sections.py`` and ``main.py``.
 
     Args:
-        dsn: asyncpg-compatible connection string, e.g.
-             "postgresql://user:password@host:5432/dbname"
-        category: The category name to filter by (case-insensitive),
-                  e.g. "Security".
+        dsn: asyncpg-compatible connection string.
+        category: The category name to filter by (e.g. ``"Security"``).
 
     Returns:
-        An ordered list of question strings for the requested category.
+        A ``(questions, category_url)`` tuple, identical in shape to
+        ``load_assessment_from_file``.
 
     Raises:
-        asyncpg.PostgresError: If the database query fails.
-        ValueError: If no questions are found for the given category.
+        NotImplementedError: Always, until the Postgres schema is in place.
     """
-    conn: asyncpg.Connection = await asyncpg.connect(dsn)
-    try:
-        rows: list[asyncpg.Record] = await conn.fetch(
-            """
-            SELECT question
-            FROM   checklist_questions
-            WHERE  LOWER(category) = LOWER($1)
-            ORDER  BY id
-            """,
-            category,
-        )
-    finally:
-        await conn.close()
-
-    questions: list[str] = [row["question"] for row in rows]
-
-    if not questions:
-        raise ValueError(
-            f"No questions found for category '{category}'. "
-            "Check the category name and that the table is populated."
-        )
-
-    logger.info(
-        "Loaded %d questions for category '%s' from database.",
-        len(questions),
-        category,
+    raise NotImplementedError(
+        "Postgres assessment schema is TBC; "
+        "use load_assessment_from_file from src.db.assessment_loader."
     )
-    return questions

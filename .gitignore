@@ -23,3 +23,9 @@ dist/
 
 # Claude Code
 .claude/
+
+# Stale test mirror — superseded by app/agents/evaluation/tests/ (Plan 09)
+app/agents/evaluation/src/tests/
+
+# MacOS
+.DS_Store

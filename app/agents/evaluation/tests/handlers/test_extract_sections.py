@@ -10,11 +10,13 @@ import fakeredis.aioredis as fakeredis
 import pytest
 from pydantic import ValidationError
 
-from src.agents.schemas import DocumentTaggedDetail
+from src.agents.schemas import DocumentTaggedDetail, QuestionItem
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
 # ---------------------------------------------------------------------------
+
+_TEST_CATEGORY_URL: str = "https://example.test/category"
 
 
 def _make_event(
@@ -109,6 +111,14 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
     ]
 
 
+def _mock_assessment_items() -> list[QuestionItem]:
+    """Default questions used by the patched ``load_assessment_from_file``."""
+    return [
+        QuestionItem(question="Is MFA enabled?", reference="Ref-1"),
+        QuestionItem(question="Are logs centralised?", reference="Ref-2"),
+    ]
+
+
 @pytest.fixture
 def fake_redis() -> fakeredis.FakeRedis:
     """Create a fresh fake Redis instance per test."""
@@ -150,7 +160,6 @@ class TestExtractSectionsForAgent:
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
         result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "security")
 
-        # First element should be the heading preceding the auth chunk
         assert result[0]["is_heading"] is True
         assert result[0]["text"] == "Authentication Section"
 
@@ -197,7 +206,6 @@ class TestExtractSectionsForAgent:
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
-        # solution agent gets everything relevant
         result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "solution")
 
         indices: list[int] = [c["chunk_index"] for c in result]
@@ -285,6 +293,14 @@ class TestSectionsToText:
 # ---------------------------------------------------------------------------
 
 
+def _patch_loader() -> Any:
+    """Patch ``load_assessment_from_file`` to return predictable typed data."""
+    return patch(
+        "src.handlers.extract_sections.load_assessment_from_file",
+        return_value=(_mock_assessment_items(), _TEST_CATEGORY_URL),
+    )
+
+
 class TestHandler:
     """Tests for the Stage 5 _handler async function."""
 
@@ -329,7 +345,6 @@ class TestHandler:
         """Handler should enqueue exactly 5 SQS messages, one per agent type."""
         event: dict[str, Any] = _make_event()
 
-        # Pre-populate tagged chunks in Redis
         await fake_redis.setex(
             "tagged:abc123",
             86_400,
@@ -346,8 +361,6 @@ class TestHandler:
         mock_sqs.send_message = _mock_send_message
 
         mock_emit: AsyncMock = AsyncMock()
-
-        mock_questions: list[str] = ["Q1: Is MFA enabled?", "Q2: Are logs centralised?"]
 
         with (
             patch(
@@ -366,15 +379,7 @@ class TestHandler:
                 "src.handlers.extract_sections._get_s3",
                 return_value=MagicMock(),
             ),
-            patch(
-                "src.handlers.extract_sections._get_db_config",
-                return_value=MagicMock(dsn="postgresql://u:p@h:5432/db"),
-            ),
-            patch(
-                "src.handlers.extract_sections.fetch_questions_by_category",
-                new_callable=AsyncMock,
-                return_value=mock_questions,
-            ),
+            _patch_loader(),
             patch(
                 "src.handlers.extract_sections._emit_metric",
                 mock_emit,
@@ -393,7 +398,6 @@ class TestHandler:
         expected_status: int = 200
         assert result["statusCode"] == expected_status
 
-        # Verify each agent type is represented
         agent_types_sent: set[str] = set()
         for msg in sent_messages:
             body: dict[str, Any] = json.loads(msg["MessageBody"])
@@ -401,11 +405,13 @@ class TestHandler:
         assert agent_types_sent == {"security", "data", "risk", "ea", "solution"}
 
     @pytest.mark.asyncio
-    async def test_sqs_message_contains_questions_as_dicts(
+    async def test_payload_contains_category_url_and_typed_questions(
         self,
         fake_redis: fakeredis.FakeRedis,
     ) -> None:
-        """SQS message questions should be list[dict] with id and question fields."""
+        """Each enqueued payload deserialises into ``AgentTaskBody`` cleanly."""
+        from src.handlers.agent import AgentTaskBody
+
         event: dict[str, Any] = _make_event()
 
         await fake_redis.setex(
@@ -422,8 +428,6 @@ class TestHandler:
 
         mock_sqs: MagicMock = MagicMock()
         mock_sqs.send_message = _mock_send_message
-
-        mock_questions: list[str] = ["Q1", "Q2"]
 
         with (
             patch(
@@ -442,15 +446,7 @@ class TestHandler:
                 "src.handlers.extract_sections._get_s3",
                 return_value=MagicMock(),
             ),
-            patch(
-                "src.handlers.extract_sections._get_db_config",
-                return_value=MagicMock(dsn="postgresql://u:p@h:5432/db"),
-            ),
-            patch(
-                "src.handlers.extract_sections.fetch_questions_by_category",
-                new_callable=AsyncMock,
-                return_value=mock_questions,
-            ),
+            _patch_loader(),
             patch(
                 "src.handlers.extract_sections._emit_metric",
                 AsyncMock(),
@@ -464,24 +460,20 @@ class TestHandler:
 
             await _handler(event, {})
 
-        # Check questions format in any message
-        body: dict[str, Any] = json.loads(sent_messages[0]["MessageBody"])
-        questions: list[dict[str, Any]] = body["questions"]
-        assert isinstance(questions[0], dict)
-        assert "id" in questions[0]
-        assert "question" in questions[0]
-        assert questions[0]["id"] == 1
-        assert questions[0]["question"] == "Q1"
+        body: AgentTaskBody = AgentTaskBody.model_validate_json(sent_messages[0]["MessageBody"])
+        assert body.categoryUrl == _TEST_CATEGORY_URL
+        assert all(isinstance(q, QuestionItem) for q in body.questions)
+        assert body.questions[0].question == "Is MFA enabled?"
+        assert body.questions[0].reference == "Ref-1"
 
     @pytest.mark.asyncio
-    async def test_large_payload_uses_s3_pointer(
+    async def test_s3_offload_pointer_carries_category_url(
         self,
         fake_redis: fakeredis.FakeRedis,
     ) -> None:
-        """Payloads exceeding 240KB should be written to S3 with an s3PayloadKey."""
+        """When the payload is offloaded to S3, the pointer message still has categoryUrl."""
         event: dict[str, Any] = _make_event()
 
-        # Create a very large tagged chunk to exceed the 240KB limit
         large_text: str = "x" * 300_000
         large_chunks: list[dict[str, Any]] = [
             {
@@ -518,8 +510,6 @@ class TestHandler:
         mock_s3: MagicMock = MagicMock()
         mock_s3.put_object = _mock_put_object
 
-        mock_questions: list[str] = ["Q1"]
-
         with (
             patch(
                 "src.handlers.extract_sections.get_redis",
@@ -537,15 +527,7 @@ class TestHandler:
                 "src.handlers.extract_sections._get_s3",
                 return_value=mock_s3,
             ),
-            patch(
-                "src.handlers.extract_sections._get_db_config",
-                return_value=MagicMock(dsn="postgresql://u:p@h:5432/db"),
-            ),
-            patch(
-                "src.handlers.extract_sections.fetch_questions_by_category",
-                new_callable=AsyncMock,
-                return_value=mock_questions,
-            ),
+            _patch_loader(),
             patch(
                 "src.handlers.extract_sections._emit_metric",
                 AsyncMock(),
@@ -562,24 +544,27 @@ class TestHandler:
 
             await _handler(event, {})
 
-        # The security agent should get the large chunk — check for S3 pointer
-        # At least one message should reference an s3PayloadKey
-        has_s3_pointer: bool = False
+        pointer_messages: list[dict[str, Any]] = []
         for msg in sent_messages:
             body: dict[str, Any] = json.loads(msg["MessageBody"])
             if "s3PayloadKey" in body:
-                has_s3_pointer = True
-                break
+                pointer_messages.append(body)
 
-        assert has_s3_pointer, "Expected at least one SQS message with s3PayloadKey"
+        assert pointer_messages, "Expected at least one SQS message with s3PayloadKey"
         assert len(s3_puts) > 0, "Expected at least one S3 put_object call"
+
+        for pointer in pointer_messages:
+            assert pointer["categoryUrl"] == _TEST_CATEGORY_URL
+            assert isinstance(pointer["questions"], list)
+            assert "question" in pointer["questions"][0]
+            assert "reference" in pointer["questions"][0]
 
     @pytest.mark.asyncio
     async def test_questions_cached_in_redis(
         self,
         fake_redis: fakeredis.FakeRedis,
     ) -> None:
-        """Questions fetched from DB should be cached in Redis for subsequent calls."""
+        """Questions loaded on first call should be cached in Redis."""
         event: dict[str, Any] = _make_event()
 
         await fake_redis.setex(
@@ -588,16 +573,11 @@ class TestHandler:
             json.dumps(_sample_tagged_chunks()),
         )
 
-        sent_messages: list[dict[str, Any]] = []
-
         def _mock_send_message(**kwargs: Any) -> dict[str, Any]:
-            sent_messages.append(kwargs)
             return {"MessageId": "mock-id"}
 
         mock_sqs: MagicMock = MagicMock()
         mock_sqs.send_message = _mock_send_message
-
-        mock_fetch: AsyncMock = AsyncMock(return_value=["Q1", "Q2"])
 
         with (
             patch(
@@ -616,14 +596,7 @@ class TestHandler:
                 "src.handlers.extract_sections._get_s3",
                 return_value=MagicMock(),
             ),
-            patch(
-                "src.handlers.extract_sections._get_db_config",
-                return_value=MagicMock(dsn="postgresql://u:p@h:5432/db"),
-            ),
-            patch(
-                "src.handlers.extract_sections.fetch_questions_by_category",
-                mock_fetch,
-            ),
+            _patch_loader(),
             patch(
                 "src.handlers.extract_sections._emit_metric",
                 AsyncMock(),
@@ -637,10 +610,15 @@ class TestHandler:
 
             await _handler(event, {})
 
-        # Check that questions are cached in Redis (5 agent types)
         for agent_type in ["security", "data", "risk", "ea", "solution"]:
             cached: str | None = await fake_redis.get(f"questions:{agent_type}")
             assert cached is not None, f"Expected questions cached for {agent_type}"
+
+            parsed: dict[str, Any] = json.loads(cached)
+            assert parsed["url"] == _TEST_CATEGORY_URL
+            assert isinstance(parsed["questions"], list)
+            assert parsed["questions"][0]["question"] == "Is MFA enabled?"
+            assert parsed["questions"][0]["reference"] == "Ref-1"
 
     @pytest.mark.asyncio
     async def test_emits_section_count_metrics(
@@ -656,10 +634,7 @@ class TestHandler:
             json.dumps(_sample_tagged_chunks()),
         )
 
-        sent_messages: list[dict[str, Any]] = []
-
         def _mock_send_message(**kwargs: Any) -> dict[str, Any]:
-            sent_messages.append(kwargs)
             return {"MessageId": "mock-id"}
 
         mock_sqs: MagicMock = MagicMock()
@@ -684,15 +659,7 @@ class TestHandler:
                 "src.handlers.extract_sections._get_s3",
                 return_value=MagicMock(),
             ),
-            patch(
-                "src.handlers.extract_sections._get_db_config",
-                return_value=MagicMock(dsn="postgresql://u:p@h:5432/db"),
-            ),
-            patch(
-                "src.handlers.extract_sections.fetch_questions_by_category",
-                new_callable=AsyncMock,
-                return_value=["Q1"],
-            ),
+            _patch_loader(),
             patch(
                 "src.handlers.extract_sections._emit_metric",
                 mock_emit,
@@ -706,7 +673,6 @@ class TestHandler:
 
             await _handler(event, {})
 
-        # Should emit SectionCount for each of 5 agent types
         metric_calls: list[str] = [call.args[0] for call in mock_emit.call_args_list]
         section_count_calls: list[str] = [m for m in metric_calls if m == "SectionCount"]
         expected_metric_count: int = 5

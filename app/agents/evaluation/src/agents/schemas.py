@@ -6,12 +6,38 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class Reference(BaseModel):
+    """Authoritative reference for a question, echoed verbatim from the input JSON.
+
+    ``text`` carries the per-question reference (e.g. ``"C1.a"``); ``url`` carries
+    the category-level reference URL. Agents must echo these values back as-is and
+    must not invent or rewrite them.
+    """
+
+    text: str
+    url: str | None = None
+
+
+class QuestionItem(BaseModel):
+    """A checklist question paired with its authoritative reference.
+
+    Sourced from the input assessment JSON (see
+    ``app/agents/evaluation/files/system_input_output.md``). Carried through
+    Stage 5 -> Stage 6 in the SQS Tasks message body so each agent can echo
+    ``reference`` back into its output ``Reference`` field.
+    """
+
+    question: str
+    reference: str
+
+
 class AssessmentRow(BaseModel):
-    """A single checklist question with its coverage rating and supporting evidence."""
+    """A single checklist question with its rating and supporting comments."""
 
     Question: str
-    Coverage: str  # "Green", "Amber", or "Red"
-    Evidence: str
+    Rating: Literal["Green", "Amber", "Red"]
+    Comments: str
+    Reference: Reference
 
 
 class FinalSummary(BaseModel):

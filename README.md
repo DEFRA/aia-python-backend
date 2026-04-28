@@ -1,40 +1,285 @@
-#AIA-NODEJS-FRONTEND
+# AIA Backend Service
 
-The "Register your dinosaur" service allows customers to apply online for a dinosaur licence.
+The AIA Backend Service consists of two co-located processes — **CoreBackend** (HTTP API) and **Orchestrator** (assessment pipeline) — that together handle secure document uploads, JWT-based authentication, specialist agent dispatch via SQS, and result persistence to PostgreSQL.
 
-This application handles the backend dinosaur processing.
+## Core Functionality
 
-## Prerequisites
+The service exposes the following API endpoints under the base path `/api/v1`:
 
-## Setup
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check (no auth) |
+| POST | `/api/v1/documents/upload` | Upload a document for AI assessment |
+| GET | `/api/v1/documents/status` | List document IDs still in PROCESSING for the user |
+| GET | `/api/v1/documents` | Paginated upload history |
+| GET | `/api/v1/documents/{documentId}` | Full result including `resultMd` |
+| GET | `/api/v1/users/me` | Authenticated user profile |
 
-### Development
+Full request/response contracts are documented in [docs/corebackend-api.md](docs/corebackend-api.md).
 
-### Test
+## Document Status Lifecycle
 
-## Running in development
+```
+PROCESSING  →  COMPLETE
+     ↓              ↑
+     ↓         PARTIAL_COMPLETE  (≥1 agent responded within timeout)
+     ↓
+   ERROR
+```
 
-## Running tests
+| Status | Terminal | Meaning |
+|--------|----------|---------|
+| `PROCESSING` | No | Upload received; AI assessment in progress |
+| `COMPLETE` | Yes | All agents responded; `resultMd` populated |
+| `PARTIAL_COMPLETE` | Yes | Timeout reached with partial results; `resultMd` + `errorMessage` (lists non-responding agents) populated |
+| `ERROR` | Yes | Unrecoverable failure or zero agent responses; `errorMessage` populated |
 
-## Branching policy
+## Architecture
 
-## Contributing to this project
+```mermaid
+graph TD
+    Client[Frontend Client] -->|POST /documents/upload| Auth[Auth Layer / JWT Validation]
+    Auth --> CB[CoreBackend :8086]
 
-Please read the [contribution guidelines](/CONTRIBUTING.md) before submitting a pull request.
+    CB -->|1. Insert metadata status=PROCESSING| DB[(PostgreSQL RDS)]
+    CB -->|2. Upload binary async| S3[AWS S3]
+    CB -->|3. POST /orchestrate fire-and-forget| ORC[Orchestrator :8001]
 
-## Licence
+    ORC -->|Download file| S3
+    ORC -->|Publish TaskMessage| TaskQueue[SQS: aia-tasks]
+    ORC -->|UPDATE status=PROCESSING| DB
 
-THIS INFORMATION IS LICENSED UNDER THE CONDITIONS OF THE OPEN GOVERNMENT LICENCE found at:
+    TaskQueue -->|Consume| AgentService[Agent Service]
+    AgentService -->|Publish StatusMessage| StatusQueue[SQS: aia-status]
 
-<http://www.nationalarchives.gov.uk/doc/open-government-licence/version/3>
+    StatusQueue -->|Poll| ORC
+    ORC -->|UPDATE status=COMPLETE / PARTIAL_COMPLETE / ERROR + resultMd| DB
 
-The following attribution statement MUST be cited in your products and applications when using this information.
+    Client -->|GET /documents/status| CB
+    CB -->|Read PROCESSING rows| DB
+```
 
->Contains public sector information licensed under the Open Government licence v3
+Once CoreBackend accepts the upload it inserts a DB record, uploads the file to S3, then fires `POST /orchestrate` to the Orchestrator (same ECS task, `localhost:8001`). The Orchestrator extracts the document text, publishes a `TaskMessage` to **aia-tasks**, and waits for results on **aia-status** with a configurable timeout (default 8 minutes). On completion it writes `resultMd` and the terminal status to the database. The frontend polls `GET /documents/status` until the document ID disappears from the list, then fetches the full result.
 
-### About the licence
+## Project Structure
 
-The Open Government Licence (OGL) was developed by the Controller of Her Majesty's Stationery Office (HMSO) to enable information providers in the public sector to license the use and re-use of their information under a common open licence.
+```
+app/
+├── api/
+│   ├── main.py               # FastAPI app, router registration, lifespan
+│   ├── documents.py          # /documents/* endpoints
+│   ├── users.py              # /users/me endpoint
+│   └── health.py             # /health endpoint
+├── core/
+│   ├── config.py             # Pydantic settings (env vars → typed config) + TEMPLATE_AGENTS mapping
+│   ├── dependencies.py       # FastAPI DI providers
+│   ├── enums.py              # DocumentStatus (PROCESSING, COMPLETE, PARTIAL_COMPLETE, ERROR)
+│   └── messages.py           # User-facing error strings
+├── models/
+│   ├── upload_request.py
+│   ├── upload_response.py    # { documentId, status }
+│   ├── history_record.py     # { documentId, originalFilename, templateType, status, ... }
+│   ├── result_record.py      # { ..., resultMd, errorMessage }
+│   ├── user_record.py        # { userId, email, name }
+│   ├── task_message.py       # SQS message published to aia-tasks
+│   ├── status_message.py     # SQS message received from aia-status
+│   ├── orchestrate_request.py# Payload for POST /orchestrate
+│   └── document_record.py
+├── repositories/
+│   ├── document_repository.py  # document_uploads table queries
+│   └── user_repository.py      # users table queries + guest fallback
+├── services/
+│   ├── upload_service.py       # Upload, status, history, result
+│   ├── orchestrator_service.py # Fire-and-forget HTTP client → Orchestrator
+│   ├── ingestor_service.py     # DOCX text extraction
+│   ├── s3_service.py           # S3 upload/download
+│   └── sqs_service.py          # send_task, receive_messages, delete_message
+├── orchestrator/
+│   ├── main.py     # FastAPI service :8001 — POST /orchestrate + status queue poller
+│   ├── session.py  # In-memory per-document agent dispatch state
+│   └── summary.py  # SummaryGenerator protocol + MarkdownSummaryGenerator
+└── utils/
+    ├── postgres.py   # Connection pool, schema init (document_uploads + users tables)
+    ├── auth.py       # JWT validation (HS256)
+    ├── app_context.py
+    └── logger.py
+docs/
+├── corebackend-api.md                  # Full API reference for frontend integration
+├── orchestrator-api.md                 # Orchestrator internal service reference
+├── db-schema.md                        # PostgreSQL schema, ERD, and column descriptions
+├── adr-orchestrator-session-storage.md # ADR: in-memory vs persistent session state
+└── adr-orchestrator-fan-out.md         # ADR: dynamic agent fan-out strategy
+tests/
+├── test_document_repository.py         # DocumentRepository DB queries
+├── test_ingestor_service.py            # DOCX text extraction
+├── test_sqs_service.py                 # SQS send/receive/delete
+├── test_upload_router.py               # CoreBackend upload/history/result endpoints
+├── test_orchestrator_session.py        # SessionStore — create, record, remove, events
+├── test_orchestrator_summary.py        # MarkdownSummaryGenerator — all result formats
+└── test_orchestrator_processing.py     # POST /orchestrate + _process_document pipeline
+```
 
-It is designed to encourage use and re-use of information freely and flexibly, with only a few conditions.
-Made with Material for MkDocs
+## Setup and Installation
+
+### 1. Clone the repository
+```bash
+git clone <repository-url>
+cd aia-backend
+```
+
+### 2. Create and activate a virtual environment
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+### 4. Configure environment variables
+```bash
+cp .env.example .env
+# Edit .env — key values below
+```
+
+Key environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `JWT_SECRET` | HS256 signing secret | — |
+| `POSTGRES_URI` | PostgreSQL connection string | — |
+| `S3_BUCKET_NAME` | S3 bucket for document storage | `docsupload` |
+| `TASK_QUEUE_URL` | SQS queue consumed by Agent Service | `…/aia-tasks` |
+| `STATUS_QUEUE_URL` | SQS queue polled by Orchestrator | `…/aia-status` |
+| `ORCHESTRATOR_URL` | Orchestrator base URL (called by CoreBackend) | `http://localhost:8001` |
+| `ORCHESTRATOR_PORT` | Port the Orchestrator listens on | `8001` |
+| `ORCHESTRATOR_AGENT_TIMEOUT_SECONDS` | Max wait for agent responses | `480` |
+| `ORCHESTRATOR_DEFAULT_AGENT_TYPE` | Fallback agent type for unknown templates | `general` |
+
+## Running in Development
+
+### 1. Start local infrastructure (PostgreSQL + LocalStack)
+```bash
+docker compose up -d
+```
+
+Docker Compose starts PostgreSQL and LocalStack. LocalStack initialises the `aia-tasks` and `aia-status` SQS queues and the `docsupload` S3 bucket automatically.
+
+### 2. Start CoreBackend (port 8086)
+```bash
+uvicorn app.api.main:app --host 127.0.0.1 --port 8086 --reload
+```
+
+### 3. Start the Orchestrator (port 8001, separate terminal)
+```bash
+uvicorn app.orchestrator.main:app --host 127.0.0.1 --port 8001 --reload
+```
+
+Swagger UI:
+- CoreBackend — `http://127.0.0.1:8086/docs`
+- Orchestrator — `http://127.0.0.1:8001/docs`
+
+## Running Tests
+
+Install dev dependencies first if you haven't already:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run the full test suite:
+
+```bash
+PYTHONPATH=. pytest tests/
+```
+
+Run with coverage report:
+
+```bash
+PYTHONPATH=. pytest tests/ --cov=app --cov-report=term-missing
+```
+
+Run a specific module:
+
+```bash
+PYTHONPATH=. pytest tests/test_orchestrator_session.py -v
+PYTHONPATH=. pytest tests/test_orchestrator_summary.py -v
+PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
+```
+
+**Test categories:**
+
+| File | What it covers | Needs infrastructure |
+|------|---------------|----------------------|
+| `test_orchestrator_session.py` | `SessionStore` — create, record results, completion event, remove | No |
+| `test_orchestrator_summary.py` | `MarkdownSummaryGenerator` — all result shapes and formatting | No |
+| `test_orchestrator_processing.py` | `POST /orchestrate` endpoint + `_process_document` (COMPLETE, PARTIAL_COMPLETE, ERROR paths) | No (mocked) |
+| `test_upload_router.py` | CoreBackend upload/history/result endpoints | No (mocked) |
+| `test_document_repository.py` | `DocumentRepository` DB queries | No (mocked) |
+| `test_ingestor_service.py` | DOCX text extraction | No |
+| `test_sqs_service.py` | SQS send/receive/delete | No (mocked) |
+
+> Orchestrator tests use `pytest-asyncio`. This is included in `requirements-dev.txt`.
+
+## Template Configuration
+
+The Orchestrator fans out to specialist agents based on the document's `templateType`. The mapping lives in `app/core/config.py`:
+
+```python
+TEMPLATE_AGENTS: dict[str, list[str]] = {
+    "SDA": ["security", "data", "risk", "ea", "solution"],
+    "CHEDP": ["security", "data", "risk"],
+}
+```
+
+To add a new template, add an entry to `TEMPLATE_AGENTS` and redeploy. If a `templateType` has no entry, the Orchestrator falls back to a single task using `ORCHESTRATOR_DEFAULT_AGENT_TYPE` (default: `general`).
+
+Each agent type in the list becomes one `TaskMessage` on the `aia-tasks` queue. The Orchestrator waits for all of them to respond before writing a terminal status. See [docs/adr-orchestrator-fan-out.md](docs/adr-orchestrator-fan-out.md) for the full design decision.
+
+## Verification and Debugging
+
+### Check document status in the database
+```bash
+docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents
+
+-- Query document lifecycle
+SELECT doc_id, file_name, status, uploaded_ts, processed_ts
+FROM document_uploads
+ORDER BY uploaded_ts DESC;
+
+-- Check users table
+SELECT * FROM users;
+```
+
+### Check S3 uploads
+```bash
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
+aws s3 ls s3://docsupload --endpoint-url http://localhost:4566 --recursive
+```
+
+### Check SQS queues
+```bash
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
+aws sqs get-queue-attributes \
+  --queue-url http://localhost:4566/000000000000/aia-tasks \
+  --endpoint-url http://localhost:4566 \
+  --attribute-names ApproximateNumberOfMessages
+```
+
+### Reset local state
+```bash
+# Clear database
+docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents \
+  -c "TRUNCATE document_uploads; TRUNCATE users CASCADE;"
+
+# Clear S3
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
+aws s3 rm s3://docsupload --recursive --endpoint-url http://localhost:4566
+```
+
+## Contributing
+
+Format code and run tests before submitting a pull request. Keep routing logic in `api/`, business logic in `services/`, and data access in `repositories/`.

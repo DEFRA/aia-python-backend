@@ -63,7 +63,7 @@ AGENT_DISPLAY_NAMES: dict[str, str] = {
     "solution": "Solution Designs",
 }
 
-_COVERAGE_ICONS: dict[str, str] = {
+_RATING_ICONS: dict[str, str] = {
     "Green": "🟢 Green",
     "Amber": "🟠 Amber",
     "Red": "🔴 Red",
@@ -156,25 +156,34 @@ def _sanitise_cell(value: str) -> str:
     return collapsed.replace("|", "\\|")
 
 
+def _render_reference_cell(row: AssessmentRow) -> str:
+    """Render the Reference cell as ``[text](url)`` when a URL is available."""
+    text: str = _sanitise_cell(row.Reference.text)
+    if row.Reference.url:
+        return f"[{text}]({row.Reference.url})"
+    return text
+
+
 def _render_row(row: AssessmentRow) -> str:
     """Render a single AssessmentRow as a markdown table row."""
-    rating: str = _COVERAGE_ICONS.get(row.Coverage, row.Coverage)
+    rating: str = _RATING_ICONS.get(row.Rating, row.Rating)
     question: str = _sanitise_cell(row.Question)
-    evidence: str = _sanitise_cell(row.Evidence)
-    return f"| {question} | {rating} | {evidence} | — |"
+    comments: str = _sanitise_cell(row.Comments)
+    reference: str = _render_reference_cell(row)
+    return f"| {question} | {rating} | {comments} | {reference} |"
 
 
-def _count_by_coverage(rows: list[AssessmentRow]) -> tuple[int, int, int]:
+def _count_by_rating(rows: list[AssessmentRow]) -> tuple[int, int, int]:
     """Return ``(red, amber, green)`` counts for a list of assessment rows."""
-    red: int = sum(1 for r in rows if r.Coverage == "Red")
-    amber: int = sum(1 for r in rows if r.Coverage == "Amber")
-    green: int = sum(1 for r in rows if r.Coverage == "Green")
+    red: int = sum(1 for r in rows if r.Rating == "Red")
+    amber: int = sum(1 for r in rows if r.Rating == "Amber")
+    green: int = sum(1 for r in rows if r.Rating == "Green")
     return red, amber, green
 
 
 def _render_summary_line(rows: list[AssessmentRow], summary: FinalSummary | None) -> str:
     """Render the per-agent summary block (counts + interpretation)."""
-    red, amber, green = _count_by_coverage(rows)
+    red, amber, green = _count_by_rating(rows)
     lines: list[str] = [f"**Summary: {red} Red, {amber} Amber, {green} Green**"]
     if summary is not None:
         if summary.Interpretation:
@@ -222,7 +231,7 @@ def _render_scorecard(results: dict[str, AgentResult | None]) -> str:
         if result is None:
             lines.append(f"| {display} | — | — | — | Unavailable |")
             continue
-        red, amber, green = _count_by_coverage(result.assessments)
+        red, amber, green = _count_by_rating(result.assessments)
         overall: str = _overall_label(red, amber, green)
         lines.append(f"| {display} | {red} | {amber} | {green} | {overall} |")
 

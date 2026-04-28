@@ -1,4 +1,5 @@
 """Security assessment agent for document-based RAG evaluation."""
+
 import json
 import logging
 from typing import cast
@@ -11,9 +12,15 @@ from src.agents.prompts.security import (
     SECURITY_ASSESSMENT_SYSTEM_PROMPT,
     SECURITY_ASSESSMENT_USER_TEMPLATE,
 )
-from src.agents.schemas import AgentResult, AssessmentRow, FinalSummary, LLMResponseMeta
+from src.agents.schemas import (
+    AgentResult,
+    AssessmentRow,
+    FinalSummary,
+    LLMResponseMeta,
+    QuestionItem,
+)
 from src.config import SecurityAgentConfig
-from src.utils.helpers import extract_json_array, strip_code_fences
+from src.utils.helpers import strip_code_fences
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -36,17 +43,22 @@ def _extract_response_meta(response: Message, model: str) -> LLMResponseMeta:
     )
 
 
-def _format_questions_block(questions: list[str]) -> str:
-    """Format a list of questions into a numbered string block.
+def _format_questions_block(questions: list[QuestionItem]) -> str:
+    """Format checklist items into a numbered XML block.
+
+    Each item is rendered as ``<question reference="...">...</question>`` so the
+    LLM sees the per-question reference identifier alongside the question text
+    and can echo it back into the output ``Reference`` field.
 
     Args:
-        questions: Ordered list of checklist question strings.
+        questions: Ordered list of ``QuestionItem`` objects.
 
     Returns:
         A single string with each question on its own numbered line.
     """
     return "\n".join(
-        f"{i}. {q}" for i, q in enumerate(questions, start=1)
+        f'{i}. <question reference="{item.reference}">{item.question}</question>'
+        for i, item in enumerate(questions, start=1)
     )
 
 
@@ -74,13 +86,17 @@ class SecurityAgent:
     async def assess(
         self,
         document: str,
-        questions: list[str],
+        questions: list[QuestionItem],
+        category_url: str,
     ) -> AgentResult:
         """Run a security assessment of a document against a checklist.
 
         Args:
             document: Full text of the document to assess.
-            questions: Ordered list of checklist questions to evaluate against.
+            questions: Ordered list of ``QuestionItem`` objects pairing each
+                checklist question with its authoritative reference identifier.
+            category_url: Category-level reference URL echoed into every
+                assessment row's ``Reference.url`` field.
 
         Returns:
             An AgentResult containing per-question assessments, a final summary,
@@ -93,6 +109,7 @@ class SecurityAgent:
         user_content: str = SECURITY_ASSESSMENT_USER_TEMPLATE.format(
             document=document,
             questions=_format_questions_block(questions),
+            category_url=category_url,
         )
 
         try:
@@ -116,7 +133,7 @@ class SecurityAgent:
             security_block: dict[str, object] = payload["Security"]  # type: ignore[assignment]
             assessments: list[AssessmentRow] = [
                 AssessmentRow.model_validate(row)
-                for row in security_block["Assessments"]  # type: ignore[index]
+                for row in cast(list[object], security_block["Assessments"])
             ]
             final_summary: FinalSummary | None = (
                 FinalSummary.model_validate(security_block["Final_Summary"])

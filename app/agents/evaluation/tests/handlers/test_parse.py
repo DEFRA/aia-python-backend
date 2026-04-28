@@ -5,14 +5,13 @@ from __future__ import annotations
 import io
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis.aioredis as fakeredis_aio
 import fitz
 import pytest
 
 from src.utils.exceptions import ScannedPdfError
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,9 +97,7 @@ class TestParseHandler:
         fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
         # Mock S3 download
-        async def mock_download(
-            s3_client: Any, bucket: str, key: str
-        ) -> bytes:
+        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return pdf_bytes
 
         published: list[dict[str, Any]] = []
@@ -112,9 +109,7 @@ class TestParseHandler:
 
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
         monkeypatch.setattr("src.handlers.parse.get_redis", AsyncMock(return_value=fake_redis))
-        monkeypatch.setattr(
-            "src.handlers.parse._get_publisher", lambda: mock_publisher
-        )
+        monkeypatch.setattr("src.handlers.parse._get_publisher", lambda: mock_publisher)
         monkeypatch.setattr("src.handlers.parse._emit_metric", AsyncMock())
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
         monkeypatch.setenv("REDIS_HOST", "localhost")
@@ -141,9 +136,7 @@ class TestParseHandler:
         cache_key: str = f"chunks:{content_hash}"
         await fake_redis.setex(cache_key, 3600, json.dumps([{"chunk_index": 0, "text": "cached"}]))
 
-        async def mock_download(
-            s3_client: Any, bucket: str, key: str
-        ) -> bytes:
+        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return pdf_bytes
 
         published: list[dict[str, Any]] = []
@@ -176,9 +169,7 @@ class TestParseHandler:
 
         fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
-        async def mock_download(
-            s3_client: Any, bucket: str, key: str
-        ) -> bytes:
+        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return blank_bytes
 
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
@@ -199,9 +190,7 @@ class TestParseHandler:
         """A non-PDF/DOCX file extension raises ValueError."""
         fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
-        async def mock_download(
-            s3_client: Any, bucket: str, key: str
-        ) -> bytes:
+        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return b"not a real file"
 
         monkeypatch.setattr("src.handlers.parse._download_s3", mock_download)
@@ -223,9 +212,7 @@ class TestParseHandler:
         docx_bytes: bytes = _make_docx_bytes()
         fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
-        async def mock_download(
-            s3_client: Any, bucket: str, key: str
-        ) -> bytes:
+        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return docx_bytes
 
         published: list[dict[str, Any]] = []
@@ -250,16 +237,12 @@ class TestParseHandler:
         assert len(published) == 1
         assert published[0]["detail_type"] == "DocumentParsed"
 
-    async def test_receipt_handle_stored_in_redis(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_receipt_handle_stored_in_redis(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The SQS receipt handle is written to Redis for later deletion."""
         pdf_bytes: bytes = _make_text_pdf()
         fake_redis: fakeredis_aio.FakeRedis = fakeredis_aio.FakeRedis(decode_responses=True)
 
-        async def mock_download(
-            s3_client: Any, bucket: str, key: str
-        ) -> bytes:
+        async def mock_download(s3_client: Any, bucket: str, key: str) -> bytes:
             return pdf_bytes
 
         mock_publisher = MagicMock()

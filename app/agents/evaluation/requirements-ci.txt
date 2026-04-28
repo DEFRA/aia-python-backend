@@ -1,0 +1,12 @@
+# CI dependencies — extends runtime requirements with test and quality-gate tools.
+
+-r requirements.txt
+
+# Test
+fakeredis[aioredis]>=2.23.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# Quality gate
+mypy==1.19.1
+ruff==0.15.0
