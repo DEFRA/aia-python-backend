@@ -14,23 +14,27 @@ from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, 
 #   }
 # }
 # -----------------------------
+CAF_URL = "https://www.ncsc.gov.uk/collection/caf"
 sample_json = {
     "Security": {
         "Assessments": [
             {
                 "Question": "Is authentication defined?",
-                "Coverage": "Green",
-                "Evidence": "Section 2.1 describes Azure AD SSO, OAuth2 token flows, and mandatory MFA for all privileged roles.",
+                "Rating": "Green",
+                "Comments": "Section 2.1 describes Azure AD SSO, OAuth2 token flows, and mandatory MFA for all privileged roles.",
+                "Reference": {"text": "B2.a", "url": CAF_URL},
             },
             {
                 "Question": "Is logging and monitoring implemented?",
-                "Coverage": "Amber",
-                "Evidence": "Section 4.3 states that logs are collected in Splunk, but monitoring rules for privileged access are still under development.",
+                "Rating": "Amber",
+                "Comments": "Section 4.3 states that logs are collected in Splunk, but monitoring rules for privileged access are still under development.",
+                "Reference": {"text": "C1.a", "url": CAF_URL},
             },
             {
                 "Question": "Is data encrypted at rest and in transit?",
-                "Coverage": "Red",
-                "Evidence": "TLS noted; no at-rest encryption or KMS details provided.",
+                "Rating": "Red",
+                "Comments": "TLS noted; no at-rest encryption or KMS details provided.",
+                "Reference": {"text": "B3.c", "url": CAF_URL},
             },
         ],
         "Final_Summary": {
@@ -105,12 +109,25 @@ story.append(Spacer(1, 12))
 # -----------------------------
 story.append(Paragraph("Assessments", h2))
 
+
+def _format_reference(ref: object) -> str:
+    """Render a Reference dict as ReportLab markup with optional clickable link."""
+    if not isinstance(ref, dict):
+        return ""
+    text: str = str(ref.get("text", "") or "")
+    url: object = ref.get("url")
+    if isinstance(url, str) and url:
+        return f'<link href="{url}" color="#1D4ED8">{text}</link>'
+    return text
+
+
 # header row
 data = [
     [
         Paragraph("Question", wrap_header),
-        Paragraph("Coverage", wrap_header),
-        Paragraph("Evidence", wrap_header),
+        Paragraph("Rating", wrap_header),
+        Paragraph("Comments", wrap_header),
+        Paragraph("Reference", wrap_header),
     ]
 ]
 
@@ -119,13 +136,14 @@ for item in assessments:
     data.append(
         [
             Paragraph(item.get("Question", ""), wrap_style),
-            Paragraph(item.get("Coverage", ""), wrap_center),
-            Paragraph(item.get("Evidence", ""), wrap_style),
+            Paragraph(item.get("Rating", ""), wrap_center),
+            Paragraph(item.get("Comments", ""), wrap_style),
+            Paragraph(_format_reference(item.get("Reference")), wrap_style),
         ]
     )
 
 # column widths
-col_widths = [2.2 * inch, 1.1 * inch, 4.0 * inch]
+col_widths = [2.0 * inch, 0.9 * inch, 3.2 * inch, 1.2 * inch]
 
 table = LongTable(data, colWidths=col_widths, repeatRows=1)
 
@@ -141,16 +159,16 @@ table_style = TableStyle(
     ]
 )
 
-# color-code Coverage column
+# color-code Rating column
 for i in range(1, len(data)):
-    coverage_value = assessments[i - 1].get("Coverage", "").lower()
-    if coverage_value == "green":
+    rating_value = assessments[i - 1].get("Rating", "").lower()
+    if rating_value == "green":
         bg = colors.HexColor("#D1FAE5")
         fg = colors.HexColor("#065F46")
-    elif coverage_value == "amber":
+    elif rating_value == "amber":
         bg = colors.HexColor("#FEF3C7")
         fg = colors.HexColor("#92400E")
-    elif coverage_value == "red":
+    elif rating_value == "red":
         bg = colors.HexColor("#FEE2E2")
         fg = colors.HexColor("#7F1D1D")
     else:
@@ -160,11 +178,12 @@ for i in range(1, len(data)):
     table_style.add("BACKGROUND", (1, i), (1, i), bg)
     table_style.add("TEXTCOLOR", (1, i), (1, i), fg)
 
-# alternate row shading (excluding coverage column)
+# alternate row shading (excluding Rating column)
 for i in range(1, len(data)):
     if i % 2 == 0:
         table_style.add("BACKGROUND", (0, i), (0, i), colors.whitesmoke)
         table_style.add("BACKGROUND", (2, i), (2, i), colors.whitesmoke)
+        table_style.add("BACKGROUND", (3, i), (3, i), colors.whitesmoke)
 
 table.setStyle(table_style)
 

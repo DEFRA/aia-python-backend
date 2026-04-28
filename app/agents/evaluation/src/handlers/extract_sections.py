@@ -16,9 +16,12 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from src.agents.schemas import DocumentTaggedDetail
-from src.config import CloudWatchConfig, DatabaseConfig, PipelineConfig, RedisConfig
-from src.db.questions_repo import fetch_questions_by_category
+from pydantic import BaseModel
+
+from src.agents.schemas import DocumentTaggedDetail, QuestionItem
+from src.config import CloudWatchConfig, PipelineConfig, RedisConfig
+from src.db.assessment_loader import load_assessment_from_file
+from src.handlers.agent import AgentTaskBody
 from src.utils.redis_client import (
     get_cache_config,
     get_redis,
@@ -26,6 +29,19 @@ from src.utils.redis_client import (
     redis_get_json,
     redis_set_json,
 )
+
+
+class _CachedAssessment(BaseModel):
+    """Pydantic envelope for the Redis-cached `(questions, url)` payload.
+
+    Validates the whole cached object in one go on read-back, so neither the
+    inner `QuestionItem` list nor the per-category URL can drift away from
+    the contract enforced at write time.
+    """
+
+    questions: list[QuestionItem]
+    url: str
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,7 +54,6 @@ _redis_config: RedisConfig | None = None
 _sqs: Any = None
 _s3: Any = None
 _cw: Any = None
-_db_config: DatabaseConfig | None = None
 _cw_config: CloudWatchConfig | None = None
 _pipeline_config: PipelineConfig | None = None
 _agent_tag_map_cache: dict[str, frozenset[str]] | None = None
@@ -108,14 +123,6 @@ def _get_cw() -> Any:
 
         _cw = boto3.client("cloudwatch")
     return _cw
-
-
-def _get_db_config() -> DatabaseConfig:
-    """Return the module-level DatabaseConfig singleton, creating on first call."""
-    global _db_config  # noqa: PLW0603
-    if _db_config is None:
-        _db_config = DatabaseConfig()  # type: ignore[call-arg]
-    return _db_config
 
 
 # ---------------------------------------------------------------------------
@@ -188,36 +195,40 @@ def _sections_to_text(sections: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _load_questions(
+async def _load_assessment(
     redis: Any,
     agent_type: str,
-    dsn: str,
-) -> list[dict[str, Any]]:
-    """Load checklist questions with Redis cache-aside.
+) -> tuple[list[QuestionItem], str]:
+    """Load ``(questions, category_url)`` with Redis cache-aside.
 
-    On a cache miss, fetches from PostgreSQL via ``fetch_questions_by_category``
-    and writes back to Redis.
+    Source: ``src.db.assessment_loader.load_assessment_from_file`` (file-based
+    until the Postgres schema is finalised). Cached value shape:
+    ``{"questions": [...QuestionItem dumps...], "url": "..."}``.
 
     Args:
         redis: An ``aioredis.Redis`` instance.
         agent_type: The agent type to fetch questions for.
-        dsn: asyncpg-compatible connection string.
 
     Returns:
-        List of dicts with ``id`` and ``question`` fields.
+        A ``(questions, category_url)`` tuple identical in shape to
+        ``load_assessment_from_file``.
     """
     cache_key: str = key_questions(agent_type)
     cached: Any = await redis_get_json(redis, cache_key)
     if cached is not None:
-        return cached  # type: ignore[no-any-return]
+        envelope: _CachedAssessment = _CachedAssessment.model_validate(cached)
+        return envelope.questions, envelope.url
 
-    questions: list[str] = await fetch_questions_by_category(dsn, agent_type)
-    question_dicts: list[dict[str, Any]] = [
-        {"id": i + 1, "question": q} for i, q in enumerate(questions)
-    ]
-    await redis_set_json(redis, cache_key, question_dicts, get_cache_config().ttl_questions)
-    logger.info("Cached %d questions for agent_type=%s", len(question_dicts), agent_type)
-    return question_dicts
+    items, url = load_assessment_from_file(agent_type)
+    envelope = _CachedAssessment(questions=items, url=url)
+    await redis_set_json(
+        redis,
+        cache_key,
+        envelope.model_dump(),
+        get_cache_config().ttl_questions,
+    )
+    logger.info("Cached %d questions for agent_type=%s", len(items), agent_type)
+    return items, url
 
 
 async def _emit_metric(
@@ -336,6 +347,7 @@ async def _enqueue_sqs_message(
             "agentType": agent_type,
             "s3PayloadKey": s3_key,
             "questions": payload["questions"],
+            "categoryUrl": payload["categoryUrl"],
             "enqueuedAt": payload["enqueuedAt"],
         }
         await _send_sqs_message(sqs_client, queue_url, json.dumps(pointer_payload))
@@ -398,24 +410,25 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         )
 
     # 3. Prepare all 5 payloads before enqueueing any
-    dsn: str = _get_db_config().dsn
     enqueued_at: str = datetime.now(tz=UTC).isoformat()
     payloads: list[dict[str, Any]] = []
     section_counts: list[tuple[str, int]] = []
 
     for agent_type in _get_pipeline_config().agent_types:
         sections: list[dict[str, Any]] = extract_sections_for_agent(tagged_chunks, agent_type)
-        questions: list[dict[str, Any]] = await _load_questions(redis, agent_type, dsn)
+        questions, category_url = await _load_assessment(redis, agent_type)
         document_text: str = _sections_to_text(sections)
 
-        payload: dict[str, Any] = {
-            "docId": doc_id,
-            "agentType": agent_type,
-            "document": document_text,
-            "questions": questions,
-            "enqueuedAt": enqueued_at,
-        }
-        payloads.append(payload)
+        # Boundary validation: build the SQS body via the typed model.
+        body: AgentTaskBody = AgentTaskBody(
+            docId=doc_id,
+            agentType=agent_type,
+            document=document_text,
+            questions=questions,
+            categoryUrl=category_url,
+            enqueuedAt=enqueued_at,
+        )
+        payloads.append(body.model_dump(mode="json"))
         section_counts.append((agent_type, len(sections)))
 
     # 4. Enqueue all 5 SQS messages

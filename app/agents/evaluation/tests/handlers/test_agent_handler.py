@@ -7,6 +7,7 @@ Covers:
 - Failure status message published on agent exception
 - CloudWatch metrics emission (duration, success, failure)
 - Unknown agent type raises ValueError
+- AgentTaskBody schema enforces typed questions + required categoryUrl
 """
 
 from __future__ import annotations
@@ -16,15 +17,17 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
-from src.agents.schemas import AgentResult, AssessmentRow, FinalSummary, LLMResponseMeta
-from src.handlers.agent import (
-    AGENT_REGISTRY,
-    AgentSqsEvent,
-    AgentTaskBody,
-    _extract_question_strings,
-    _handler,
+from src.agents.schemas import (
+    AgentResult,
+    AssessmentRow,
+    FinalSummary,
+    LLMResponseMeta,
+    QuestionItem,
+    Reference,
 )
+from src.handlers.agent import AGENT_REGISTRY, AgentSqsEvent, AgentTaskBody, _handler
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -34,8 +37,9 @@ _SAMPLE_RESULT: AgentResult = AgentResult(
     assessments=[
         AssessmentRow(
             Question="Q1",
-            Coverage="Green",
-            Evidence="Found in Section 1.",
+            Rating="Green",
+            Comments="Found in Section 1.",
+            Reference=Reference(text="Ref-1", url="https://example.test/policy"),
         ),
     ],
     metadata=LLMResponseMeta(
@@ -50,29 +54,25 @@ _SAMPLE_RESULT: AgentResult = AgentResult(
     ),
 )
 
+_DEFAULT_QUESTIONS: list[dict[str, str]] = [
+    {"question": "Is auth defined?", "reference": "Ref-1"},
+    {"question": "Is encryption used?", "reference": "Ref-2"},
+]
+
+_DEFAULT_CATEGORY_URL: str = "https://example.test/category"
+
 
 def _build_sqs_event(
     agent_type: str = "security",
     document: str | None = "Test document text",
     s3_payload_key: str | None = None,
 ) -> dict[str, Any]:
-    """Build a minimal SQS Lambda event dict for testing.
-
-    Args:
-        agent_type: The agent type string.
-        document: Inline document text (None if using S3 pointer).
-        s3_payload_key: S3 key for large document payloads.
-
-    Returns:
-        A dict matching the SQS Lambda event shape.
-    """
+    """Build a minimal SQS Lambda event dict for testing."""
     body: dict[str, Any] = {
         "docId": "doc-001",
         "agentType": agent_type,
-        "questions": [
-            {"id": "q1", "question": "Is auth defined?"},
-            {"id": "q2", "question": "Is encryption used?"},
-        ],
+        "questions": _DEFAULT_QUESTIONS,
+        "categoryUrl": _DEFAULT_CATEGORY_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     if document is not None:
@@ -87,15 +87,7 @@ def _make_mock_agent(
     return_value: AgentResult | None = None,
     side_effect: Exception | None = None,
 ) -> MagicMock:
-    """Build a mock agent class whose instances have a mocked assess() method.
-
-    Args:
-        return_value: The AgentResult to return from assess().
-        side_effect: An exception to raise from assess().
-
-    Returns:
-        A MagicMock that, when called as a constructor, returns a mock instance.
-    """
+    """Build a mock agent class whose instances have a mocked assess() method."""
     mock_instance: MagicMock = MagicMock()
     if side_effect is not None:
         mock_instance.assess = AsyncMock(side_effect=side_effect)
@@ -118,13 +110,14 @@ def test_agent_sqs_event_validates_correctly() -> None:
     assert len(parsed.Records) == 1
 
 
-def test_agent_task_body_validates_correctly() -> None:
-    """AgentTaskBody should parse the JSON body from an SQS record."""
+def test_agent_task_body_validates_typed_questions() -> None:
+    """AgentTaskBody should parse questions into typed ``QuestionItem`` instances."""
     body_dict: dict[str, Any] = {
         "docId": "doc-001",
         "agentType": "data",
         "document": "Some text",
-        "questions": [{"id": "q1", "question": "Q1?"}],
+        "questions": _DEFAULT_QUESTIONS,
+        "categoryUrl": _DEFAULT_CATEGORY_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     body: AgentTaskBody = AgentTaskBody.model_validate(body_dict)
@@ -132,6 +125,10 @@ def test_agent_task_body_validates_correctly() -> None:
     assert body.agentType == "data"
     assert body.document == "Some text"
     assert body.s3PayloadKey is None
+    assert body.categoryUrl == _DEFAULT_CATEGORY_URL
+    assert all(isinstance(q, QuestionItem) for q in body.questions)
+    assert body.questions[0].question == "Is auth defined?"
+    assert body.questions[0].reference == "Ref-1"
 
 
 def test_agent_task_body_allows_s3_pointer() -> None:
@@ -140,7 +137,8 @@ def test_agent_task_body_allows_s3_pointer() -> None:
         "docId": "doc-002",
         "agentType": "risk",
         "s3PayloadKey": "payloads/doc-002.txt",
-        "questions": [{"id": "q1", "question": "Q1?"}],
+        "questions": _DEFAULT_QUESTIONS,
+        "categoryUrl": _DEFAULT_CATEGORY_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     body: AgentTaskBody = AgentTaskBody.model_validate(body_dict)
@@ -148,19 +146,31 @@ def test_agent_task_body_allows_s3_pointer() -> None:
     assert body.document is None
 
 
-# ---------------------------------------------------------------------------
-# _extract_question_strings
-# ---------------------------------------------------------------------------
+def test_agent_task_body_rejects_legacy_string_questions() -> None:
+    """A list of bare strings must fail validation under the new schema."""
+    body_dict: dict[str, Any] = {
+        "docId": "doc-003",
+        "agentType": "security",
+        "document": "x",
+        "questions": ["Is MFA enforced?", "Is encryption applied?"],
+        "categoryUrl": _DEFAULT_CATEGORY_URL,
+        "enqueuedAt": "2026-04-14T10:00:00Z",
+    }
+    with pytest.raises(ValidationError):
+        AgentTaskBody.model_validate(body_dict)
 
 
-def test_extract_question_strings() -> None:
-    """_extract_question_strings should pull the 'question' value from each dict."""
-    questions: list[dict[str, Any]] = [
-        {"id": "q1", "question": "Is auth defined?"},
-        {"id": "q2", "question": "Is encryption used?"},
-    ]
-    result: list[str] = _extract_question_strings(questions)
-    assert result == ["Is auth defined?", "Is encryption used?"]
+def test_agent_task_body_requires_category_url() -> None:
+    """``categoryUrl`` is required and missing it must raise ``ValidationError``."""
+    body_dict: dict[str, Any] = {
+        "docId": "doc-004",
+        "agentType": "security",
+        "document": "x",
+        "questions": _DEFAULT_QUESTIONS,
+        "enqueuedAt": "2026-04-14T10:00:00Z",
+    }
+    with pytest.raises(ValidationError):
+        AgentTaskBody.model_validate(body_dict)
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +215,13 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
     assert sent_messages[0]["docId"] == "doc-001"
     assert "result" in sent_messages[0]
     mock_agent_cls.assert_called_once()
+
+    # Verify the agent instance was called with typed QuestionItem objects and category_url
+    mock_instance = mock_agent_cls.return_value
+    mock_instance.assess.assert_awaited_once()
+    call_kwargs = mock_instance.assess.await_args.kwargs
+    assert call_kwargs["category_url"] == _DEFAULT_CATEGORY_URL
+    assert all(isinstance(q, QuestionItem) for q in call_kwargs["questions"])
 
 
 @pytest.mark.asyncio

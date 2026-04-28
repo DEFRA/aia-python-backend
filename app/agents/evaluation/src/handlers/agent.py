@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from src.agents.data_agent import DataAgent
 from src.agents.ea_agent import EAAgent
 from src.agents.risk_agent import RiskAgent
-from src.agents.schemas import AgentResult
+from src.agents.schemas import AgentResult, QuestionItem
 from src.agents.security_agent import SecurityAgent
 from src.agents.solution_agent import SolutionAgent
 from src.config import (
@@ -63,7 +63,12 @@ class SpecialistAgentConfig(Protocol):
 class SpecialistAgent(Protocol):
     """Structural type for a specialist agent with an async ``assess``."""
 
-    async def assess(self, document: str, questions: list[str]) -> AgentResult: ...
+    async def assess(
+        self,
+        document: str,
+        questions: list[QuestionItem],
+        category_url: str,
+    ) -> AgentResult: ...
 
 
 # Typed factories for the dispatch registries. ``Callable[..., T]`` accepts
@@ -80,10 +85,10 @@ SpecialistConfigFactory = Callable[..., SpecialistAgentConfig]
 
 AGENT_REGISTRY: dict[str, SpecialistAgentFactory] = {
     "security": SecurityAgent,
-    "data": DataAgent,
-    "risk": RiskAgent,
-    "ea": EAAgent,
-    "solution": SolutionAgent,
+    "data": DataAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
+    "risk": RiskAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
+    "ea": EAAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
+    "solution": SolutionAgent,  # type: ignore[dict-item]  # Plan 10: migrate to new SpecialistAgent Protocol
 }
 
 CONFIG_REGISTRY: dict[str, SpecialistConfigFactory] = {
@@ -100,13 +105,20 @@ CONFIG_REGISTRY: dict[str, SpecialistConfigFactory] = {
 
 
 class AgentTaskBody(BaseModel):
-    """JSON body inside the SQS Tasks queue message."""
+    """JSON body inside the SQS Tasks queue message.
+
+    ``questions`` is a list of typed ``QuestionItem`` instances (each pairing a
+    checklist question with its authoritative reference identifier).
+    ``categoryUrl`` carries the per-category SharePoint reference URL echoed
+    into every assessment row's ``Reference.url`` field.
+    """
 
     docId: str
     agentType: str
     document: str | None = None
     s3PayloadKey: str | None = None
-    questions: list[dict[str, Any]]
+    questions: list[QuestionItem]
+    categoryUrl: str
     enqueuedAt: str
 
 
@@ -246,18 +258,6 @@ async def _emit_metric(
     )
 
 
-def _extract_question_strings(questions: list[dict[str, Any]]) -> list[str]:
-    """Extract plain question strings from the question dicts.
-
-    Args:
-        questions: List of dicts each containing a ``"question"`` key.
-
-    Returns:
-        Ordered list of question text strings.
-    """
-    return [q["question"] for q in questions]
-
-
 # ---------------------------------------------------------------------------
 # Lambda entry point
 # ---------------------------------------------------------------------------
@@ -274,12 +274,11 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     Flow:
         1. Validate SQS event via Pydantic.
         2. Resolve document text (inline or from S3).
-        3. Extract question strings from question dicts.
-        4. Look up agent class and config from registries.
-        5. Run agent assessment.
-        6. On success: publish completed status to SQS Status queue.
-        7. On failure: catch exception, publish failed status to SQS Status queue.
-        8. Emit CloudWatch metrics.
+        3. Look up agent class and config from registries.
+        4. Run agent assessment.
+        5. On success: publish completed status to SQS Status queue.
+        6. On failure: catch exception, publish failed status to SQS Status queue.
+        7. Emit CloudWatch metrics.
 
     Args:
         event: Raw SQS Lambda event dict.
@@ -309,10 +308,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     else:
         raise ValueError(f"Neither document nor s3PayloadKey provided: doc_id={doc_id}")
 
-    # 3. Extract question strings
-    question_strings: list[str] = _extract_question_strings(body.questions)
-
-    # 4. Look up agent class and config
+    # 3. Look up agent class and config
     if agent_type not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent type: {agent_type}")
 
@@ -325,16 +321,20 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     )
     agent: SpecialistAgent = agent_cls(client=client, agent_config=agent_config)
 
-    # 5. Run assessment and publish result
+    # 4. Run assessment and publish result
     status_queue_url: str = os.environ["SQS_STATUS_QUEUE_URL"]
     duration_ms: float
 
     try:
-        result: AgentResult = await agent.assess(document, question_strings)
+        result: AgentResult = await agent.assess(
+            document=document,
+            questions=body.questions,
+            category_url=body.categoryUrl,
+        )
         duration_ms = (time.monotonic() - start) * 1000
         completed_at: str = datetime.now(tz=UTC).isoformat()
 
-        # 6. Publish success to SQS Status queue
+        # 5. Publish success to SQS Status queue
         status_message: dict[str, Any] = {
             "docId": doc_id,
             "agentType": agent_type,
@@ -345,7 +345,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         }
         await _send_status_message(_get_sqs(), status_queue_url, status_message)
 
-        # 8. Emit success metrics
+        # 7. Emit success metrics
         await _emit_metric("AgentDuration", duration_ms, "Milliseconds", agent_type)
         await _emit_metric("AgentSuccess", 1.0, "Count", agent_type)
 
@@ -359,7 +359,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     except Exception as exc:
         duration_ms = (time.monotonic() - start) * 1000
 
-        # 7. Publish failure to SQS Status queue
+        # 6. Publish failure to SQS Status queue
         logger.error(
             "Agent assessment failed: doc_id=%s agent_type=%s error=%s",
             doc_id,
@@ -374,7 +374,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         }
         await _send_status_message(_get_sqs(), status_queue_url, failure_message)
 
-        # 8. Emit failure metrics
+        # 7. Emit failure metrics
         await _emit_metric("AgentDuration", duration_ms, "Milliseconds", agent_type)
         await _emit_metric("AgentFailure", 1.0, "Count", agent_type)
 
