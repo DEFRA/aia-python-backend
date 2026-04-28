@@ -27,7 +27,13 @@ from src.agents.schemas import (
     QuestionItem,
     Reference,
 )
-from src.handlers.agent import AGENT_REGISTRY, AgentSqsEvent, AgentTaskBody, _handler
+from src.handlers.agent import (
+    AGENT_REGISTRY,
+    CONFIG_REGISTRY,
+    AgentSqsEvent,
+    AgentTaskBody,
+    _handler,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -99,6 +105,17 @@ def _make_mock_agent(
 
 
 # ---------------------------------------------------------------------------
+# Registry contents
+# ---------------------------------------------------------------------------
+
+
+def test_agent_registry_contains_only_security_and_governance() -> None:
+    """The registries must list exactly the two surviving specialist agents."""
+    assert set(AGENT_REGISTRY.keys()) == {"security", "governance"}
+    assert set(CONFIG_REGISTRY.keys()) == {"security", "governance"}
+
+
+# ---------------------------------------------------------------------------
 # Pydantic model tests
 # ---------------------------------------------------------------------------
 
@@ -114,7 +131,7 @@ def test_agent_task_body_validates_typed_questions() -> None:
     """AgentTaskBody should parse questions into typed ``QuestionItem`` instances."""
     body_dict: dict[str, Any] = {
         "docId": "doc-001",
-        "agentType": "data",
+        "agentType": "governance",
         "document": "Some text",
         "questions": _DEFAULT_QUESTIONS,
         "categoryUrl": _DEFAULT_CATEGORY_URL,
@@ -122,7 +139,7 @@ def test_agent_task_body_validates_typed_questions() -> None:
     }
     body: AgentTaskBody = AgentTaskBody.model_validate(body_dict)
     assert body.docId == "doc-001"
-    assert body.agentType == "data"
+    assert body.agentType == "governance"
     assert body.document == "Some text"
     assert body.s3PayloadKey is None
     assert body.categoryUrl == _DEFAULT_CATEGORY_URL
@@ -135,7 +152,7 @@ def test_agent_task_body_allows_s3_pointer() -> None:
     """AgentTaskBody should accept s3PayloadKey without inline document."""
     body_dict: dict[str, Any] = {
         "docId": "doc-002",
-        "agentType": "risk",
+        "agentType": "governance",
         "s3PayloadKey": "payloads/doc-002.txt",
         "questions": _DEFAULT_QUESTIONS,
         "categoryUrl": _DEFAULT_CATEGORY_URL,
@@ -225,8 +242,8 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_handler_dispatches_to_data_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Handler should instantiate DataAgent for agentType='data'."""
+async def test_handler_dispatches_to_governance_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handler should instantiate GovernanceAgent for agentType='governance'."""
     monkeypatch.setenv("SQS_STATUS_QUEUE_URL", "https://sqs.example.com/status")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
@@ -246,18 +263,18 @@ async def test_handler_dispatches_to_data_agent(monkeypatch: pytest.MonkeyPatch)
         patch("src.handlers.agent._emit_metric", side_effect=mock_emit),
         patch("src.handlers.agent._get_sqs", return_value=MagicMock()),
         patch("src.handlers.agent._get_cw", return_value=MagicMock()),
-        patch.dict(AGENT_REGISTRY, {"data": mock_agent_cls}),
+        patch.dict(AGENT_REGISTRY, {"governance": mock_agent_cls}),
         patch("src.handlers.agent.anthropic") as mock_anthropic_mod,
     ):
         mock_anthropic_mod.AsyncAnthropic.return_value = MagicMock()
 
-        event: dict[str, Any] = _build_sqs_event(agent_type="data")
+        event: dict[str, Any] = _build_sqs_event(agent_type="governance")
         result: dict[str, Any] = await _handler(event, {})
 
     assert result == {"statusCode": 200}
     assert len(sent_messages) == 1
     assert sent_messages[0]["status"] == "completed"
-    assert sent_messages[0]["agentType"] == "data"
+    assert sent_messages[0]["agentType"] == "governance"
 
 
 # ---------------------------------------------------------------------------

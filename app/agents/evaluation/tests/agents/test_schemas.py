@@ -65,11 +65,18 @@ def test_document_tagged_detail() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_sections_ready_detail_valid_agent_type() -> None:
-    """SectionsReadyDetail should accept all five valid agent types."""
-    for agent in ("security", "data", "risk", "ea", "solution"):
+def test_sections_ready_detail_only_accepts_two_agent_types() -> None:
+    """SectionsReadyDetail must accept only the two surviving agents."""
+    for agent in ("security", "governance"):
         detail = SectionsReadyDetail(docId="doc-1", agentType=agent)
         assert detail.agentType == agent
+
+
+def test_sections_ready_detail_rejects_legacy_agent_types() -> None:
+    """SectionsReadyDetail must reject the four removed specialist agent types."""
+    for legacy in ("data", "risk", "ea", "solution"):
+        with pytest.raises(ValidationError):
+            SectionsReadyDetail(docId="doc-1", agentType=legacy)
 
 
 def test_sections_ready_detail_invalid_agent_type() -> None:
