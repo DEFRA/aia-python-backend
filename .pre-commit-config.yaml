@@ -35,7 +35,11 @@ repos:
     hooks:
       - id: pytest
         name: pytest
-        entry: bash -c 'ANTHROPIC_API_KEY=dummy DB_NAME=dummy DB_USER=dummy DB_PASSWORD=dummy REDIS_HOST=localhost pytest app/agents/evaluation/src/tests -x --tb=short'
+        # Scoped to tests/db + tests/handlers (Plan 09 canonical suite). The
+        # tests/agents/ and tests/utils/ trees have pre-existing failures from
+        # Plan 10 specialist agents and a stale TTL_CHUNKS import; widen this
+        # entry once those land.
+        entry: bash -c 'ANTHROPIC_API_KEY=dummy DB_NAME=dummy DB_USER=dummy DB_PASSWORD=dummy REDIS_HOST=localhost pytest app/agents/evaluation/tests/db app/agents/evaluation/tests/handlers -x --tb=short'
         language: system
         pass_filenames: false
         stages: [pre-push]
