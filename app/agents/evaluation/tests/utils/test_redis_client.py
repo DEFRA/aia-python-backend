@@ -3,15 +3,8 @@
 import fakeredis.aioredis as fakeredis_aio
 import pytest
 
+from src.config import CacheConfig
 from src.utils.redis_client import (
-    TTL_CHUNKS,
-    TTL_COMPILED,
-    TTL_QUESTIONS,
-    TTL_RESULT,
-    TTL_RESULTS_COUNT,
-    TTL_SECTIONS,
-    TTL_STAGE8_COUNT,
-    TTL_TAGGED,
     key_chunks,
     key_compiled,
     key_questions,
@@ -28,21 +21,23 @@ from src.utils.redis_client import (
 )
 
 # ---------------------------------------------------------------------------
-# TTL constants
+# Cache TTL configuration
 # ---------------------------------------------------------------------------
 
 
-def test_ttl_constants_are_positive_ints() -> None:
-    """All TTL constants must be positive integers."""
+def test_cache_ttls_are_positive_ints() -> None:
+    """All cache TTLs on CacheConfig must be positive integers."""
+    config: CacheConfig = CacheConfig()
     for ttl in (
-        TTL_CHUNKS,
-        TTL_TAGGED,
-        TTL_SECTIONS,
-        TTL_QUESTIONS,
-        TTL_RESULT,
-        TTL_RESULTS_COUNT,
-        TTL_COMPILED,
-        TTL_STAGE8_COUNT,
+        config.ttl_chunks,
+        config.ttl_tagged,
+        config.ttl_sections,
+        config.ttl_questions,
+        config.ttl_result,
+        config.ttl_results_count,
+        config.ttl_compiled,
+        config.ttl_stage8_count,
+        config.ttl_receipt,
     ):
         assert isinstance(ttl, int)
         assert ttl > 0
