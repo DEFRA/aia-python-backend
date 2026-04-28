@@ -4,6 +4,8 @@ import json
 import requests
 import msal
 import boto3
+import psycopg2
+
 from dotenv import load_dotenv
 load_dotenv()
  
@@ -23,6 +25,13 @@ TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID")
 CLIENT_ID = os.getenv("SHAREPOINT_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SHAREPOINT_CLIENT_SECRET")
 SHAREPOINT_SITE_ID = ""
+    
+# PostgreSQL details: 
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
  
 # SharePoint site you were granted access to
@@ -127,6 +136,28 @@ def test_sharepoint_connectivity(access_token):
         print("Response:")
         print(json.dumps(response.json(), indent=2))
         sys.exit(1)
+
+# ------------------------------
+
+# RDS POSTGRESQL CONNECTIVITY TEST
+
+# ------------------------------
+def test_postgres_connection():
+    try:
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            connect_timeout=2  # seconds
+        )
+        conn.close()
+        return True
+    except Exception as e:
+        print("Connection failed:", e)
+        return False
+
  
 # ------------------------------
 
@@ -142,11 +173,15 @@ if __name__ == "__main__":
     else:
         print("AWS session is NOT valid")
 
-    #sts = session.client("sts")
-    #identity = sts.get_caller_identity()
 
     print("🔐 Authenticating with Azure AD...")
     token = get_access_token() 
     print("🔎 Testing SharePoint connectivity...")
     site_id = test_sharepoint_connectivity(token) 
+    print("🔌 Testing PostgreSQL connectivity...")
+    if test_postgres_connection():
+        print("Successfully connected to PostgreSQL database")
+    else:
+        print("Failed to connect to PostgreSQL database")
+
     print("🎉 Connectivity test completed successfully")
