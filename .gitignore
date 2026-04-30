@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *.pyo
 connection_test.py
+config.py
+db.py
+sharepoint.py
+evaluator.py
+utils.py
+main_new.py
 
 
 # Environment
