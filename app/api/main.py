@@ -19,8 +19,11 @@ API_PREFIX = "/api/v1"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if config.db.uri:
-        await init_db()
-        logger.info("PostgreSQL initialised")
+        try:
+            await init_db()
+            logger.info("PostgreSQL initialised")
+        except Exception as exc:
+            logger.warning("PostgreSQL unavailable at startup — DB endpoints will fail: %s", exc)
     yield
     await close_postgres_pool()
 

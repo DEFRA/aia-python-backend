@@ -11,6 +11,9 @@ logger = get_logger(__name__)
 _pool: Optional[asyncpg.Pool] = None
 
 _CREATE_TABLES_SQL = """
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 CREATE TABLE IF NOT EXISTS users (
     user_id    TEXT        PRIMARY KEY,
     email      TEXT        NOT NULL UNIQUE,
