@@ -40,7 +40,59 @@ CREATE TABLE IF NOT EXISTS document_uploads (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
     ON document_uploads (user_id, file_name);
 """
+"""
+CREATE SCHEMA aia.aia_app;
+GRANT USAGE, CREATE ON SCHEMA aia.aia_app TO aia_user;
 
+CREATE TABLE aia_app.source_path_policydoc (
+    url_id     UUID PRIMARY KEY,
+    url        TEXT NOT NULL,	
+    desp	VARCHAR(100),
+    category   VARCHAR(50) NOT NULL,
+    type       VARCHAR(50) NOT NULL,
+    isactive   BOOLEAN NOT NULL,
+    datasize   DOUBLE PRECISION
+);
+
+INSERT INTO aia_app.source_path_policydoc (
+    url_id,
+    url,
+    desp,
+    category,
+    type,
+    isactive,
+    datasize
+)
+VALUES (
+    gen_random_uuid(),
+    'https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx',
+    'Strategic Architecture Principles',
+    'Technical',
+    'SharePoint',
+    TRUE,
+    12.5
+);
+
+INSERT INTO aia_app.source_path_policydoc (
+    url_id,
+    url,
+    desp,
+    category,
+    type,
+    isactive,
+    datasize
+)
+VALUES (
+    gen_random_uuid(),
+    'https://defra.sharepoint.com/sites/def-ddts-portfoliohub/SitePages/Secure-by-Design.aspx',
+    'Secure By Design',
+    'Security',
+    'SharePoint',
+    TRUE,
+    12.5
+);
+
+"""
 _MIGRATE_SQL_STATEMENTS = [
     "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ;",
     "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS result_md TEXT;",
