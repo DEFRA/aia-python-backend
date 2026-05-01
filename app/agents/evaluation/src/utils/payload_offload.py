@@ -3,7 +3,7 @@
 Pipeline stages pass intermediate state (parsed chunks, tagged chunks, sections)
 through small EventBridge / SQS messages.  When a payload fits within the SQS
 inline limit (240 KB by default) it is JSON-serialised inline; otherwise it is
-written to ``s3://{bucket}/state/{docId}/{stage}.json`` and the receiving
+written to ``s3://{bucket}/state/{document_id}/{stage}.json`` and the receiving
 handler dereferences the ``s3Key`` to fetch the bytes.
 
 The corresponding Pydantic discriminated union ``PayloadEnvelope`` lives in
@@ -63,7 +63,7 @@ def inline_or_s3(  # noqa: PLR0913
         threshold: Maximum inline size in bytes (default 240,000).
 
     Returns:
-        Either ``{"inline": "<json string>"}`` or ``{"s3Key": "state/<docId>/<stage>.json"}``.
+        Either ``{"inline": "<json string>"}`` or ``{"s3Key": "state/<document_id>/<stage>.json"}``.
     """
     body: bytes = _serialise(payload)
     if len(body) <= threshold:

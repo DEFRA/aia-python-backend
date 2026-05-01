@@ -29,7 +29,7 @@ def _make_text_pdf(text: str = "Security controls overview. " * 20) -> bytes:
 
 def _make_sqs_event(doc_id: str = "doc-001", s3_key: str = "uploads/test.pdf") -> dict[str, Any]:
     """Build a minimal SQS event matching the handler's expected schema."""
-    body: dict[str, str] = {"docId": doc_id, "s3Key": s3_key}
+    body: dict[str, str] = {"document_id": doc_id, "s3Key": s3_key}
     return {
         "Records": [
             {
@@ -66,7 +66,7 @@ class TestSqsEventValidation:
         parsed: SqsEvent = SqsEvent.model_validate(event)
         assert len(parsed.Records) == 1
         body: SqsRecordBody = SqsRecordBody.model_validate_json(parsed.Records[0].body)
-        assert body.docId == "doc-001"
+        assert body.document_id == "doc-001"
         assert body.s3Key == "uploads/test.pdf"
 
     def test_missing_records_raises(self) -> None:
@@ -83,7 +83,7 @@ class TestSqsEventValidation:
         from src.handlers.parse import SqsRecordBody
 
         with pytest.raises(ValidationError):
-            SqsRecordBody.model_validate({"docId": "x"})  # missing s3Key
+            SqsRecordBody.model_validate({"document_id": "x"})  # missing s3Key
 
 
 @pytest.mark.asyncio
@@ -122,7 +122,7 @@ class TestParseHandler:
         assert len(published) == 1
         assert published[0]["detail_type"] == "DocumentParsed"
         detail: dict[str, Any] = published[0]["detail"]
-        assert detail["docId"] == "doc-001"
+        assert detail["document_id"] == "doc-001"
         # Payload envelope is inline (small parse)
         assert "payload" in detail
         assert "inline" in detail["payload"]

@@ -64,7 +64,7 @@ class AgentResult(BaseModel):
 
 
 class TaggedChunk(BaseModel):
-    """A document chunk enriched with security/governance tags."""
+    """A document chunk enriched with security/technical tags."""
 
     chunk_index: int
     page: int
@@ -115,7 +115,7 @@ class DocumentParsedDetail(BaseModel):
     S3 reference (see ``src.utils.payload_offload``).
     """
 
-    docId: str
+    document_id: str
     payload: PayloadEnvelope
 
 
@@ -126,7 +126,7 @@ class DocumentTaggedDetail(BaseModel):
     S3 reference (see ``src.utils.payload_offload``).
     """
 
-    docId: str
+    document_id: str
     payload: PayloadEnvelope
 
 
@@ -136,14 +136,14 @@ class SectionsReadyDetail(BaseModel):
     Emitted once per agent type during the fan-out.
     """
 
-    docId: str
-    agentType: Literal["security", "governance"]
+    document_id: str
+    agentType: Literal["security", "technical"]
 
 
 class AgentCompleteDetail(BaseModel):
     """Detail payload for the ``AgentComplete`` event (Stage 6 terminus marker)."""
 
-    docId: str
+    document_id: str
     agentType: str
 
 
@@ -160,7 +160,7 @@ class AgentStatusMessage(BaseModel):
     field is a validated ``AgentResult`` on success, or ``None`` on failure.
     """
 
-    docId: str
+    document_id: str
     agentType: str
     status: Literal["completed", "failed"]
     result: AgentResult | None

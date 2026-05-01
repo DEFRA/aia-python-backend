@@ -40,7 +40,7 @@ logger.setLevel(logging.INFO)
 class SqsRecordBody(BaseModel):
     """JSON body inside each SQS record."""
 
-    docId: str
+    document_id: str
     s3Key: str
 
 
@@ -212,7 +212,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     sqs_event: SqsEvent = SqsEvent.model_validate(event)
     record: SqsRecord = sqs_event.Records[0]
     body: SqsRecordBody = SqsRecordBody.model_validate_json(record.body)
-    doc_id: str = body.docId
+    doc_id: str = body.document_id
     s3_key: str = body.s3Key
 
     logger.info("Stage 3 Parse: doc_id=%s s3_key=%s", doc_id, s3_key)
@@ -236,7 +236,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     # 5. Publish DocumentParsed event
     detail: DocumentParsedDetail = DocumentParsedDetail.model_validate(
-        {"docId": doc_id, "payload": envelope}
+        {"document_id": doc_id, "payload": envelope}
     )
     await _get_publisher().publish("DocumentParsed", detail.model_dump(by_alias=True))
 

@@ -46,7 +46,7 @@ async def test_publish_builds_correct_envelope(config: EventBridgeConfig) -> Non
 
         await publisher.publish(
             detail_type="DocumentParsed",
-            detail={"docId": "doc-123", "chunksCacheKey": "chunks:abc"},
+            detail={"document_id": "doc-123", "chunksCacheKey": "chunks:abc"},
         )
 
     call_kwargs: dict[str, Any] = mock_client.put_events.call_args[1]
@@ -57,7 +57,7 @@ async def test_publish_builds_correct_envelope(config: EventBridgeConfig) -> Non
     assert entry["Source"] == "defra.pipeline"
     assert entry["DetailType"] == "DocumentParsed"
     assert entry["EventBusName"] == "test-bus"
-    assert '"docId"' in entry["Detail"]
+    assert '"document_id"' in entry["Detail"]
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_publish_raises_on_failed_entry(config: EventBridgeConfig) -> None
         with pytest.raises(RuntimeError, match="partial failure"):
             await publisher.publish(
                 detail_type="DocumentParsed",
-                detail={"docId": "doc-123"},
+                detail={"document_id": "doc-123"},
             )
 
 
@@ -87,6 +87,6 @@ async def test_publish_calls_put_events_exactly_once(config: EventBridgeConfig) 
     mock_client.put_events.return_value = {"FailedEntryCount": 0, "Entries": []}
 
     publisher = EventBridgePublisher(config=config, client=mock_client)
-    await publisher.publish(detail_type="TestEvent", detail={"docId": "doc-1"})
+    await publisher.publish(detail_type="TestEvent", detail={"document_id": "doc-1"})
 
     mock_client.put_events.assert_called_once()
