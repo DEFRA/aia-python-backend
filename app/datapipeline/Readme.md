@@ -170,6 +170,18 @@ Results are written to the `data_pipeline` schema:
 
 **Re-run behaviour (idempotent):** when a changed page is processed, existing questions for that `policy_doc_id` are deleted before inserting the new set. This prevents stale questions from accumulating across runs. `question_categories` rows are removed automatically via `ON DELETE CASCADE`.
 
+**Question-level `isactive` flag:** every question has an `isactive BOOLEAN NOT NULL DEFAULT TRUE` column. Set it to `false` to exclude a specific question from agent assessment runs without deleting it. The pipeline always inserts new questions as active; deactivation is a manual, deliberate action.
+
+```sql
+-- Deactivate a specific question
+UPDATE data_pipeline.questions SET isactive = false WHERE question_id = '<uuid>';
+
+-- Re-activate
+UPDATE data_pipeline.questions SET isactive = true WHERE question_id = '<uuid>';
+```
+
+Agents querying for assessment questions must filter `WHERE isactive = true`.
+
 ---
 
 ## Environment Variables
@@ -270,6 +282,7 @@ pytest app/datapipeline/src/tests/ --cov=app/datapipeline/src --cov-report=term-
 - **Change detection** — `lastModifiedDateTime` from Graph API is compared against the stored value; unchanged pages are skipped without calling the LLM.
 - **Full page content via canvasLayout** — the pipeline fetches actual SharePoint page text through the Graph Pages API (`/pages/microsoft.graph.sitePage?$expand=canvasLayout`), not just site metadata. This yields the complete policy body for LLM extraction. Site metadata is used only as a fallback for non-SitePages URLs or when the pages API fails.
 - **Idempotent question writes** — on a changed page, existing questions are deleted before the new set is inserted. Stale questions do not accumulate across re-runs.
+- **Question-level `isactive` flag** — `questions.isactive` defaults to `true` for every inserted row. Operators can set individual questions to `false` to exclude them from agent assessment without losing the record. The pipeline never touches this column after insertion; deactivation is always a manual action. Agents must filter `WHERE isactive = true` when fetching questions.
 - **Prompt in Markdown** — the LLM system prompt lives in `prompts/policy_evaluation_prompt.md` and is loaded at cold-start via `Path`, keeping it reviewable and editable outside Python code.
 - **Feature flag for source list** — `USE_LOCAL_POLICY_SOURCES=true` allows the pipeline to run in development or test environments without a populated `source_path_policydoc` table.
 - **Debug output flag** — `SAVE_DEBUG_OUTPUT=true` writes a plain-text file per URL (source URL + raw content + questions JSON) to `app/datapipeline/debug/`. The write is best-effort and never blocks the pipeline. Files are git-ignored. Intended for local inspection and troubleshooting only — never enable in production.

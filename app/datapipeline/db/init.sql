@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.questions (
     source_excerpt TEXT        NOT NULL,
     policy_doc_id  UUID        NOT NULL
         REFERENCES data_pipeline.policy_documents(policy_doc_id) ON DELETE CASCADE,
+    isactive       BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
