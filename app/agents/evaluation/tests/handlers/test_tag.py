@@ -19,7 +19,7 @@ def _make_event(
     """Build a minimal EventBridge event dict for Stage 4."""
     chunks: list[dict[str, Any]] = inline_chunks if inline_chunks is not None else _sample_chunks()
     detail: DocumentParsedDetail = DocumentParsedDetail.model_validate(
-        {"docId": doc_id, "payload": {"inline": json.dumps(chunks)}}
+        {"document_id": doc_id, "payload": {"inline": json.dumps(chunks)}}
     )
     return {"detail": detail.model_dump(by_alias=True)}
 
@@ -62,7 +62,7 @@ async def test_handler_validates_event() -> None:
     """_handler should reject an event missing required detail fields."""
     from src.handlers.tag import _handler
 
-    bad_event: dict[str, Any] = {"detail": {"docId": "doc-001"}}
+    bad_event: dict[str, Any] = {"detail": {"document_id": "doc-001"}}
 
     with pytest.raises(ValidationError):
         await _handler(bad_event, {})
@@ -117,7 +117,7 @@ async def test_tag_handler_resolves_s3_chunks() -> None:
     chunks_json: bytes = json.dumps(_sample_chunks()).encode("utf-8")
 
     detail = DocumentParsedDetail.model_validate(
-        {"docId": "doc-s3", "payload": {"s3Key": "state/doc-s3/chunks.json"}}
+        {"document_id": "doc-s3", "payload": {"s3Key": "state/doc-s3/chunks.json"}}
     )
     event: dict[str, Any] = {"detail": detail.model_dump(by_alias=True)}
 

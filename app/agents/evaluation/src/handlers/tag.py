@@ -22,6 +22,7 @@ from src.agents.schemas import DocumentParsedDetail, DocumentTaggedDetail, Tagge
 from src.agents.tagging_agent import TaggingAgent
 from src.config import CloudWatchConfig, EventBridgeConfig, TaggingAgentConfig
 from src.utils.eventbridge import EventBridgePublisher
+from src.utils.llm_client import make_llm_client
 from src.utils.payload_offload import inline_or_s3, resolve_payload
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -134,7 +135,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     # 1. Validate EventBridge event
     detail: DocumentParsedDetail = DocumentParsedDetail.model_validate(event["detail"])
-    doc_id: str = detail.docId
+    doc_id: str = detail.document_id
 
     logger.info("Stage 4 Tag: doc_id=%s", doc_id)
 
@@ -150,7 +151,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     chunks: list[dict[str, Any]] = json.loads(chunks_bytes)
 
     # 3. Run TaggingAgent
-    client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic()
+    client: anthropic.AsyncAnthropic = make_llm_client()
     agent: TaggingAgent = TaggingAgent(client=client, config=_get_tagging_config())
     tagged_chunks: list[TaggedChunk] = await agent.tag(chunks)
 
@@ -166,7 +167,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     # 5. Publish DocumentTagged event
     tagged_detail: DocumentTaggedDetail = DocumentTaggedDetail.model_validate(
-        {"docId": doc_id, "payload": envelope}
+        {"document_id": doc_id, "payload": envelope}
     )
     await _get_publisher().publish("DocumentTagged", tagged_detail.model_dump(by_alias=True))
 
