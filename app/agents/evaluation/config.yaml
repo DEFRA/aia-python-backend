@@ -4,19 +4,21 @@
 # Secrets (API keys, DB credentials) MUST NOT be placed in this file; they are sourced
 # from environment variables only.
 
+# --- LLM provider ---
+# "anthropic" uses the direct Anthropic API (ANTHROPIC_API_KEY required).
+# "bedrock"   uses AWS Bedrock (AWS credentials required; no API key needed).
+llm:
+  provider: "anthropic"
+
 # --- Agent models ---
 agents:
   security:
-    model: "claude-opus-4-6"
+    model: "claude-sonnet-4-6"
     max_tokens: 4096
     temperature: 0.0
-  governance:
-    model: "claude-opus-4-6"
-    max_tokens: 4096
-    temperature: 0.0
-  gdpr:
-    model: "claude-opus-4-6"
-    max_tokens: 4096
+  technical:
+    model: "claude-sonnet-4-6"
+    max_tokens: 16000
     temperature: 0.0
   tagging:
     model: "claude-sonnet-4-6"
@@ -37,7 +39,7 @@ eventbridge:
 pipeline:
   agent_types:
     - "security"
-    - "governance"
+    - "technical"
   sqs_inline_limit: 240000  # bytes - leave headroom below 256 KB
   agent_tag_map:
     security:
@@ -47,7 +49,7 @@ pipeline:
       - "vulnerability_management"
       - "secrets_management"
       - "network_security"
-    governance:
+    technical:
       - "data_protection"
       - "records_of_processing"
       - "data_retention"
@@ -77,4 +79,4 @@ local_runner:
   output_filename_template: "pipeline_output_{doc_id}.json"
   display_keys:
     security: "Security"
-    governance: "Governance"
+    technical: "Technical"

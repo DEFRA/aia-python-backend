@@ -1,21 +1,18 @@
-"""Information governance assessment agent.
+"""Technical compliance assessment agent.
 
-Mirrors ``SecurityAgent`` exactly: the only differences are the prompt module,
-the config class, and the top-level JSON key (``"Governance"``).
+Mirrors ``SecurityAgent`` exactly: the only differences are the prompt files,
+the config class, and the top-level JSON key (``"Technical"``).
 """
 
 import json
 import logging
+from pathlib import Path
 from typing import cast
 
 import anthropic
 from anthropic import APIError
 from anthropic.types import Message, TextBlock
 
-from src.agents.prompts.governance import (
-    GOVERNANCE_ASSESSMENT_SYSTEM_PROMPT,
-    GOVERNANCE_ASSESSMENT_USER_TEMPLATE,
-)
 from src.agents.schemas import (
     AgentResult,
     AssessmentRow,
@@ -23,10 +20,14 @@ from src.agents.schemas import (
     LLMResponseMeta,
     QuestionItem,
 )
-from src.config import GovernanceAgentConfig
+from src.config import TechnicalAgentConfig
 from src.utils.helpers import strip_code_fences
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
+_SYSTEM_PROMPT: str = (_PROMPTS_DIR / "technical_system.md").read_text(encoding="utf-8")
+_USER_TEMPLATE: str = (_PROMPTS_DIR / "technical_user.md").read_text(encoding="utf-8")
 
 
 def _extract_response_meta(response: Message, model: str) -> LLMResponseMeta:
@@ -66,18 +67,19 @@ def _format_questions_block(questions: list[QuestionItem]) -> str:
     )
 
 
-class GovernanceAgent:
-    """Async LLM agent that assesses a document against an information-governance checklist.
+class TechnicalAgent:
+    """Async LLM agent that assesses a document against a technical compliance checklist.
 
-    Sends a document and a set of governance checklist questions to the LLM and parses
-    the structured JSON response into typed Pydantic models. Covers UK GDPR,
-    DPA 2018, and public-sector records-management requirements.
+    Sends a document and a set of checklist questions to the LLM and parses
+    the structured JSON response into typed Pydantic models. Covers the technical
+    implementation of DPA 2018, UK GDPR, and public-sector records-management
+    obligations.
     """
 
     def __init__(
         self,
         client: anthropic.AsyncAnthropic,
-        agent_config: GovernanceAgentConfig,
+        agent_config: TechnicalAgentConfig,
     ) -> None:
         """Initialise the agent with an Anthropic client and configuration.
 
@@ -86,7 +88,7 @@ class GovernanceAgent:
             agent_config: Configuration controlling model, token limit, and temperature.
         """
         self.client: anthropic.AsyncAnthropic = client
-        self.agent_config: GovernanceAgentConfig = agent_config
+        self.agent_config: TechnicalAgentConfig = agent_config
 
     async def assess(
         self,
@@ -94,7 +96,7 @@ class GovernanceAgent:
         questions: list[QuestionItem],
         category_url: str,
     ) -> AgentResult:
-        """Run a governance assessment of a document against a checklist.
+        """Run a technical compliance assessment of a document against a checklist.
 
         Args:
             document: Full text of the document to assess.
@@ -111,7 +113,7 @@ class GovernanceAgent:
             APIError: If the LLM API call fails.
             ValueError: If the LLM response cannot be parsed into the expected schema.
         """
-        user_content: str = GOVERNANCE_ASSESSMENT_USER_TEMPLATE.format(
+        user_content: str = _USER_TEMPLATE.format(
             document=document,
             questions=_format_questions_block(questions),
             category_url=category_url,
@@ -122,7 +124,7 @@ class GovernanceAgent:
                 model=self.agent_config.model,
                 max_tokens=self.agent_config.max_tokens,
                 temperature=self.agent_config.temperature,
-                system=GOVERNANCE_ASSESSMENT_SYSTEM_PROMPT,
+                system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APIError as exc:
@@ -135,14 +137,14 @@ class GovernanceAgent:
         try:
             cleaned: str = strip_code_fences(raw_text)
             payload: dict[str, object] = json.loads(cleaned)
-            governance_block: dict[str, object] = payload["Governance"]  # type: ignore[assignment]
+            technical_block: dict[str, object] = payload["Technical"]  # type: ignore[assignment]
             assessments: list[AssessmentRow] = [
                 AssessmentRow.model_validate(row)
-                for row in cast(list[object], governance_block["Assessments"])
+                for row in cast(list[object], technical_block["Assessments"])
             ]
             final_summary: FinalSummary | None = (
-                FinalSummary.model_validate(governance_block["Final_Summary"])
-                if "Final_Summary" in governance_block
+                FinalSummary.model_validate(technical_block["Final_Summary"])
+                if "Final_Summary" in technical_block
                 else None
             )
         except (json.JSONDecodeError, KeyError, ValueError) as exc:

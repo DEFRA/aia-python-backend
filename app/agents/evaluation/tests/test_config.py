@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.config import EventBridgeConfig, GovernanceAgentConfig, PipelineConfig
+from src.config import EventBridgeConfig, PipelineConfig, TechnicalAgentConfig
 
 
 def test_redis_config_is_gone() -> None:
@@ -15,6 +15,18 @@ def test_cache_config_is_gone() -> None:
     """Plan 11: CacheConfig and its TTLs were removed alongside Redis."""
     with pytest.raises(ImportError):
         from src.config import CacheConfig  # noqa: F401
+
+
+def test_gdpr_agent_config_is_gone() -> None:
+    """GDPRAgentConfig was removed in Phase 3."""
+    with pytest.raises(ImportError):
+        from src.config import GDPRAgentConfig  # noqa: F401
+
+
+def test_governance_agent_config_is_gone() -> None:
+    """GovernanceAgentConfig was renamed to TechnicalAgentConfig in Phase 3."""
+    with pytest.raises(ImportError):
+        from src.config import GovernanceAgentConfig  # noqa: F401
 
 
 def test_eventbridge_config_defaults() -> None:
@@ -36,24 +48,19 @@ def test_eventbridge_config_custom_values() -> None:
 
 
 def test_pipeline_config_default_agent_types() -> None:
-    """PipelineConfig should default ``agent_types`` to the two surviving agents.
-
-    The yaml file overrides this default with the same list, but the field
-    default itself is the contract: any caller building a ``PipelineConfig``
-    in isolation (e.g. inside a test) must see the new two-agent set.
-    """
+    """PipelineConfig should default ``agent_types`` to the two surviving agents."""
     config: PipelineConfig = PipelineConfig.model_construct()
-    assert config.agent_types == ["security", "governance"]
+    assert config.agent_types == ["security", "technical"]
 
 
-def test_governance_agent_config_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GovernanceAgentConfig should read GOVERNANCE_* env vars via Pydantic aliases."""
-    monkeypatch.setenv("GOVERNANCE_MODEL", "test-model")
-    monkeypatch.setenv("GOVERNANCE_MAX_TOKENS", "2048")
-    monkeypatch.setenv("GOVERNANCE_TEMPERATURE", "0.5")
+def test_technical_agent_config_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TechnicalAgentConfig should read TECHNICAL_* env vars via Pydantic aliases."""
+    monkeypatch.setenv("TECHNICAL_MODEL", "test-model")
+    monkeypatch.setenv("TECHNICAL_MAX_TOKENS", "2048")
+    monkeypatch.setenv("TECHNICAL_TEMPERATURE", "0.5")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    config: GovernanceAgentConfig = GovernanceAgentConfig()
+    config: TechnicalAgentConfig = TechnicalAgentConfig()
 
     assert config.model == "test-model"
     assert config.max_tokens == 2048

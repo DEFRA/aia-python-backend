@@ -4,7 +4,7 @@ Triggered by SQS Tasks queue (batch size = 1). Resolves the agent type from
 the message body, runs the specialist agent, and publishes the result to the
 SQS Status queue -- the terminal output of the pipeline. Catches agent
 exceptions and publishes a failure status message rather than letting them
-propagate, so external consumers see one Status message per ``(docId, agentType)``
+propagate, so external consumers see one Status message per ``(document_id, agentType)``
 regardless of outcome.
 """
 
@@ -22,14 +22,15 @@ import anthropic
 import boto3
 from pydantic import BaseModel
 
-from src.agents.governance_agent import GovernanceAgent
 from src.agents.schemas import AgentResult, AgentStatusMessage, QuestionItem
 from src.agents.security_agent import SecurityAgent
+from src.agents.technical_agent import TechnicalAgent
 from src.config import (
     CloudWatchConfig,
-    GovernanceAgentConfig,
     SecurityAgentConfig,
+    TechnicalAgentConfig,
 )
+from src.utils.llm_client import make_llm_client
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -43,7 +44,7 @@ logger.setLevel(logging.INFO)
 class SpecialistAgentConfig(Protocol):
     """Structural type for any specialist agent's Pydantic config.
 
-    Every specialist agent config (``SecurityAgentConfig``, ``GovernanceAgentConfig``)
+    Every specialist agent config (``SecurityAgentConfig``, ``TechnicalAgentConfig``)
     exposes ``api_key``, ``model``, ``max_tokens`` and ``temperature``; declaring
     them here removes the need for ``Any`` annotations at the dispatch site.
     """
@@ -79,12 +80,12 @@ SpecialistConfigFactory = Callable[..., SpecialistAgentConfig]
 
 AGENT_REGISTRY: dict[str, SpecialistAgentFactory] = {
     "security": SecurityAgent,
-    "governance": GovernanceAgent,
+    "technical": TechnicalAgent,
 }
 
 CONFIG_REGISTRY: dict[str, SpecialistConfigFactory] = {
     "security": SecurityAgentConfig,
-    "governance": GovernanceAgentConfig,
+    "technical": TechnicalAgentConfig,
 }
 
 # ---------------------------------------------------------------------------
@@ -101,7 +102,7 @@ class AgentTaskBody(BaseModel):
     into every assessment row's ``Reference.url`` field.
     """
 
-    docId: str
+    document_id: str
     agentType: str
     document: str | None = None
     s3PayloadKey: str | None = None
@@ -282,7 +283,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     sqs_event: AgentSqsEvent = AgentSqsEvent.model_validate(event)
     record: AgentSqsRecord = sqs_event.Records[0]
     body: AgentTaskBody = AgentTaskBody.model_validate_json(record.body)
-    doc_id: str = body.docId
+    doc_id: str = body.document_id
     agent_type: str = body.agentType
 
     logger.info("Stage 6 Agent: doc_id=%s agent_type=%s", doc_id, agent_type)
@@ -305,9 +306,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     config_cls: SpecialistConfigFactory = CONFIG_REGISTRY[agent_type]
     agent_config: SpecialistAgentConfig = config_cls()
 
-    client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic(
-        api_key=agent_config.api_key,
-    )
+    client: anthropic.AsyncAnthropic = make_llm_client()
     agent: SpecialistAgent = agent_cls(client=client, agent_config=agent_config)
 
     # 4. Run assessment and publish result
@@ -325,7 +324,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
         # 5. Publish success to SQS Status queue
         status_message: AgentStatusMessage = AgentStatusMessage(
-            docId=doc_id,
+            document_id=doc_id,
             agentType=agent_type,
             status="completed",
             result=result,
@@ -357,7 +356,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             exc,
         )
         failure_message: AgentStatusMessage = AgentStatusMessage(
-            docId=doc_id,
+            document_id=doc_id,
             agentType=agent_type,
             status="failed",
             result=None,

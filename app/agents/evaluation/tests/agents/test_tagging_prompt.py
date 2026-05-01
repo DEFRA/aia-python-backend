@@ -5,11 +5,11 @@ from __future__ import annotations
 from src.agents.prompts.tagging import SYSTEM_PROMPT, TAXONOMY
 
 
-def test_tagging_prompt_lists_governance_tags() -> None:
-    """The eleven UK information-governance tags must appear verbatim in the
-    tagging system prompt's taxonomy section.
+def test_tagging_prompt_lists_technical_agent_tags() -> None:
+    """The eleven UK information-governance tags routed to the TechnicalAgent must
+    appear verbatim in the tagging system prompt's taxonomy section.
     """
-    governance_tags: list[str] = [
+    technical_tags: list[str] = [
         "data_protection",
         "records_of_processing",
         "data_retention",
@@ -22,14 +22,14 @@ def test_tagging_prompt_lists_governance_tags() -> None:
         "audit_trail",
         "information_classification",
     ]
-    for tag in governance_tags:
+    for tag in technical_tags:
         assert tag in SYSTEM_PROMPT, f"Expected '{tag}' in tagging system prompt"
         assert tag in TAXONOMY, f"Expected '{tag}' in TAXONOMY map"
 
 
 def test_tagging_taxonomy_drops_legacy_only_tags() -> None:
     """Tags exclusively used by the four removed agents (and not retained for
-    security or governance) must be removed from the taxonomy.
+    security or technical) must be removed from the taxonomy.
     """
     surviving_tags: set[str] = {
         # security set
@@ -39,7 +39,7 @@ def test_tagging_taxonomy_drops_legacy_only_tags() -> None:
         "vulnerability_management",
         "secrets_management",
         "network_security",
-        # governance set
+        # technical set
         "data_protection",
         "records_of_processing",
         "data_retention",

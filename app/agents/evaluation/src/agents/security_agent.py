@@ -2,16 +2,13 @@
 
 import json
 import logging
+from pathlib import Path
 from typing import cast
 
 import anthropic
 from anthropic import APIError
 from anthropic.types import Message, TextBlock
 
-from src.agents.prompts.security import (
-    SECURITY_ASSESSMENT_SYSTEM_PROMPT,
-    SECURITY_ASSESSMENT_USER_TEMPLATE,
-)
 from src.agents.schemas import (
     AgentResult,
     AssessmentRow,
@@ -23,6 +20,10 @@ from src.config import SecurityAgentConfig
 from src.utils.helpers import strip_code_fences
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
+_SYSTEM_PROMPT: str = (_PROMPTS_DIR / "security_system.md").read_text(encoding="utf-8")
+_USER_TEMPLATE: str = (_PROMPTS_DIR / "security_user.md").read_text(encoding="utf-8")
 
 
 def _extract_response_meta(response: Message, model: str) -> LLMResponseMeta:
@@ -106,7 +107,7 @@ class SecurityAgent:
             APIError: If the LLM API call fails.
             ValueError: If the LLM response cannot be parsed into the expected schema.
         """
-        user_content: str = SECURITY_ASSESSMENT_USER_TEMPLATE.format(
+        user_content: str = _USER_TEMPLATE.format(
             document=document,
             questions=_format_questions_block(questions),
             category_url=category_url,
@@ -117,7 +118,7 @@ class SecurityAgent:
                 model=self.agent_config.model,
                 max_tokens=self.agent_config.max_tokens,
                 temperature=self.agent_config.temperature,
-                system=SECURITY_ASSESSMENT_SYSTEM_PROMPT,
+                system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APIError as exc:

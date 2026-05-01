@@ -76,7 +76,7 @@ def _build_sqs_event(
 ) -> dict[str, Any]:
     """Build a minimal SQS Lambda event dict for testing."""
     body: dict[str, Any] = {
-        "docId": "doc-001",
+        "document_id": "doc-001",
         "agentType": agent_type,
         "questions": _DEFAULT_QUESTIONS,
         "categoryUrl": _DEFAULT_CATEGORY_URL,
@@ -110,10 +110,10 @@ def _make_mock_agent(
 # ---------------------------------------------------------------------------
 
 
-def test_agent_registry_contains_only_security_and_governance() -> None:
+def test_agent_registry_contains_only_security_and_technical() -> None:
     """The registries must list exactly the two surviving specialist agents."""
-    assert set(AGENT_REGISTRY.keys()) == {"security", "governance"}
-    assert set(CONFIG_REGISTRY.keys()) == {"security", "governance"}
+    assert set(AGENT_REGISTRY.keys()) == {"security", "technical"}
+    assert set(CONFIG_REGISTRY.keys()) == {"security", "technical"}
 
 
 # ---------------------------------------------------------------------------
@@ -131,16 +131,16 @@ def test_agent_sqs_event_validates_correctly() -> None:
 def test_agent_task_body_validates_typed_questions() -> None:
     """AgentTaskBody should parse questions into typed ``QuestionItem`` instances."""
     body_dict: dict[str, Any] = {
-        "docId": "doc-001",
-        "agentType": "governance",
+        "document_id": "doc-001",
+        "agentType": "technical",
         "document": "Some text",
         "questions": _DEFAULT_QUESTIONS,
         "categoryUrl": _DEFAULT_CATEGORY_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     body: AgentTaskBody = AgentTaskBody.model_validate(body_dict)
-    assert body.docId == "doc-001"
-    assert body.agentType == "governance"
+    assert body.document_id == "doc-001"
+    assert body.agentType == "technical"
     assert body.document == "Some text"
     assert body.s3PayloadKey is None
     assert body.categoryUrl == _DEFAULT_CATEGORY_URL
@@ -152,8 +152,8 @@ def test_agent_task_body_validates_typed_questions() -> None:
 def test_agent_task_body_allows_s3_pointer() -> None:
     """AgentTaskBody should accept s3PayloadKey without inline document."""
     body_dict: dict[str, Any] = {
-        "docId": "doc-002",
-        "agentType": "governance",
+        "document_id": "doc-002",
+        "agentType": "technical",
         "s3PayloadKey": "payloads/doc-002.txt",
         "questions": _DEFAULT_QUESTIONS,
         "categoryUrl": _DEFAULT_CATEGORY_URL,
@@ -167,7 +167,7 @@ def test_agent_task_body_allows_s3_pointer() -> None:
 def test_agent_task_body_rejects_legacy_string_questions() -> None:
     """A list of bare strings must fail validation under the new schema."""
     body_dict: dict[str, Any] = {
-        "docId": "doc-003",
+        "document_id": "doc-003",
         "agentType": "security",
         "document": "x",
         "questions": ["Is MFA enforced?", "Is encryption applied?"],
@@ -181,7 +181,7 @@ def test_agent_task_body_rejects_legacy_string_questions() -> None:
 def test_agent_task_body_requires_category_url() -> None:
     """``categoryUrl`` is required and missing it must raise ``ValidationError``."""
     body_dict: dict[str, Any] = {
-        "docId": "doc-004",
+        "document_id": "doc-004",
         "agentType": "security",
         "document": "x",
         "questions": _DEFAULT_QUESTIONS,
@@ -230,7 +230,7 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
     assert len(sent_messages) == 1
     assert sent_messages[0].status == "completed"
     assert sent_messages[0].agentType == "security"
-    assert sent_messages[0].docId == "doc-001"
+    assert sent_messages[0].document_id == "doc-001"
     assert sent_messages[0].result is not None
     # Round-trip the JSON serialisation through the schema to prove the
     # published body is a valid ``AgentStatusMessage`` (Pydantic Boundary rule).
@@ -249,8 +249,8 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_handler_dispatches_to_governance_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Handler should instantiate GovernanceAgent for agentType='governance'."""
+async def test_handler_dispatches_to_technical_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handler should instantiate TechnicalAgent for agentType='technical'."""
     monkeypatch.setenv("SQS_STATUS_QUEUE_URL", "https://sqs.example.com/status")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
@@ -270,18 +270,18 @@ async def test_handler_dispatches_to_governance_agent(monkeypatch: pytest.Monkey
         patch("src.handlers.agent._emit_metric", side_effect=mock_emit),
         patch("src.handlers.agent._get_sqs", return_value=MagicMock()),
         patch("src.handlers.agent._get_cw", return_value=MagicMock()),
-        patch.dict(AGENT_REGISTRY, {"governance": mock_agent_cls}),
+        patch.dict(AGENT_REGISTRY, {"technical": mock_agent_cls}),
         patch("src.handlers.agent.anthropic") as mock_anthropic_mod,
     ):
         mock_anthropic_mod.AsyncAnthropic.return_value = MagicMock()
 
-        event: dict[str, Any] = _build_sqs_event(agent_type="governance")
+        event: dict[str, Any] = _build_sqs_event(agent_type="technical")
         result: dict[str, Any] = await _handler(event, {})
 
     assert result == {"statusCode": 200}
     assert len(sent_messages) == 1
     assert sent_messages[0].status == "completed"
-    assert sent_messages[0].agentType == "governance"
+    assert sent_messages[0].agentType == "technical"
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +545,7 @@ async def test_agent_handler_emits_status_message_only(
     msg: AgentStatusMessage = sent_messages[0]
     assert msg.status == "completed"
     assert msg.agentType == "security"
-    assert msg.docId == "doc-001"
+    assert msg.document_id == "doc-001"
     # Verify the published JSON deserialises back into a valid ``AgentStatusMessage``
     # — exercises the full Pydantic-boundary round-trip.
     rebuilt: AgentStatusMessage = AgentStatusMessage.model_validate_json(msg.model_dump_json())

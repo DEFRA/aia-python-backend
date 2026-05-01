@@ -9,7 +9,7 @@ Precedence: environment variables > yaml values > code defaults.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import Field, computed_field
@@ -131,6 +131,31 @@ def _make_customise_sources(yaml_key: str) -> classmethod[Any, Any, Any]:
 
 
 # ---------------------------------------------------------------------------
+# LLM client config
+# ---------------------------------------------------------------------------
+
+
+class LLMConfig(BaseSettings):
+    """LLM provider selection.
+
+    ``provider`` controls which Anthropic client the pipeline constructs:
+
+    * ``"anthropic"`` — direct Anthropic API; requires ``ANTHROPIC_API_KEY``.
+    * ``"bedrock"``   — AWS Bedrock; uses the boto3 credential chain, no API key.
+
+    Override via the ``LLM_PROVIDER`` environment variable or the ``llm.provider``
+    key in ``config.yaml``.
+    """
+
+    provider: Literal["anthropic", "bedrock"] = Field(
+        default="anthropic", alias="LLM_PROVIDER"
+    )
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+    settings_customise_sources = _make_customise_sources("llm")
+
+
+# ---------------------------------------------------------------------------
 # Agent configs
 # ---------------------------------------------------------------------------
 
@@ -147,33 +172,21 @@ class SecurityAgentConfig(BaseSettings):
     settings_customise_sources = _make_customise_sources("agents.security")
 
 
-class GovernanceAgentConfig(BaseSettings):
-    """Configuration for the GovernanceAgent.
+class TechnicalAgentConfig(BaseSettings):
+    """Configuration for the TechnicalAgent.
 
-    Drives the UK information-governance assessment (DPA 2018, UK GDPR,
+    Drives the technical compliance assessment (DPA 2018, UK GDPR,
     public-sector records management). Mirrors ``SecurityAgentConfig``
     so the two agents are interchangeable from the registry's perspective.
     """
 
-    model: str = Field(alias="GOVERNANCE_MODEL")
-    max_tokens: int = Field(default=4096, alias="GOVERNANCE_MAX_TOKENS")
-    temperature: float = Field(default=0.0, alias="GOVERNANCE_TEMPERATURE")
+    model: str = Field(alias="TECHNICAL_MODEL")
+    max_tokens: int = Field(default=4096, alias="TECHNICAL_MAX_TOKENS")
+    temperature: float = Field(default=0.0, alias="TECHNICAL_TEMPERATURE")
     api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("agents.governance")
-
-
-class GDPRAgentConfig(BaseSettings):
-    """Configuration for the GDPRComplianceAgent."""
-
-    model: str = Field(alias="GDPR_MODEL")
-    max_tokens: int = Field(default=4096, alias="GDPR_MAX_TOKENS")
-    temperature: float = Field(default=0.0, alias="GDPR_TEMPERATURE")
-    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-    settings_customise_sources = _make_customise_sources("agents.gdpr")
+    settings_customise_sources = _make_customise_sources("agents.technical")
 
 
 class TaggingAgentConfig(BaseSettings):
@@ -212,7 +225,7 @@ class PipelineConfig(BaseSettings):
     """Pipeline-wide constants (agent types, SQS limits, tag routing)."""
 
     agent_types: list[str] = Field(
-        default_factory=lambda: ["security", "governance"],
+        default_factory=lambda: ["security", "technical"],
         alias="PIPELINE_AGENT_TYPES",
     )
     sqs_inline_limit: int = Field(default=240_000, alias="PIPELINE_SQS_INLINE_LIMIT")
@@ -268,7 +281,7 @@ class LocalRunnerConfig(BaseSettings):
         alias="LOCAL_RUNNER_OUTPUT_FILENAME_TEMPLATE",
     )
     display_keys: dict[str, str] = Field(
-        default_factory=lambda: {"security": "Security", "governance": "Governance"},
+        default_factory=lambda: {"security": "Security", "technical": "Technical"},
         alias="LOCAL_RUNNER_DISPLAY_KEYS",
     )
 

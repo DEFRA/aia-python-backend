@@ -82,9 +82,9 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
     mock_security.assess = AsyncMock(return_value=_sample_result("Green"))
     mock_security_cls: MagicMock = MagicMock(return_value=mock_security)
 
-    mock_governance: MagicMock = MagicMock()
-    mock_governance.assess = AsyncMock(return_value=_sample_result("Amber"))
-    mock_governance_cls: MagicMock = MagicMock(return_value=mock_governance)
+    mock_technical: MagicMock = MagicMock()
+    mock_technical.assess = AsyncMock(return_value=_sample_result("Amber"))
+    mock_technical_cls: MagicMock = MagicMock(return_value=mock_technical)
 
     with (
         patch("main._parse_bytes", return_value=[{"chunk_index": 0, "text": "x"}]),
@@ -94,12 +94,13 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
             return_value=[{"is_heading": False, "text": "body"}],
         ),
         patch(
-            "main.load_assessment_from_file",
-            return_value=(questions, "https://example.test/"),
+            "main.fetch_assessment_by_category",
+            new=AsyncMock(return_value=(questions, "https://example.test/")),
         ),
+        patch("main.DatabaseConfig", return_value=MagicMock(dsn="postgresql://test:test@localhost/test")),
         patch.dict(
             "src.handlers.agent.AGENT_REGISTRY",
-            {"security": mock_security_cls, "governance": mock_governance_cls},
+            {"security": mock_security_cls, "technical": mock_technical_cls},
         ),
         patch("main.anthropic") as mock_anthropic_mod,
     ):
@@ -120,16 +121,16 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
 
     # Both agents dispatched via the registry
     mock_security_cls.assert_called_once()
-    mock_governance_cls.assert_called_once()
+    mock_technical_cls.assert_called_once()
     mock_security.assess.assert_awaited_once()
-    mock_governance.assess.assert_awaited_once()
+    mock_technical.assess.assert_awaited_once()
 
     # Output JSON has the SQS Status shape with the configured display keys
     assert output_path.is_file()
     written: dict[str, Any] = json.loads(output_path.read_text(encoding="utf-8"))
-    assert written["docId"] == "UUID-test"
+    assert written["document_id"] == "UUID-test"
     assert "Security" in written
-    assert "Governance" in written
+    assert "Technical" in written
     assert written["Security"]["Assessments"][0]["Rating"] == "Green"
-    assert written["Governance"]["Assessments"][0]["Rating"] == "Amber"
+    assert written["Technical"]["Assessments"][0]["Rating"] == "Amber"
     assert result == written

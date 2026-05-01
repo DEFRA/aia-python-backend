@@ -2,8 +2,8 @@
 
 Taxonomy is partitioned by downstream agent:
 - Security tags map to the SecurityAgent's checklist categories.
-- Governance tags map to the GovernanceAgent's UK information-governance
-  remit (DPA 2018 / UK GDPR / public-sector records management).
+- Technical tags map to the TechnicalAgent's UK compliance remit
+  (DPA 2018 / UK GDPR / public-sector records management).
 
 Adding or removing a tag here must stay in lock-step with
 ``pipeline.agent_tag_map`` in ``app/agents/evaluation/config.yaml``;
@@ -18,7 +18,7 @@ TAXONOMY: dict[str, str] = {
     "vulnerability_management": "CVE, SAST, DAST, patching, dependency scanning",
     "secrets_management": "API keys, credentials, vaults, rotation",
     "network_security": "Firewall, VPN, TLS, segmentation, ingress/egress",
-    # --- Information Governance (UK GDPR / DPA 2018 / records management) ---
+    # --- Technical compliance (UK GDPR / DPA 2018 / records management) ---
     "data_protection": "DPA 2018 / UK GDPR scope, controller/processor roles, accountability",
     "records_of_processing": "ROPA per UK GDPR Article 30, processing register, metadata",
     "data_retention": "Retention schedules, disposal procedures, archival, deletion",

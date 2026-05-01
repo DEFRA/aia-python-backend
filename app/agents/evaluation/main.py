@@ -1,7 +1,7 @@
 """Local end-to-end runner for the evaluation pipeline.
 
 Mocks the SQS Tasks queue input from ``files/system_input_output_SQS.md`` --
-``{"docId": "...", "s3Key": "..."}`` -- and drives every pipeline stage in
+``{"document_id": "...","s3Key": "..."}`` -- and drives every pipeline stage in
 sequence against the underlying business logic:
 
     Stage 3 Parse -> Stage 4 Tag -> Stage 5 Extract Sections -> Stage 6 Agent
@@ -17,7 +17,7 @@ filename template, agent-type display keys) are sourced from
 hardcoded paths or display strings live in this module.
 
 The output JSON shape matches the contract in ``files/system_input_output_SQS.md``:
-``{"docId": "...", "<Section>": {"Assessments": [...], "Final_Summary": {...}}}``
+``{"document_id": "...","<Section>": {"Assessments": [...], "Final_Summary": {...}}}``
 with one section per specialist agent that has an assessment input file.
 """
 
@@ -35,8 +35,8 @@ from dotenv import load_dotenv
 
 from src.agents.schemas import AgentResult, TaggedChunk
 from src.agents.tagging_agent import TaggingAgent
-from src.config import LocalRunnerConfig, PipelineConfig, TaggingAgentConfig
-from src.db.assessment_loader import load_assessment_from_file
+from src.config import DatabaseConfig, LocalRunnerConfig, PipelineConfig, TaggingAgentConfig
+from src.db.questions_repo import fetch_assessment_by_category
 from src.handlers.agent import (
     AGENT_REGISTRY,
     CONFIG_REGISTRY,
@@ -47,6 +47,7 @@ from src.handlers.agent import (
 from src.handlers.extract_sections import extract_sections_for_agent
 from src.handlers.parse import SqsRecordBody, _parse_bytes
 from src.utils.exceptions import UnknownCategoryError
+from src.utils.llm_client import make_llm_client
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -116,7 +117,7 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
     runner_config: LocalRunnerConfig = LocalRunnerConfig()
 
     # ---- Mock Stage 3 input: SQS Tasks message body --------------------
-    sqs_body: SqsRecordBody = SqsRecordBody(docId=doc_id, s3Key=s3_key)
+    sqs_body: SqsRecordBody = SqsRecordBody(document_id=doc_id, s3Key=s3_key)
     logger.info("Mock SQS Tasks body: %s", sqs_body.model_dump_json())
 
     # ---- Stage 3 -- Parse: read bytes from local disk, parse to chunks --
@@ -131,7 +132,7 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
     # ``client`` as ``anthropic.AsyncAnthropic``; ``AsyncAnthropicBedrock``
     # is duck-compatible (same ``messages.create`` interface).
     tagging_config: TaggingAgentConfig = TaggingAgentConfig()  # type: ignore[call-arg]
-    tagging_client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropicBedrock()  # type: ignore[assignment]
+    tagging_client: anthropic.AsyncAnthropic = make_llm_client()
     tagging_agent: TaggingAgent = TaggingAgent(client=tagging_client, config=tagging_config)
     tagged_chunks: list[TaggedChunk] = await tagging_agent.tag(chunks)
     tagged_dicts: list[dict[str, Any]] = [tc.model_dump() for tc in tagged_chunks]
@@ -152,7 +153,9 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
             continue
 
         try:
-            questions, category_url = load_assessment_from_file(display_key)
+            questions, category_url = await fetch_assessment_by_category(
+                DatabaseConfig().dsn, display_key
+            )
         except UnknownCategoryError:
             logger.warning(
                 "No assessment input for '%s' (looked for category=%s) -- skipping this agent.",
@@ -165,7 +168,7 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
         document_text: str = _sections_to_text(sections)
 
         body: AgentTaskBody = AgentTaskBody(
-            docId=doc_id,
+            document_id=doc_id,
             agentType=agent_type,
             document=document_text,
             questions=questions,
@@ -188,12 +191,12 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
         )
 
     # ---- Stage 6 -- Agent: run each specialist on its sections ---------
-    output: dict[str, Any] = {"docId": doc_id}
+    output: dict[str, Any] = {"document_id": doc_id}
 
     for body in agent_tasks:
         agent_type = body.agentType
         agent_config: SpecialistAgentConfig = CONFIG_REGISTRY[agent_type]()
-        agent_client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropicBedrock()  # type: ignore[assignment]
+        agent_client: anthropic.AsyncAnthropic = make_llm_client()
         agent: SpecialistAgent = AGENT_REGISTRY[agent_type](
             client=agent_client,
             agent_config=agent_config,
