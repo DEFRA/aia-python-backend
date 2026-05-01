@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +28,7 @@ def _make_event(
         inline_tagged if inline_tagged is not None else _sample_tagged_chunks()
     )
     detail: DocumentTaggedDetail = DocumentTaggedDetail.model_validate(
-        {"docId": doc_id, "payload": {"inline": json.dumps(chunks)}}
+        {"document_id": doc_id, "payload": {"inline": json.dumps(chunks)}}
     )
     return {"detail": detail.model_dump(by_alias=True)}
 
@@ -111,7 +112,7 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
 
 
 def _mock_assessment_items() -> list[QuestionItem]:
-    """Default questions used by the patched ``load_assessment_from_file``."""
+    """Default questions returned by the patched ``fetch_assessment_by_category``."""
     return [
         QuestionItem(question="Is MFA enabled?", reference="Ref-1"),
         QuestionItem(question="Are logs centralised?", reference="Ref-2"),
@@ -136,8 +137,8 @@ class TestExtractSectionsForAgent:
         texts: list[str] = [c["text"] for c in result]
         assert "MFA is enforced for all users." in texts
 
-    def test_security_agent_excludes_governance_only_chunks(self) -> None:
-        """Security agent should not include chunks tagged only with governance tags."""
+    def test_security_agent_excludes_technical_only_chunks(self) -> None:
+        """Security agent should not include chunks tagged only with technical-agent tags."""
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
@@ -205,12 +206,12 @@ class TestExtractSectionsForAgent:
         indices: list[int] = [c["chunk_index"] for c in result]
         assert indices == sorted(indices)
 
-    def test_governance_agent_gets_records_and_retention(self) -> None:
-        """Governance agent should include records_of_processing and data_retention chunks."""
+    def test_technical_agent_gets_records_and_retention(self) -> None:
+        """Technical agent should include records_of_processing and data_retention chunks."""
         from src.handlers.extract_sections import extract_sections_for_agent
 
         chunks: list[dict[str, Any]] = _sample_tagged_chunks()
-        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "governance")
+        result: list[dict[str, Any]] = extract_sections_for_agent(chunks, "technical")
 
         body_texts: list[str] = [c["text"] for c in result if not c.get("is_heading")]
         assert "ROPA maintained per Article 30." in body_texts
@@ -277,12 +278,21 @@ class TestSectionsToText:
 # ---------------------------------------------------------------------------
 
 
-def _patch_loader() -> Any:
-    """Patch ``load_assessment_from_file`` to return predictable typed data."""
-    return patch(
-        "src.handlers.extract_sections.load_assessment_from_file",
-        return_value=(_mock_assessment_items(), _TEST_CATEGORY_URL),
+def _patch_loader() -> ExitStack:
+    """Patch ``fetch_assessment_by_category`` and ``_get_db_config`` together."""
+    stack = ExitStack()
+    stack.enter_context(
+        patch(
+            "src.handlers.extract_sections.fetch_assessment_by_category",
+            new=AsyncMock(return_value=(_mock_assessment_items(), _TEST_CATEGORY_URL)),
+        )
     )
+    mock_db = MagicMock()
+    mock_db.dsn = "postgresql://test:test@localhost/test"
+    stack.enter_context(
+        patch("src.handlers.extract_sections._get_db_config", return_value=mock_db)
+    )
+    return stack
 
 
 class TestHandler:
@@ -293,7 +303,7 @@ class TestHandler:
         """_handler should reject an event missing required detail fields."""
         from src.handlers.extract_sections import _handler
 
-        bad_event: dict[str, Any] = {"detail": {"docId": "doc-001"}}
+        bad_event: dict[str, Any] = {"detail": {"document_id": "doc-001"}}
 
         with pytest.raises(ValidationError):
             await _handler(bad_event, {})
@@ -340,7 +350,7 @@ class TestHandler:
         for msg in sent_messages:
             body: dict[str, Any] = json.loads(msg["MessageBody"])
             agent_types_sent.add(body["agentType"])
-        assert agent_types_sent == {"security", "governance"}
+        assert agent_types_sent == {"security", "technical"}
 
     @pytest.mark.asyncio
     async def test_extract_sections_resolves_s3_tagged_payload(self) -> None:
@@ -348,7 +358,7 @@ class TestHandler:
         chunks_json: bytes = json.dumps(_sample_tagged_chunks()).encode("utf-8")
 
         detail = DocumentTaggedDetail.model_validate(
-            {"docId": "doc-x", "payload": {"s3Key": "state/doc-x/tagged.json"}}
+            {"document_id": "doc-x", "payload": {"s3Key": "state/doc-x/tagged.json"}}
         )
         event: dict[str, Any] = {"detail": detail.model_dump(by_alias=True)}
 

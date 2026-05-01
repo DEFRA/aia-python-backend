@@ -18,8 +18,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.agents.schemas import DocumentTaggedDetail
-from src.config import CloudWatchConfig, PipelineConfig
-from src.db.assessment_loader import load_assessment_from_file
+from src.config import CloudWatchConfig, DatabaseConfig, PipelineConfig
+from src.db.questions_repo import fetch_assessment_by_category
 from src.handlers.agent import AgentTaskBody
 from src.utils.payload_offload import resolve_payload
 
@@ -35,6 +35,7 @@ _s3: Any = None
 _cw: Any = None
 _cw_config: CloudWatchConfig | None = None
 _pipeline_config: PipelineConfig | None = None
+_db_config: DatabaseConfig | None = None
 _agent_tag_map_cache: dict[str, frozenset[str]] | None = None
 
 
@@ -52,6 +53,14 @@ def _get_pipeline_config() -> PipelineConfig:
     if _pipeline_config is None:
         _pipeline_config = PipelineConfig()
     return _pipeline_config
+
+
+def _get_db_config() -> DatabaseConfig:
+    """Return the module-level DatabaseConfig singleton, creating on first call."""
+    global _db_config  # noqa: PLW0603
+    if _db_config is None:
+        _db_config = DatabaseConfig()
+    return _db_config
 
 
 def _get_agent_tag_map() -> dict[str, frozenset[str]]:
@@ -260,7 +269,7 @@ async def _enqueue_sqs_message(  # noqa: PLR0913
     """Enqueue a single SQS message, offloading the document text to S3 if too large.
 
     Args:
-        payload: Full payload dict containing docId, agentType, document, etc.
+        payload: Full payload dict containing document_id, agentType, document, etc.
         queue_url: SQS queue URL.
         sqs_client: A boto3 SQS client.
         s3_client: A boto3 S3 client (for large payload offload).
@@ -268,7 +277,7 @@ async def _enqueue_sqs_message(  # noqa: PLR0913
         inline_limit: Maximum inline body size in bytes.
     """
     message_body: str = json.dumps(payload)
-    doc_id: str = payload["docId"]
+    doc_id: str = payload["document_id"]
     agent_type: str = payload["agentType"]
 
     if len(message_body.encode("utf-8")) <= inline_limit:
@@ -283,7 +292,7 @@ async def _enqueue_sqs_message(  # noqa: PLR0913
     # Pydantic-serialised payload (Pydantic Boundary Validation rule).
     pointer_body: AgentTaskBody = AgentTaskBody.model_validate(
         {
-            "docId": doc_id,
+            "document_id": doc_id,
             "agentType": agent_type,
             "s3PayloadKey": s3_key,
             "questions": payload["questions"],
@@ -332,7 +341,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     # 1. Validate EventBridge event
     detail: DocumentTaggedDetail = DocumentTaggedDetail.model_validate(event["detail"])
-    doc_id: str = detail.docId
+    doc_id: str = detail.document_id
 
     logger.info("Stage 5 ExtractSections: doc_id=%s", doc_id)
 
@@ -353,11 +362,13 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     for agent_type in _get_pipeline_config().agent_types:
         sections: list[dict[str, Any]] = extract_sections_for_agent(tagged_chunks, agent_type)
-        questions, category_url = load_assessment_from_file(agent_type)
+        questions, category_url = await fetch_assessment_by_category(
+            _get_db_config().dsn, agent_type
+        )
         document_text: str = _sections_to_text(sections)
 
         body: AgentTaskBody = AgentTaskBody(
-            docId=doc_id,
+            document_id=doc_id,
             agentType=agent_type,
             document=document_text,
             questions=questions,

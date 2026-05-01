@@ -1,49 +1,72 @@
-"""Postgres reader stub for per-category assessment input.
+"""Postgres reader for per-category assessment questions.
 
-The Postgres schema for the assessment input table is TBC. Until the layout is
-finalised, callers should use ``src.db.assessment_loader.load_assessment_from_file``;
-this module preserves the agreed async signature so the swap-over at
-``handlers/extract_sections.py`` and ``main.py`` is a one-line change.
-
-When implemented, the function is expected to read from a categories table
-(carrying the per-category SharePoint reference URL) joined to a questions
-table (one row per checklist question with its authoritative reference text)
-and return ``(list[QuestionItem], category_url)`` -- exactly the shape produced
-by the file-based loader today.
+Reads from the data_pipeline schema populated by the datapipeline Lambda.
+Returns ``(list[QuestionItem], category_url)``.
 """
 
 from __future__ import annotations
 
 import logging
 
+import asyncpg
+
 from src.agents.schemas import QuestionItem
+from src.utils.exceptions import UnknownCategoryError
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_FETCH_QUESTIONS_SQL = """
+    SELECT q.question_text, q.reference, pd.source_url
+    FROM data_pipeline.questions q
+    JOIN data_pipeline.question_categories qc ON q.question_id = qc.question_id
+    JOIN data_pipeline.policy_documents pd ON q.policy_doc_id = pd.policy_doc_id
+    WHERE LOWER(qc.category) = LOWER($1)
+      AND q.isactive = true
+    ORDER BY pd.created_at DESC, q.created_at ASC
+"""
 
 
 async def fetch_assessment_by_category(
     dsn: str,
     category: str,
 ) -> tuple[list[QuestionItem], str]:
-    """Fetch ``(questions, category_url)`` for a category from Postgres.
-
-    The Postgres schema is TBC. Until the table layout is finalised, callers
-    should use ``src.db.assessment_loader.load_assessment_from_file``. This
-    stub preserves the agreed signature so the swap-over is a one-line
-    change at the call sites in ``extract_sections.py`` and ``main.py``.
+    """Fetch active questions for a category from data_pipeline.questions.
 
     Args:
         dsn: asyncpg-compatible connection string.
-        category: The category name to filter by (e.g. ``"Security"``).
+        category: Category name (e.g. ``"security"``, ``"technical"``).
+            Case-insensitive — matched with ``LOWER()`` in SQL.
 
     Returns:
-        A ``(questions, category_url)`` tuple, identical in shape to
-        ``load_assessment_from_file``.
+        ``(questions, category_url)`` where ``questions`` is the list of active
+        ``QuestionItem`` instances and ``category_url`` is the ``source_url`` of
+        the most recently created policy document contributing questions in this
+        category (used as ``Reference.url`` in every assessment row).
 
     Raises:
-        NotImplementedError: Always, until the Postgres schema is in place.
+        UnknownCategoryError: If no active questions exist for the given category.
+        asyncpg.PostgresError: On connection or query failure.
     """
-    raise NotImplementedError(
-        "Postgres assessment schema is TBC; "
-        "use load_assessment_from_file from src.db.assessment_loader."
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(_FETCH_QUESTIONS_SQL, category)
+    finally:
+        await conn.close()
+
+    if not rows:
+        raise UnknownCategoryError(
+            f"No active questions found for category: {category!r}"
+        )
+
+    questions: list[QuestionItem] = [
+        QuestionItem(question=row["question_text"], reference=row["reference"])
+        for row in rows
+    ]
+    category_url: str = rows[0]["source_url"]
+    logger.info(
+        "Fetched %d question(s) for category=%r category_url=%s",
+        len(questions),
+        category,
+        category_url,
     )
+    return questions, category_url
