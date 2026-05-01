@@ -24,6 +24,11 @@ _EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
+# Load the evaluation module's own .env so DatabaseConfig picks up DB_HOST/NAME/USER/PASSWORD.
+# This must happen before any src.* import that triggers Pydantic settings initialisation.
+from dotenv import load_dotenv as _load_dotenv  # noqa: E402
+_load_dotenv(_EVAL_ROOT / ".env", override=False)  # override=False: root .env values take precedence
+
 from src.config import DatabaseConfig  # noqa: E402
 from src.db.questions_repo import fetch_assessment_by_category  # noqa: E402
 from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
@@ -38,9 +43,15 @@ from app.utils.logger import get_logger
 
 logger = get_logger("app.relay_service")
 
-# Covers the maximum expected LLM call; set on the receive call so the message
-# stays invisible while the agent runs.
+# SQS visibility window — message stays invisible while the agent runs.
+# Must be strictly greater than _AGENT_TIMEOUT_SECONDS so there is always
+# time to publish an error StatusMessage before the message reappears.
 _AGENT_VISIBILITY_TIMEOUT = 600
+
+# Maximum time allowed for a single agent.assess() call.
+# Sourced from ORCHESTRATOR_AGENT_TIMEOUT_SECONDS (default 480 s).
+# Kept below _AGENT_VISIBILITY_TIMEOUT to guarantee the error path completes.
+_AGENT_TIMEOUT_SECONDS: int = app_config.orchestrator_agent_timeout
 
 _db_config: DatabaseConfig | None = None
 
@@ -88,16 +99,33 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
     agent = AGENT_REGISTRY[agent_type](client=client, agent_config=agent_config)
 
     try:
-        result = await agent.assess(
-            document=document,
-            questions=questions,
-            category_url=category_url,
+        result = await asyncio.wait_for(
+            agent.assess(
+                document=document,
+                questions=questions,
+                category_url=category_url,
+            ),
+            timeout=_AGENT_TIMEOUT_SECONDS,
         )
         return StatusMessage(
             task_id=task.task_id,
             document_id=task.document_id,
             agent_type=agent_type,
             result=result.model_dump(),
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Agent timed out after %ds task_id=%s agent_type=%s",
+            _AGENT_TIMEOUT_SECONDS,
+            task.task_id,
+            agent_type,
+        )
+        return StatusMessage(
+            task_id=task.task_id,
+            document_id=task.document_id,
+            agent_type=agent_type,
+            result={},
+            error=f"Agent timed out after {_AGENT_TIMEOUT_SECONDS}s",
         )
     except Exception as exc:  # noqa: BLE001
         logger.error(

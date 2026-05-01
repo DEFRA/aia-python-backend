@@ -189,6 +189,52 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
 
 
 # ---------------------------------------------------------------------------
+# dispatch — LLM timeout surfaced as StatusMessage.error (not a retry)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_returns_error_on_agent_timeout() -> None:
+    """asyncio.TimeoutError from wait_for must produce an error StatusMessage,
+    not propagate — the message must still be deleted, not retried."""
+    from app.relay_service.worker import dispatch
+
+    task = _make_task()
+    s3 = AsyncMock()
+    mock_agent = AsyncMock()
+
+    async def _slow_assess(**_: Any) -> None:
+        await asyncio.sleep(9999)
+
+    mock_agent.assess.side_effect = _slow_assess
+
+    with (
+        patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
+        patch(
+            "app.relay_service.worker.fetch_assessment_by_category",
+            new=AsyncMock(return_value=([], "https://example.com")),
+        ),
+        patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
+        patch(
+            "app.relay_service.worker.AGENT_REGISTRY",
+            {"security": lambda **_: mock_agent},
+        ),
+        patch(
+            "app.relay_service.worker.CONFIG_REGISTRY",
+            {"security": MagicMock(return_value=MagicMock())},
+        ),
+        patch("app.relay_service.worker._AGENT_TIMEOUT_SECONDS", 1),
+    ):
+        mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
+        status = await dispatch(task, s3)
+
+    assert status.error is not None
+    assert "timed out" in status.error.lower()
+    assert "1s" in status.error
+    assert status.result == {}
+
+
+# ---------------------------------------------------------------------------
 # run_worker — single iteration smoke test
 # ---------------------------------------------------------------------------
 
