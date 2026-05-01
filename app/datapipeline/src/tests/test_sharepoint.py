@@ -281,6 +281,7 @@ class TestReadPageContent:
         pages_resp = MagicMock()
         pages_resp.status_code = 403
         pages_resp.text = "Forbidden"
+        # 4xx is not retried — only one pages call before fallback
         mock_get.side_effect = [site_resp, pages_resp]
 
         client = _make_client()
@@ -356,3 +357,216 @@ class TestReadPageContent:
         assert "microsoft.graph.sitePage" in second_call_url
         assert "DataPolicy.aspx" in second_call_url
         assert "canvasLayout" in second_call_url
+
+
+# ---------------------------------------------------------------------------
+# SharePointClient._get_with_retry
+# ---------------------------------------------------------------------------
+
+
+class TestGetWithRetry:
+    def _make_timeout_exc(self) -> req_lib.exceptions.ReadTimeout:
+        return req_lib.exceptions.ReadTimeout("Read timed out.")
+
+    def _make_site_r(self, last_modified: str | None = None) -> MagicMock:
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = _site_response(last_modified=last_modified or _TS_STR)
+        return r
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    def test_succeeds_on_first_attempt_without_sleep(
+        self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        mock_get.side_effect = _mock_get(
+            [_site_response(), _pages_response()]
+        ).side_effect
+
+        client = _make_client()
+        client.read_page_content(_TEAMS_URL)
+
+        mock_sleep.assert_not_called()
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    def test_retries_once_on_pages_timeout_then_succeeds(
+        self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        timeout_resp = self._make_timeout_exc()
+        page_r = MagicMock()
+        page_r.status_code = 200
+        page_r.json.return_value = _pages_response(body_html="<p>Content</p>")
+        # site OK → pages timeout → pages OK on retry
+        mock_get.side_effect = [self._make_site_r(), timeout_resp, page_r]
+
+        client = _make_client()
+        text, _ = client.read_page_content(_TEAMS_URL)
+
+        assert "Content" in text
+        mock_sleep.assert_called_once()
+        assert mock_get.call_count == 3  # site + timeout + retry
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    def test_falls_back_after_all_retries_exhausted(
+        self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        mock_get.side_effect = [
+            self._make_site_r(),
+            self._make_timeout_exc(),
+            self._make_timeout_exc(),
+        ]
+
+        client = _make_client()
+        text, last_modified = client.read_page_content(_TEAMS_URL)
+
+        assert "Site Title" in text
+        assert last_modified == _TS
+        mock_sleep.assert_called_once()  # one sleep between the two page attempts
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    def test_backoff_delay_is_two_seconds(
+        self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        mock_get.side_effect = [
+            self._make_site_r(),
+            self._make_timeout_exc(),
+            self._make_timeout_exc(),
+        ]
+
+        client = _make_client()
+        client.read_page_content(_TEAMS_URL)
+
+        mock_sleep.assert_called_once_with(2.0)
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    def test_4xx_not_retried(
+        self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        bad_r = MagicMock()
+        bad_r.status_code = 400
+        bad_r.text = '{"error":{"code":"badArgument"}}'
+        # Only two responses needed: site OK + one 400 (no retry for 4xx)
+        mock_get.side_effect = [self._make_site_r(), bad_r, bad_r]
+
+        client = _make_client()
+        client.read_page_content(_TEAMS_URL)
+
+        mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# SharePointClient._fetch_page_content — 400 list-and-match fallback
+# ---------------------------------------------------------------------------
+
+
+def _list_response(
+    page_name: str = "DataPolicy.aspx", page_id: str = "page-id-1"
+) -> dict:
+    return {"value": [{"id": page_id, "name": page_name}]}
+
+
+class TestFetchPageContentFallback:
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    def test_400_triggers_list_and_match_fallback(
+        self, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        site_r = MagicMock()
+        site_r.status_code = 200
+        site_r.json.return_value = _site_response(last_modified=_TS_STR)
+        bad_r = MagicMock()
+        bad_r.status_code = 400
+        bad_r.text = '{"error":{"code":"badArgument"}}'
+        list_r = MagicMock()
+        list_r.status_code = 200
+        list_r.json.return_value = _list_response("DataPolicy.aspx", "pid-1")
+        detail_r = MagicMock()
+        detail_r.status_code = 200
+        detail_r.json.return_value = _pages_response(body_html="<p>CDAP content</p>")[
+            "value"
+        ][0]
+        mock_get.side_effect = [site_r, bad_r, list_r, detail_r]
+
+        client = _make_client()
+        text, _ = client.read_page_content(_TEAMS_URL)
+
+        assert "CDAP content" in text
+        assert mock_get.call_count == 4  # site + 400 filter + list + detail
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    def test_400_list_finds_no_match_falls_back_to_site_metadata(
+        self, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        site_r = MagicMock()
+        site_r.status_code = 200
+        site_r.json.return_value = _site_response(last_modified=_TS_STR)
+        bad_r = MagicMock()
+        bad_r.status_code = 400
+        bad_r.text = '{"error":{"code":"badArgument"}}'
+        # list returns pages but none match the target name
+        list_r = MagicMock()
+        list_r.status_code = 200
+        list_r.json.return_value = {"value": [{"id": "x", "name": "OtherPage.aspx"}]}
+        mock_get.side_effect = [site_r, bad_r, list_r]
+
+        client = _make_client()
+        text, last_modified = client.read_page_content(_TEAMS_URL)
+
+        assert "Site Title" in text
+        assert last_modified == _TS
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    def test_400_list_also_fails_falls_back_to_site_metadata(
+        self, mock_get: MagicMock, mock_msal: MagicMock
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+        site_r = MagicMock()
+        site_r.status_code = 200
+        site_r.json.return_value = _site_response(last_modified=_TS_STR)
+        bad_r = MagicMock()
+        bad_r.status_code = 400
+        bad_r.text = '{"error":{"code":"badArgument"}}'
+        list_err_r = MagicMock()
+        list_err_r.status_code = 403
+        list_err_r.text = "Forbidden"
+        mock_get.side_effect = [site_r, bad_r, list_err_r]
+
+        client = _make_client()
+        text, last_modified = client.read_page_content(_TEAMS_URL)
+
+        assert "Site Title" in text
+        assert last_modified == _TS
