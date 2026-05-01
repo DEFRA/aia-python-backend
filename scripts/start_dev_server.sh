@@ -22,7 +22,7 @@ sleep 5
 # Set environment variables for local development
 export PORT=8086
 export AWS_ENDPOINT_URL=http://localhost:4566
-export POSTGRES_URI="postgresql://aiauser:Admin123\$@localhost:5432/aia_documents"
+export POSTGRES_URI="postgresql://aiauser:<PASSWORD>@localhost:5432/aia_documents"
 export S3_BUCKET_NAME=docsupload
 export ENV=dev
 export HOST=localhost
