@@ -50,7 +50,7 @@ app/datapipeline/
 │   ├── sharepoint.py                # SharePointClient — Microsoft Graph API
 │   ├── sync.py                      # Change detection (get/upsert policy_document_sync)
 │   ├── utils.py                     # url_to_hash, page_name_from_url, new_uuid
-│   ├── lambda_function.py           # Lambda handler wrapper (do not modify)
+│   ├── lambda_function.py           # Lambda handler — thin wrapper around main.run()
 │   └── tests/
 │       ├── test_db.py
 │       ├── test_evaluator.py
@@ -58,7 +58,8 @@ app/datapipeline/
 │       ├── test_sharepoint.py
 │       ├── test_sync.py
 │       └── test_utils.py
-├── requirements.txt
+├── requirements.txt                     # Runtime dependencies (bundled into Lambda zip)
+├── requirements-dev.txt                 # Dev/test dependencies (not bundled)
 └── Readme.md
 ```
 
@@ -269,9 +270,175 @@ podman rm   aiadocuments
 ## Running Tests
 
 ```bash
+pip install -r app/datapipeline/requirements-dev.txt
+
 pytest app/datapipeline/src/tests/ -v
 pytest app/datapipeline/src/tests/ --cov=app/datapipeline/src --cov-report=term-missing
 ```
+
+---
+
+## Deploying to AWS Lambda
+
+The pipeline runs as a single Lambda function invoked by EventBridge Scheduler. The handler is `app.datapipeline.src.lambda_function.lambda_handler`, which delegates entirely to `main.run()` and returns `{"statusCode": 200, "body": {"processed": N, "skipped": N, "failed": N}}`.
+
+### Step 1 — Build the deployment zip
+
+The zip must contain both the application code and all runtime dependencies. Build on a Linux x86_64 environment (or use the `--platform` flag on macOS) so that `psycopg2-binary` ships the correct native library for Lambda's Amazon Linux runtime.
+
+```bash
+# From the repo root
+
+# Install runtime deps into a staging directory
+pip install -r app/datapipeline/requirements.txt \
+    --platform manylinux2014_x86_64 \
+    --only-binary=:all: \
+    --target package/
+
+# Copy application source
+cp -r app/ package/app/
+
+# Zip everything
+cd package && zip -r ../datapipeline-lambda.zip . && cd ..
+```
+
+> **Note:** `requirements-dev.txt` (pytest etc.) must **not** be installed into `package/` — runtime only.
+
+Upload `datapipeline-lambda.zip` to S3 or directly via the Lambda console / AWS CLI.
+
+---
+
+### Step 2 — Create / configure the Lambda function
+
+| Setting | Value |
+|---------|-------|
+| **Runtime** | Python 3.12 |
+| **Handler** | `app.datapipeline.src.lambda_function.lambda_handler` |
+| **Timeout** | `600` seconds (10 minutes) |
+| **Memory** | `512` MB |
+| **Architecture** | `x86_64` |
+
+```bash
+aws lambda create-function \
+  --function-name aia-datapipeline \
+  --runtime python3.12 \
+  --handler app.datapipeline.src.lambda_function.lambda_handler \
+  --timeout 600 \
+  --memory-size 512 \
+  --role arn:aws:iam::<ACCOUNT_ID>:role/aia-datapipeline-role \
+  --zip-file fileb://datapipeline-lambda.zip
+```
+
+---
+
+### Step 3 — Set environment variables
+
+Configure all required variables in the Lambda environment (console → Configuration → Environment variables, or via CLI / IaC).
+
+| Variable | Where to get it |
+|----------|----------------|
+| `DB_HOST` | RDS endpoint |
+| `DB_PORT` | `5432` (default) |
+| `DB_NAME` | Database name |
+| `DB_USER` | Database user |
+| `DB_PASSWORD` | RDS password — store in Secrets Manager (see note below) |
+| `SHAREPOINT_TENANT_ID` | Azure AD → App registrations |
+| `SHAREPOINT_CLIENT_ID` | Azure AD → App registrations |
+| `SHAREPOINT_CLIENT_SECRET` | Azure AD → App registrations → Certificates & secrets |
+| `AWS_DEFAULT_REGION` | e.g. `eu-west-2` |
+| `MODEL_ID` | e.g. `anthropic.claude-3-7-sonnet-20250219-v1:0` |
+
+> **Secrets Manager (recommended):** Store `DB_PASSWORD`, `SHAREPOINT_CLIENT_SECRET` as secrets and inject their values at Lambda startup rather than as plain-text env vars. Requires adding `secretsmanager:GetSecretValue` to the IAM role and a small wrapper to resolve the values before `main.run()` is called.
+
+Do **not** set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, or `AWS_SESSION_TOKEN` in Lambda — Bedrock access is handled by the IAM execution role (Step 4).
+
+---
+
+### Step 4 — IAM execution role
+
+Create a role with the following trust policy (Lambda service) and attach these permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:<REGION>::foundation-model/<MODEL_ID>"
+    }
+  ]
+}
+```
+
+If using Secrets Manager for credentials, also add:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "secretsmanager:GetSecretValue",
+  "Resource": [
+    "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:aia/datapipeline/*"
+  ]
+}
+```
+
+If the Lambda is deployed inside a VPC (required when RDS is not publicly accessible), attach the AWS managed policy **`AWSLambdaVPCAccessExecutionRole`** to the role — it grants the `ec2:CreateNetworkInterface` permissions Lambda needs.
+
+---
+
+### Step 5 — VPC configuration (required if RDS is in a VPC)
+
+Lambda must be placed in the **same VPC and private subnet** as RDS so it can reach port 5432.
+
+1. In the Lambda console → Configuration → VPC, select the VPC, private subnets, and a security group.
+2. On the **RDS security group**, add an inbound rule:
+
+   | Type | Protocol | Port | Source |
+   |------|----------|------|--------|
+   | PostgreSQL | TCP | 5432 | Lambda security group ID |
+
+3. Ensure the private subnets have a **NAT Gateway** route to the internet — Lambda needs outbound HTTPS to reach SharePoint (Graph API) and Bedrock.
+
+---
+
+### Step 6 — EventBridge Scheduler
+
+Create a schedule to invoke the Lambda on the required cadence (e.g. daily at 02:00 UTC):
+
+```bash
+aws scheduler create-schedule \
+  --name aia-datapipeline-daily \
+  --schedule-expression "cron(0 2 * * ? *)" \
+  --flexible-time-window '{"Mode": "OFF"}' \
+  --target '{
+    "Arn": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:aia-datapipeline",
+    "RoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/aia-scheduler-role"
+  }'
+```
+
+The scheduler role needs `lambda:InvokeFunction` on the Lambda ARN.
+
+The Lambda handler ignores the event payload, so no input transformer is needed.
+
+---
+
+### Step 7 — Verify the deployment
+
+Invoke the function manually to confirm end-to-end connectivity before relying on the schedule:
+
+```bash
+aws lambda invoke \
+  --function-name aia-datapipeline \
+  --log-type Tail \
+  response.json \
+  --query 'LogResult' --output text | base64 --decode
+
+cat response.json
+# Expected: {"statusCode": 200, "body": "{\"processed\": N, \"skipped\": N, \"failed\": 0}"}
+```
+
+Check CloudWatch Logs (`/aws/lambda/aia-datapipeline`) for per-URL progress and any errors.
 
 ---
 
