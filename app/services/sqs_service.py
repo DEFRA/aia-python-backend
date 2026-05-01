@@ -47,24 +47,35 @@ class SQSService:
         queue_url: str,
         max_messages: int = 10,
         wait_seconds: int = 20,
+        visibility_timeout: int = 0,
     ) -> list[dict[str, str]]:
         """
         Long-polls a queue and returns up to `max_messages` messages.
         Each entry has 'body' and 'receipt_handle'.
         Messages are NOT deleted — caller must call delete_message after processing.
+        When visibility_timeout > 0, overrides the queue's default visibility window.
         """
+        kwargs: dict[str, Any] = {
+            "QueueUrl": queue_url,
+            "MaxNumberOfMessages": min(max_messages, 10),
+            "WaitTimeSeconds": wait_seconds,
+            "AttributeNames": ["All"],
+        }
+        if visibility_timeout > 0:
+            kwargs["VisibilityTimeout"] = visibility_timeout
         async with self._get_client() as client:
-            response = await client.receive_message(
-                QueueUrl=queue_url,
-                MaxNumberOfMessages=min(max_messages, 10),  # SQS hard limit
-                WaitTimeSeconds=wait_seconds,
-                AttributeNames=["All"],
-            )
+            response = await client.receive_message(**kwargs)
         raw_messages = response.get("Messages", [])
         return [
             {"body": m["Body"], "receipt_handle": m["ReceiptHandle"]}
             for m in raw_messages
         ]
+
+    async def publish(self, queue_url: str, body: str) -> str:
+        """Publishes a raw JSON string to any SQS queue. Returns the MessageId."""
+        async with self._get_client() as client:
+            response = await client.send_message(QueueUrl=queue_url, MessageBody=body)
+        return response["MessageId"]
 
     async def delete_message(self, queue_url: str, receipt_handle: str) -> None:
         """Deletes a message from the queue after successful processing."""
