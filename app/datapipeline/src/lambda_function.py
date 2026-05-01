@@ -13,7 +13,7 @@ DB_NAME = os.environ["DB_NAME"]
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 BEDROCK_REGION = os.environ.get["BEDROCK_REGION"]
-BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20240620-v1:0"  
+BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 
 TENANT_ID = os.environ["SHAREPOINT_TENANT_ID"]
 CLIENT_ID = os.environ["SHAREPOINT_CLIENT_ID"]
@@ -26,6 +26,7 @@ bedrock = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
 
 
 # ---------- DB HELPERS (psycopg2) ----------
+
 
 def get_db_connection():
     return psycopg2.connect(
@@ -73,14 +74,15 @@ def save_questions(conn, doc_id, questions_json):
 
 # ---------- SHAREPOINT HELPERS ----------
 
+
 def get_sharepoint_access_token():
     """
     Client credentials flow to get an access token for Graph/SharePoint.
     """
-    token_url = f"https://login.microsoftonline.com/{SHAREPOINT_TENANT_ID}/oauth2/v2.0/token"
+    token_url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
     data = {
-        "client_id": SHAREPOINT_CLIENT_ID,
-        "client_secret": SHAREPOINT_CLIENT_SECRET,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
         "scope": SHAREPOINT_SCOPE,
         "grant_type": "client_credentials",
     }
@@ -108,6 +110,7 @@ def fetch_sharepoint_content(url: str) -> str:
 
 
 # ---------- BEDROCK / CLAUDE HELPER ----------
+
 
 def generate_evaluation_questions(document_text: str):
     """
@@ -175,6 +178,7 @@ Document content:
 
 
 # ---------- LAMBDA HANDLER ----------
+
 
 def lambda_handler(event, context):
     conn = None

@@ -1,199 +1,234 @@
+# AIA Policy Evaluation Data Pipeline
 
-Overview:
+Automates the extraction and storage of structured evaluation questions from Defra SharePoint policy pages. Questions are used downstream by the AIA assessment pipeline to evaluate design documents against organisational policies.
 
-The AIA Policy Evaluation Data Pipeline automates the extraction, analysis, and storage of policy‑based evaluation questions. These questions are later used to validate whether internal documents comply with organisational policies.
-The pipeline is fully serverless and event‑driven, using AWS EventBridge, AWS Lambda, PostgreSQL, Microsoft Graph (SharePoint Online), and Anthropic Bedrock.
+---
 
-High‑Level Architecture
+## Architecture
+
+```
 EventBridge Scheduler
         │
         ▼
-AWS Lambda Function
+AWS Lambda (data pipeline)
         │
-        ├── Fetch active policy URLs from PostgreSQL
+        ├── Load policy source URLs
+        │       ├── [default]  data_pipeline.source_path_policydoc (PostgreSQL)
+        │       └── [flag]     data/policy_sources.json (local file)
         │
-        ├── For each policy URL:
-        │       ├── Parse SharePoint hostname + site path
-        │       ├── Retrieve policy content via Microsoft Graph API
-        │       ├── Generate evaluation questions using Anthropic Bedrock
-        │       └── Store generated JSON results back into PostgreSQL
+        ├── For each active policy URL:
+        │       ├── Fetch page content via Microsoft Graph API (SharePoint)
+        │       ├── Check change — skip if last_modified unchanged
+        │       ├── Extract evaluation questions via Anthropic Bedrock (LLM)
+        │       └── Write to data_pipeline normalised tables (PostgreSQL)
         │
         ▼
-PostgreSQL (results stored)
+PostgreSQL — data_pipeline schema
+```
 
-Diagram:
-                   ┌──────────────────────────────  ┐
-                   │      EventBridge Scheduler     │
-                   │  (Cron-based automated trigger)│
-                   └───────────────┬──────────────  ┘
-                                   │
-                                   ▼
-                     ┌────────────────────────┐
-                     │      AWS Lambda        │
-                     │  Policy Evaluation Job │
-                     └─────────────┬──────────┘
-                                   │
-     ┌─────────────────────────────┼──────────────────────────────────────────┐
-     │                             │                                          │
-     ▼                             ▼                                          ▼
-┌──────────────┐        ┌──────────────────────┐                   ┌──────────────────────┐
-│ PostgreSQL   │        │ SharePoint URL       │                   │ Microsoft Graph API  │
-│ (Source URLs)│        │ Parsing (Hostname &  │                   │ (SharePoint Content  │
-│ aia_app.     │        │ Site Path Extraction)│                   │ Retrieval)           │
-│ source_path_ │        └──────────────────────┘                   └──────────────────────┘
-│ policydoc    │                    │                                          │
-└───────┬──────┘                    │                                          │
-        │                           ▼                                          │
-        │                ┌──────────────────────┐                              │
-        │                │ SharePoint Page      │                              │
-        │                │ Content (Title, Desc)│                              │
-        │                └───────────┬──────────┘                              │
-        │                            │                                         │
-        │                            ▼                                         │
-        │               ┌──────────────────────────┐                           │
-        │               │ Anthropic Bedrock (LLM)  │                           │
-        │               │ Generates Evaluation     │                           │
-        │               │ Questions (JSON Output)  │                           │
-        │               └───────────┬──────────────┘                           │
-        │                           │                                          │
-        │                           ▼                                          │
-        │               ┌──────────────────────────┐                           │
-        └──────────────►│ PostgreSQL (Results)     │◄──────────────────────────┘
-                        │ aia_app.policy_          │
-                        │ evaluation_results       │
-                        └──────────────────────────┘
+---
 
-Structure
-policy-evaluator/
-│
-├── app/datapipeline/src
+## Directory Structure
+
+```
+app/datapipeline/
+├── data/
+│   └── policy_sources.json          # Local policy source list (feature-flag mode)
+├── prompts/
+│   └── policy_evaluation_prompt.md  # LLM system prompt (edit without touching Python)
+├── src/
 │   ├── __init__.py
-│   ├── config.py
-│   ├── db.py
-│   ├── sharepoint.py
-│   ├── evaluator.py
-│   ├── utils.py
-│   └── main.py
-│
-├── app/datapipeline/prompts/
-│   └── policy_evaluation_prompt.md
-│
-├── app/datapipeline
-├    └── requirements.txt
-└    └── README.md
+│   ├── db.py                        # fetch_policy_sources, load_local_policy_sources,
+│   │                                #   insert_policy_document, delete_questions_for_doc,
+│   │                                #   insert_questions
+│   ├── evaluator.py                 # QuestionExtractor — calls Anthropic Bedrock
+│   ├── main.py                      # Pipeline orchestrator (run entry point)
+│   ├── schemas.py                   # PolicySource, ExtractedQuestion, SyncRecord
+│   ├── sharepoint.py                # SharePointClient — Microsoft Graph API
+│   ├── sync.py                      # Change detection (get/upsert policy_document_sync)
+│   ├── utils.py                     # url_to_hash, page_name_from_url, new_uuid
+│   ├── lambda_function.py           # Lambda handler wrapper (do not modify)
+│   └── tests/
+│       ├── test_db.py
+│       ├── test_evaluator.py
+│       ├── test_main.py
+│       ├── test_sharepoint.py
+│       ├── test_sync.py
+│       └── test_utils.py
+├── requirements.txt
+└── Readme.md
+```
 
-Pipeline Flow
-1. Event Trigger
-An AWS EventBridge Scheduler triggers the Lambda function at a configured interval (e.g., hourly, daily, weekly).
-This ensures policy evaluations are refreshed automatically without manual intervention.
+---
 
-2. Lambda Execution
-When invoked, the Lambda function performs the following steps:
-2.1 Fetch Policy Source URLs
-The Lambda connects to PostgreSQL and queries:
+## Pipeline Flow
 
-aia_app.source_path_policydoc
+### 1. Trigger
+AWS EventBridge Scheduler invokes the Lambda on a configured schedule (hourly / daily).
 
-It retrieves all active policy URLs that need evaluation.
-Each row contains:
-- url_id
-- url (SharePoint policy page)
-- category
-- type
-- isactive
-- datasize
+### 2. Load Policy Sources
+Policy URLs are loaded from one of two sources, controlled by the `USE_LOCAL_POLICY_SOURCES` feature flag:
 
+| Mode | Source |
+|------|--------|
+| `false` (default) | `data_pipeline.source_path_policydoc` in PostgreSQL |
+| `true` | `data/policy_sources.json` bundled with the Lambda package |
 
-3. SharePoint Content Retrieval
-For each policy URL:
-- The URL is parsed to extract:
-- SharePoint hostname
-- Site path (/teams/... or /sites/...)
-- The Lambda calls Microsoft Graph API using:
-- Client credentials (Tenant ID, Client ID, Client Secret)
-- Scope: https://graph.microsoft.com/.default
-- The Graph API returns:
-- Page title
-- Page description
-- Additional metadata (if available)
+Only rows/entries where `isactive = true` are processed.
 
-This content becomes the input for the evaluation model.
+### 3. SharePoint Content Retrieval
+For each policy URL the pipeline makes two Graph API calls:
 
-4. Evaluation Question Generation (Anthropic Bedrock)
-The pipeline uses Anthropic Bedrock to generate structured evaluation questions.
-The model receives:
-- The policy URL
-- The extracted SharePoint content
-- A strict JSON‑only system prompt
-- A timestamp
-- A root UUID for traceability
+**Step 1 — resolve site ID**
+```
+GET /v1.0/sites/{hostname}:{site_path}
+```
+Returns the opaque `site_id` needed for the pages endpoint, plus site-level fallback metadata (title, description, `lastModifiedDateTime`).
 
-The model returns a JSON object containing:
-- Policy metadata
-- Generated evaluation questions
-- References
-- Source excerpts
-- Timestamps
-The output is validated to ensure it is valid JSON.
+**Step 2 — fetch page content (SitePages URLs only)**
+```
+GET /v1.0/sites/{site_id}/pages/microsoft.graph.sitePage
+    ?$filter=name eq '{page.aspx}'&$expand=canvasLayout
+```
+Returns the full page body via `canvasLayout.horizontalSections[].columns[].webparts[].innerHtml`, HTML-stripped to plain text, along with the page-level `lastModifiedDateTime`.
 
-5. Store Results in PostgreSQL
-The validated JSON is inserted into:
+**Fallback behaviour**
 
-aia_app.policy_evaluation_results
+| Condition | Behaviour |
+|-----------|-----------|
+| URL is a document library or non-SitePages path | Uses site title + description (Step 1 only) |
+| Pages API returns empty result | Falls back to site metadata |
+| Pages API returns a non-200 status | Logs a warning, falls back to site metadata |
+| Site API returns a non-200 status | Raises `RequestException` — pipeline marks URL as failed |
 
-Each row contains:
-- id (UUID)
-- policy_url
-- category
-- generated_at
-- result_json (JSONB)
-This allows downstream systems to query, analyse, or display the evaluation questions.
+Page-level `lastModifiedDateTime` is used when available; site-level timestamp is the fallback.
 
-Key Features
-✔ Fully Automated
-No manual triggers required — EventBridge handles scheduling.
-✔ Dynamic URL Handling
-SharePoint URLs are not hardcoded; they are fetched from PostgreSQL and parsed dynamically.
-✔ Robust SharePoint Integration
-Uses Microsoft Graph API with OAuth2 client credentials.
-✔ AI‑Driven Evaluation
-Anthropic Bedrock generates structured, policy‑aligned evaluation questions.
-✔ JSONB Storage
-Results are stored in PostgreSQL as JSONB for flexible querying and indexing.
-✔ Error Handling & Validation
-- Invalid URLs are skipped
-- SharePoint failures are caught and logged
-- JSON output is validated before insertion
+### 4. Change Detection
+Before calling the LLM the pipeline checks `data_pipeline.policy_document_sync`:
+- If `last_modified` is unchanged since the last run → **skip** (no LLM call, no DB write)
+- If changed or never synced → proceed
 
-Environment Variables
-The pipeline requires the following environment variables:
+### 5. Question Extraction (Anthropic Bedrock)
+The LLM receives the page content plus a category hint and returns a JSON array of `ExtractedQuestion` objects:
 
-AWS / Bedrock
-- AWS_ACCESS_KEY_ID
-- AWS_SECRET_ACCESS_KEY
-- AWS_SESSION_TOKEN
-- AWS_DEFAULT_REGION
-- MODEL_ID
-SharePoint / Microsoft Graph
-- SHAREPOINT_TENANT_ID
-- SHAREPOINT_CLIENT_ID
-- SHAREPOINT_CLIENT_SECRET
+```json
+[
+  {
+    "question_text": "Does the system encrypt data at rest?",
+    "reference": "Section 3.2",
+    "source_excerpt": "All data must be encrypted at rest using AES-256.",
+    "categories": ["security"]
+  }
+]
+```
 
-PostgreSQL
-- DB_HOST
-- DB_PORT
-- DB_NAME
-- DB_USER
-- DB_PASSWORD
+The system prompt is loaded from `prompts/policy_evaluation_prompt.md` — edit the prompt there without touching Python code.
 
-Database Tables
-1. Source Policy Table
-aia_app.source_path_policydoc
-Stores policy URLs and metadata.
-2. Evaluation Results Table
-aia_app.policy_evaluation_results
-Stores generated evaluation questions in JSONB format.
+### 6. Persist to PostgreSQL
+Results are written to the `data_pipeline` schema:
 
+| Table | Purpose |
+|-------|---------|
+| `source_path_policydoc` | Source — active policy URLs (read only) |
+| `policy_documents` | One row per unique policy URL processed |
+| `questions` | Extracted questions linked to a policy document |
+| `question_categories` | Junction table — question ↔ category mapping |
+| `policy_document_sync` | Housekeeping — last-modified timestamp per URL |
 
+**Re-run behaviour (idempotent):** when a changed page is processed, existing questions for that `policy_doc_id` are deleted before inserting the new set. This prevents stale questions from accumulating across runs. `question_categories` rows are removed automatically via `ON DELETE CASCADE`.
 
+---
 
+## Environment Variables
+
+### Required (always)
+
+| Variable | Description |
+|----------|-------------|
+| `DB_HOST` | PostgreSQL host |
+| `DB_PORT` | PostgreSQL port (default: `5432`) |
+| `DB_NAME` | Database name |
+| `DB_USER` | Database user |
+| `DB_PASSWORD` | Database password |
+| `SHAREPOINT_TENANT_ID` | Azure AD tenant ID |
+| `SHAREPOINT_CLIENT_ID` | Azure AD app client ID |
+| `SHAREPOINT_CLIENT_SECRET` | Azure AD app client secret |
+| `AWS_DEFAULT_REGION` | AWS region for Bedrock |
+| `MODEL_ID` | Bedrock model ID (e.g. `anthropic.claude-3-7-sonnet-20250219-v1:0`) |
+
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWS_ACCESS_KEY_ID` | — | AWS access key (not needed when using IAM role) |
+| `AWS_SECRET_ACCESS_KEY` | — | AWS secret key (not needed when using IAM role) |
+| `AWS_SESSION_TOKEN` | — | AWS session token (temporary credentials) |
+| `USE_LOCAL_POLICY_SOURCES` | `false` | Set to `true` to load policy URLs from the bundled JSON file instead of the database |
+| `LOCAL_POLICY_SOURCES_PATH` | `data/policy_sources.json` | Override the local sources file path (used when `USE_LOCAL_POLICY_SOURCES=true`) |
+
+---
+
+## Local Sources File (`data/policy_sources.json`)
+
+Used when `USE_LOCAL_POLICY_SOURCES=true`. Entries with `isactive: false` are skipped automatically.
+
+```json
+[
+  {
+    "url_id": 1,
+    "url": "https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx",
+    "desp": "Strategic Architecture Principles",
+    "category": "technical",
+    "type": "page",
+    "isactive": true,
+    "datasize": null
+  }
+]
+```
+
+Fields match the `data_pipeline.source_path_policydoc` schema. Query parameters are stripped from URLs (SharePoint `xsdata`/`sdata` tracking params are session-specific and not needed by the Graph API).
+
+---
+
+## Running Locally
+
+```bash
+pip install -r app/datapipeline/requirements.txt
+
+# Copy and fill in required variables
+cp .env.example .env
+
+# Start local PostgreSQL via Podman (schema + seed data applied automatically)
+./scripts/start-datapipeline-dev.sh
+
+# Run with database sources (default — requires Podman DB running)
+python -m app.datapipeline.src.main
+
+# Run with local sources file (no DB read for source list)
+USE_LOCAL_POLICY_SOURCES=true python -m app.datapipeline.src.main
+
+# Stop / remove the container when done
+# Default container name is 'aiadocuments' (set DATAPIPELINE_CONTAINER to override)
+podman stop aiadocuments
+podman rm   aiadocuments
+```
+
+## Running Tests
+
+```bash
+pytest app/datapipeline/src/tests/ -v
+pytest app/datapipeline/src/tests/ --cov=app/datapipeline/src --cov-report=term-missing
+```
+
+---
+
+## Key Design Decisions
+
+- **Normalised schema** — questions and categories are stored in separate tables rather than JSONB blobs, enabling indexed queries by category, policy document, or question text.
+- **`url_hash` as sync key** — `policy_document_sync` uses a SHA-256 hex digest of the source URL as its primary key, avoiding issues with long URLs and special characters.
+- **Change detection** — `lastModifiedDateTime` from Graph API is compared against the stored value; unchanged pages are skipped without calling the LLM.
+- **Full page content via canvasLayout** — the pipeline fetches actual SharePoint page text through the Graph Pages API (`/pages/microsoft.graph.sitePage?$expand=canvasLayout`), not just site metadata. This yields the complete policy body for LLM extraction. Site metadata is used only as a fallback for non-SitePages URLs or when the pages API fails.
+- **Idempotent question writes** — on a changed page, existing questions are deleted before the new set is inserted. Stale questions do not accumulate across re-runs.
+- **Prompt in Markdown** — the LLM system prompt lives in `prompts/policy_evaluation_prompt.md` and is loaded at cold-start via `Path`, keeping it reviewable and editable outside Python code.
+- **Feature flag for source list** — `USE_LOCAL_POLICY_SOURCES=true` allows the pipeline to run in development or test environments without a populated `source_path_policydoc` table.
+- **psycopg2 (sync)** — the Lambda uses synchronous psycopg2, appropriate for a single-threaded Lambda handler. The evaluation pipeline (ECS) uses asyncpg.
