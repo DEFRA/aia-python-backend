@@ -202,9 +202,11 @@ def run() -> dict[str, int]:
             failed += 1
             continue
 
-        # 2. Sync check — skip if content has not changed
+        content_size = len(content.encode("utf-8"))
+
+        # 2. Sync check — skip if neither timestamp nor content size has changed
         sync = get_sync_record(conn, url)
-        if not is_changed(sync, last_modified):
+        if not is_changed(sync, last_modified, content_size):
             logger.info("No change detected, skipping url=%s", url)
             skipped += 1
             continue
@@ -238,7 +240,7 @@ def run() -> dict[str, int]:
             policy_doc_id = insert_policy_document(conn, url, file_name, source.category)
             delete_questions_for_doc(conn, policy_doc_id)
             insert_questions(conn, policy_doc_id, questions)
-            upsert_sync_record(conn, url, file_name, last_modified, policy_doc_id)
+            upsert_sync_record(conn, url, last_modified, content_size, policy_doc_id)
         except Exception as exc:
             logger.error("DB write failed url=%s: %s", url, exc)
             conn.rollback()

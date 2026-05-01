@@ -12,7 +12,7 @@ _TS = datetime(2024, 6, 1, tzinfo=timezone.utc)
 _SOURCE = PolicySource(
     url_id=1,
     url=_URL,
-    desp="Test policy",
+    filename="Test policy",
     category="security",
     type="page",
     isactive=True,
@@ -22,7 +22,6 @@ _QUESTIONS = [
         question_text="Is data encrypted?",
         reference="Section 3.2",
         source_excerpt="Data must be encrypted.",
-        categories=["security"],
     )
 ]
 
@@ -189,7 +188,7 @@ class TestRunSummary:
 _INACTIVE_SOURCE = PolicySource(
     url_id=2,
     url="https://defra.sharepoint.com/teams/T1/SitePages/Old.aspx",
-    desp="Old policy",
+    filename="Old policy",
     category="technical",
     type="page",
     isactive=False,

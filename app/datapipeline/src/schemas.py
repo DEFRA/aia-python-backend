@@ -8,11 +8,10 @@ from pydantic import BaseModel
 class PolicySource(BaseModel):
     url_id: int
     url: str
-    desp: str
+    filename: str
     category: str
     type: str
     isactive: bool
-    datasize: int | None = None
 
 
 class ExtractedQuestion(BaseModel):
@@ -24,7 +23,7 @@ class ExtractedQuestion(BaseModel):
 class SyncRecord(BaseModel):
     url_hash: str
     source_url: str
-    file_name: str
     last_modified: datetime | None
+    content_size: int | None
     last_synced_at: datetime
     policy_doc_id: str | None

@@ -41,11 +41,10 @@ class TestFetchPolicySources:
             {
                 "url_id": 1,
                 "url": "https://sp.com/teams/T1/SitePages/P.aspx",
-                "desp": "Data Policy",
+                "filename": "Data Policy",
                 "category": "security",
                 "type": "page",
                 "isactive": True,
-                "datasize": None,
             }
         ]
         conn = _make_conn(_make_cursor(rows))
@@ -156,12 +155,12 @@ class TestFetchAllPolicySources:
     def test_returns_all_sources_including_inactive(self) -> None:
         rows = [
             {
-                "url_id": 1, "url": "https://sp.com/active", "desp": "Active",
-                "category": "security", "type": "page", "isactive": True, "datasize": None,
+                "url_id": 1, "url": "https://sp.com/active", "filename": "Active",
+                "category": "security", "type": "page", "isactive": True,
             },
             {
-                "url_id": 2, "url": "https://sp.com/inactive", "desp": "Inactive",
-                "category": "technical", "type": "page", "isactive": False, "datasize": None,
+                "url_id": 2, "url": "https://sp.com/inactive", "filename": "Inactive",
+                "category": "technical", "type": "page", "isactive": False,
             },
         ]
         conn = _make_conn(_make_cursor(rows))
@@ -261,20 +260,18 @@ _SAMPLE_SOURCES = [
     {
         "url_id": 1,
         "url": "https://defra.sharepoint.com/teams/T1/SitePages/Policy.aspx",
-        "desp": "Policy Page",
+        "filename": "Policy Page",
         "category": "security",
         "type": "page",
         "isactive": True,
-        "datasize": None,
     },
     {
         "url_id": 2,
         "url": "https://defra.sharepoint.com/teams/T1/SitePages/Inactive.aspx",
-        "desp": "Inactive Page",
+        "filename": "Inactive Page",
         "category": "technical",
         "type": "page",
         "isactive": False,
-        "datasize": None,
     },
 ]
 

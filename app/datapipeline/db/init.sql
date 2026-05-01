@@ -16,6 +16,52 @@ DO $$ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Migration: source_policy_docs — rename desp → filename, drop datasize
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'desp'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs RENAME COLUMN desp TO filename;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'datasize'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs DROP COLUMN datasize;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Migration: policy_document_sync — drop file_name, add content_size
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'policy_document_sync'
+          AND column_name  = 'file_name'
+    ) THEN
+        ALTER TABLE data_pipeline.policy_document_sync DROP COLUMN file_name;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'policy_document_sync'
+          AND column_name  = 'content_size'
+    ) THEN
+        ALTER TABLE data_pipeline.policy_document_sync ADD COLUMN content_size INTEGER;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Migration: move category from question_categories to policy_documents
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
@@ -50,11 +96,10 @@ END $$;
 CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     url_id   SERIAL PRIMARY KEY,
     url      TEXT    NOT NULL UNIQUE,
-    desp     TEXT    NOT NULL,
+    filename TEXT    NOT NULL,
     category TEXT    NOT NULL,
     type     TEXT    NOT NULL DEFAULT 'page',
-    isactive BOOLEAN NOT NULL DEFAULT TRUE,
-    datasize INTEGER
+    isactive BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- ---------------------------------------------------------------------------
@@ -88,8 +133,8 @@ CREATE TABLE IF NOT EXISTS data_pipeline.questions (
 CREATE TABLE IF NOT EXISTS data_pipeline.policy_document_sync (
     url_hash       CHAR(64)    PRIMARY KEY,
     source_url     TEXT        NOT NULL,
-    file_name      TEXT        NOT NULL,
     last_modified  TIMESTAMPTZ,
+    content_size   INTEGER,
     last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     policy_doc_id  UUID
         REFERENCES data_pipeline.policy_documents(policy_doc_id) ON DELETE SET NULL
@@ -99,7 +144,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policy_document_sync (
 -- Seed: known policy source URLs
 -- Remove any row you do not want processed (or set isactive = FALSE).
 -- ---------------------------------------------------------------------------
-INSERT INTO data_pipeline.source_policy_docs (url, desp, category, type, isactive) VALUES
+INSERT INTO data_pipeline.source_policy_docs (url, filename, category, type, isactive) VALUES
     (
         'https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx',
         'Strategic Architecture Principles',
