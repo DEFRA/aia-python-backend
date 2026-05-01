@@ -46,7 +46,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
 CREATE SCHEMA aia.aia_app;
 GRANT USAGE, CREATE ON SCHEMA aia.aia_app TO aia_user;
 
-CREATE TABLE aia_app.source_path_policydoc (
+CREATE TABLE aia_app.source_policy_docs (
     url_id     UUID PRIMARY KEY,
     url        TEXT NOT NULL,	
     desp	VARCHAR(100),
@@ -56,7 +56,7 @@ CREATE TABLE aia_app.source_path_policydoc (
     datasize   DOUBLE PRECISION
 );
 
-INSERT INTO aia_app.source_path_policydoc (
+INSERT INTO aia_app.source_policy_docs (
     url_id,
     url,
     desp,
@@ -75,7 +75,7 @@ VALUES (
     12.5
 );
 
-INSERT INTO aia_app.source_path_policydoc (
+INSERT INTO aia_app.source_policy_docs (
     url_id,
     url,
     desp,

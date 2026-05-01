@@ -147,7 +147,7 @@ class TestRunSummary:
         with patch.multiple("app.datapipeline.src.main", **mocks):
             summary = run()
 
-        assert summary == {"processed": 0, "skipped": 0, "failed": 0}
+        assert summary == {"processed": 0, "skipped": 0, "failed": 0, "cleaned": 0}
 
     def test_raises_when_env_var_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MODEL_ID")
@@ -186,6 +186,73 @@ class TestRunSummary:
         assert summary["failed"] == 1
 
 
+_INACTIVE_SOURCE = PolicySource(
+    url_id=2,
+    url="https://defra.sharepoint.com/teams/T1/SitePages/Old.aspx",
+    desp="Old policy",
+    category="technical",
+    type="page",
+    isactive=False,
+)
+
+
+class TestInactiveSourceCleanup:
+    def test_inactive_source_increments_skipped(self) -> None:
+        from app.datapipeline.src.main import run
+
+        mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
+        with patch.multiple("app.datapipeline.src.main", **mocks):
+            summary = run()
+
+        assert summary["skipped"] == 1
+        assert summary["processed"] == 0
+
+    def test_inactive_source_calls_delete_when_data_exists(self) -> None:
+        from app.datapipeline.src.main import run
+
+        mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
+        mocks["delete_policy_document_by_url"] = MagicMock(return_value=1)
+        with patch.multiple("app.datapipeline.src.main", **mocks):
+            summary = run()
+
+        mocks["delete_policy_document_by_url"].assert_called_once_with(
+            mocks["_get_db_connection"].return_value, _INACTIVE_SOURCE.url
+        )
+        assert summary["cleaned"] == 1
+
+    def test_inactive_source_does_not_increment_cleaned_when_no_data(self) -> None:
+        from app.datapipeline.src.main import run
+
+        mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
+        mocks["delete_policy_document_by_url"] = MagicMock(return_value=0)
+        with patch.multiple("app.datapipeline.src.main", **mocks):
+            summary = run()
+
+        assert summary["cleaned"] == 0
+        assert summary["skipped"] == 1
+
+    def test_inactive_source_does_not_fetch_sharepoint(self) -> None:
+        from app.datapipeline.src.main import run
+
+        mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
+        with patch.multiple("app.datapipeline.src.main", **mocks):
+            run()
+
+        mocks["_build_sharepoint_client"].return_value.read_page_content.assert_not_called()
+
+    def test_mixed_sources_processed_and_cleaned(self) -> None:
+        from app.datapipeline.src.main import run
+
+        mocks = _build_mocks(sources=[_SOURCE, _INACTIVE_SOURCE])
+        mocks["delete_policy_document_by_url"] = MagicMock(return_value=1)
+        with patch.multiple("app.datapipeline.src.main", **mocks):
+            summary = run()
+
+        assert summary["processed"] == 1
+        assert summary["cleaned"] == 1
+        assert summary["skipped"] == 1
+
+
 class TestLocalSourcesFeatureFlag:
     def test_uses_local_sources_when_flag_true(
         self, monkeypatch: pytest.MonkeyPatch
@@ -200,7 +267,7 @@ class TestLocalSourcesFeatureFlag:
             run()
 
         local_mock.assert_called_once()
-        mocks["fetch_policy_sources"].assert_not_called()
+        mocks["fetch_all_policy_sources"].assert_not_called()
 
     def test_uses_db_sources_when_flag_false(
         self, monkeypatch: pytest.MonkeyPatch
@@ -214,7 +281,7 @@ class TestLocalSourcesFeatureFlag:
         with patch.multiple("app.datapipeline.src.main", **mocks):
             run()
 
-        mocks["fetch_policy_sources"].assert_called_once()
+        mocks["fetch_all_policy_sources"].assert_called_once()
         local_mock.assert_not_called()
 
     def test_uses_db_sources_when_flag_absent(
@@ -229,7 +296,7 @@ class TestLocalSourcesFeatureFlag:
         with patch.multiple("app.datapipeline.src.main", **mocks):
             run()
 
-        mocks["fetch_policy_sources"].assert_called_once()
+        mocks["fetch_all_policy_sources"].assert_called_once()
         local_mock.assert_not_called()
 
     def test_custom_path_passed_to_loader(
@@ -339,12 +406,13 @@ def _build_mocks(
         "_get_db_connection": MagicMock(return_value=conn),
         "_build_sharepoint_client": MagicMock(return_value=sp),
         "_build_extractor": MagicMock(return_value=extractor),
-        "fetch_policy_sources": MagicMock(return_value=sources),
+        "fetch_all_policy_sources": MagicMock(return_value=sources),
         "load_local_policy_sources": MagicMock(return_value=sources),
         "get_sync_record": MagicMock(return_value=None),
         "is_changed": MagicMock(return_value=sync_changed),
         "insert_policy_document": MagicMock(return_value="doc-uuid"),
         "delete_questions_for_doc": MagicMock(return_value=0),
+        "delete_policy_document_by_url": MagicMock(return_value=0),
         "insert_questions": MagicMock(return_value=len(questions)),
         "upsert_sync_record": MagicMock(),
     }

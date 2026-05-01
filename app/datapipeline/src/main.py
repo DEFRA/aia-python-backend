@@ -1,6 +1,6 @@
 """Data Pipeline — main orchestrator.
 
-Reads active policy source URLs from data_pipeline.source_path_policydoc,
+Reads active policy source URLs from data_pipeline.source_policy_docs,
 fetches each SharePoint page, extracts evaluation questions via LLM,
 and writes the results to the Phase 1 normalised tables:
   data_pipeline.policy_documents
@@ -11,7 +11,7 @@ and writes the results to the Phase 1 normalised tables:
 Feature flag — local source list:
   Set USE_LOCAL_POLICY_SOURCES=true to read policy URLs from a bundled JSON
   file instead of the database.  Useful for development and testing without a
-  live data_pipeline.source_path_policydoc table.  The default file path is
+  live data_pipeline.source_policy_docs table.  The default file path is
   app/datapipeline/data/policy_sources.json; override with
   LOCAL_POLICY_SOURCES_PATH=<absolute path>.
 
@@ -39,8 +39,9 @@ import psycopg2
 from dotenv import load_dotenv
 
 from app.datapipeline.src.db import (
+    delete_policy_document_by_url,
     delete_questions_for_doc,
-    fetch_policy_sources,
+    fetch_all_policy_sources,
     insert_policy_document,
     insert_questions,
     load_local_policy_sources,
@@ -90,7 +91,7 @@ def _load_sources(conn: psycopg2.extensions.connection) -> list:
             "Feature flag USE_LOCAL_POLICY_SOURCES=true — loading from %s", path
         )
         return load_local_policy_sources(path)
-    return fetch_policy_sources(conn)
+    return fetch_all_policy_sources(conn)
 
 
 def _write_debug_file(
@@ -154,7 +155,7 @@ def run() -> dict[str, int]:
     """Execute the full data pipeline and return a summary dict.
 
     Returns:
-        {"processed": N, "skipped": N, "failed": N}
+        {"processed": N, "skipped": N, "failed": N, "cleaned": N}
     """
     for var in _REQUIRED_ENV:
         if not os.environ.get(var):
@@ -171,14 +172,26 @@ def run() -> dict[str, int]:
         raise RuntimeError(f"Failed to fetch policy sources: {exc}") from exc
 
     if not sources:
-        logger.warning("No active policy sources found — nothing to process.")
+        logger.warning("No policy sources found — nothing to process.")
         conn.close()
-        return {"processed": 0, "skipped": 0, "failed": 0}
+        return {"processed": 0, "skipped": 0, "failed": 0, "cleaned": 0}
 
-    processed = skipped = failed = 0
+    processed = skipped = failed = cleaned = 0
 
     for source in sources:
         url = source.url
+
+        # Deactivated source — remove any stale data then skip
+        if not source.isactive:
+            deleted = delete_policy_document_by_url(conn, url)
+            if deleted:
+                logger.info("Removed stale data for deactivated source url=%s", url)
+                cleaned += 1
+            else:
+                logger.debug("Deactivated source has no stored data url=%s", url)
+            skipped += 1
+            continue
+
         logger.info("=== Processing policy source url=%s ===", url)
 
         # 1. Fetch SharePoint page content and last_modified timestamp
@@ -241,7 +254,7 @@ def run() -> dict[str, int]:
         processed += 1
 
     conn.close()
-    summary = {"processed": processed, "skipped": skipped, "failed": failed}
+    summary = {"processed": processed, "skipped": skipped, "failed": failed, "cleaned": cleaned}
     logger.info("Pipeline complete: %s", summary)
     return summary
 

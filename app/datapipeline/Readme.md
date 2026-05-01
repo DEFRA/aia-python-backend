@@ -13,7 +13,7 @@ EventBridge Scheduler
 AWS Lambda (data pipeline)
         │
         ├── Load policy source URLs
-        │       ├── [default]  data_pipeline.source_path_policydoc (PostgreSQL)
+        │       ├── [default]  data_pipeline.source_policy_docs (PostgreSQL)
         │       └── [flag]     data/policy_sources.json (local file)
         │
         ├── For each active policy URL:
@@ -75,7 +75,7 @@ Policy URLs are loaded from one of two sources, controlled by the `USE_LOCAL_POL
 
 | Mode | Source |
 |------|--------|
-| `false` (default) | `data_pipeline.source_path_policydoc` in PostgreSQL |
+| `false` (default) | `data_pipeline.source_policy_docs` in PostgreSQL |
 | `true` | `data/policy_sources.json` bundled with the Lambda package |
 
 Only rows/entries where `isactive = true` are processed.
@@ -163,7 +163,7 @@ Results are written to the `data_pipeline` schema:
 
 | Table | Purpose |
 |-------|---------|
-| `source_path_policydoc` | Source — active policy URLs (read only) |
+| `source_policy_docs` | Source — active policy URLs (read only) |
 | `policy_documents` | One row per unique policy URL processed |
 | `questions` | Extracted questions linked to a policy document |
 | `question_categories` | Junction table — question ↔ category mapping |
@@ -234,7 +234,7 @@ Used when `USE_LOCAL_POLICY_SOURCES=true`. Entries with `isactive: false` are sk
 ]
 ```
 
-Fields match the `data_pipeline.source_path_policydoc` schema. Query parameters are stripped from URLs (SharePoint `xsdata`/`sdata` tracking params are session-specific and not needed by the Graph API).
+Fields match the `data_pipeline.source_policy_docs` schema. Query parameters are stripped from URLs (SharePoint `xsdata`/`sdata` tracking params are session-specific and not needed by the Graph API).
 
 ---
 
@@ -451,6 +451,6 @@ Check CloudWatch Logs (`/aws/lambda/aia-datapipeline`) for per-URL progress and 
 - **Idempotent question writes** — on a changed page, existing questions are deleted before the new set is inserted. Stale questions do not accumulate across re-runs.
 - **Question-level `isactive` flag** — `questions.isactive` defaults to `true` for every inserted row. Operators can set individual questions to `false` to exclude them from agent assessment without losing the record. The pipeline never touches this column after insertion; deactivation is always a manual action. Agents must filter `WHERE isactive = true` when fetching questions.
 - **Prompt in Markdown** — the LLM system prompt lives in `prompts/policy_evaluation_prompt.md` and is loaded at cold-start via `Path`, keeping it reviewable and editable outside Python code.
-- **Feature flag for source list** — `USE_LOCAL_POLICY_SOURCES=true` allows the pipeline to run in development or test environments without a populated `source_path_policydoc` table.
+- **Feature flag for source list** — `USE_LOCAL_POLICY_SOURCES=true` allows the pipeline to run in development or test environments without a populated `source_policy_docs` table.
 - **Debug output flag** — `SAVE_DEBUG_OUTPUT=true` writes a plain-text file per URL (source URL + raw content + questions JSON) to `app/datapipeline/debug/`. The write is best-effort and never blocks the pipeline. Files are git-ignored. Intended for local inspection and troubleshooting only — never enable in production.
 - **psycopg2 (sync)** — the Lambda uses synchronous psycopg2, appropriate for a single-threaded Lambda handler. The evaluation pipeline (ECS) uses asyncpg.

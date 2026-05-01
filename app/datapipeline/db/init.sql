@@ -4,9 +4,21 @@
 CREATE SCHEMA IF NOT EXISTS data_pipeline;
 
 -- ---------------------------------------------------------------------------
+-- Migration: rename legacy table if it exists under the old name
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'data_pipeline' AND table_name = 'source_path_policydoc'
+    ) THEN
+        ALTER TABLE data_pipeline.source_path_policydoc RENAME TO source_policy_docs;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Source: active policy URLs to process
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_pipeline.source_path_policydoc (
+CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     url_id   SERIAL PRIMARY KEY,
     url      TEXT    NOT NULL UNIQUE,
     desp     TEXT    NOT NULL,
@@ -67,7 +79,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policy_document_sync (
 -- Seed: known policy source URLs
 -- Remove any row you do not want processed (or set isactive = FALSE).
 -- ---------------------------------------------------------------------------
-INSERT INTO data_pipeline.source_path_policydoc (url, desp, category, type, isactive) VALUES
+INSERT INTO data_pipeline.source_policy_docs (url, desp, category, type, isactive) VALUES
     (
         'https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx',
         'Strategic Architecture Principles',

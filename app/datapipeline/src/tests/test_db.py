@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 
 
 from app.datapipeline.src.db import (
+    delete_policy_document_by_url,
     delete_questions_for_doc,
+    fetch_all_policy_sources,
     fetch_policy_sources,
     insert_policy_document,
     insert_questions,
@@ -153,6 +155,79 @@ class TestInsertQuestions:
 
         assert count == 0
         conn.commit.assert_called_once()
+
+
+class TestFetchAllPolicySources:
+    def test_returns_all_sources_including_inactive(self) -> None:
+        rows = [
+            {
+                "url_id": 1, "url": "https://sp.com/active", "desp": "Active",
+                "category": "security", "type": "page", "isactive": True, "datasize": None,
+            },
+            {
+                "url_id": 2, "url": "https://sp.com/inactive", "desp": "Inactive",
+                "category": "technical", "type": "page", "isactive": False, "datasize": None,
+            },
+        ]
+        conn = _make_conn(_make_cursor(rows))
+        sources = fetch_all_policy_sources(conn)
+
+        assert len(sources) == 2
+        assert sources[0].isactive is True
+        assert sources[1].isactive is False
+
+    def test_returns_empty_list_when_no_rows(self) -> None:
+        conn = _make_conn(_make_cursor([]))
+        assert fetch_all_policy_sources(conn) == []
+
+    def test_does_not_filter_by_isactive(self) -> None:
+        cursor = _make_cursor([])
+        conn = _make_conn(cursor)
+        fetch_all_policy_sources(conn)
+
+        sql = cursor.execute.call_args[0][0]
+        assert "WHERE" not in sql.upper()
+
+
+class TestDeletePolicyDocumentByUrl:
+    def test_returns_one_when_row_deleted(self) -> None:
+        cursor = _make_cursor()
+        cursor.rowcount = 1
+        conn = _make_conn(cursor)
+
+        count = delete_policy_document_by_url(conn, "https://sp.com/page")
+
+        assert count == 1
+
+    def test_returns_zero_when_no_matching_row(self) -> None:
+        cursor = _make_cursor()
+        cursor.rowcount = 0
+        conn = _make_conn(cursor)
+
+        count = delete_policy_document_by_url(conn, "https://sp.com/missing")
+
+        assert count == 0
+
+    def test_commits_after_delete(self) -> None:
+        cursor = _make_cursor()
+        cursor.rowcount = 1
+        conn = _make_conn(cursor)
+
+        delete_policy_document_by_url(conn, "https://sp.com/page")
+
+        conn.commit.assert_called_once()
+
+    def test_deletes_by_source_url(self) -> None:
+        cursor = _make_cursor()
+        cursor.rowcount = 0
+        conn = _make_conn(cursor)
+
+        delete_policy_document_by_url(conn, "https://sp.com/page")
+
+        sql, params = cursor.execute.call_args[0]
+        assert "policy_documents" in sql
+        assert "source_url" in sql
+        assert params == ("https://sp.com/page",)
 
 
 class TestDeleteQuestionsForDoc:

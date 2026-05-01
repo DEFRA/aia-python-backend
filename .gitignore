@@ -5,9 +5,13 @@ __pycache__/
 connection_test.py
 config.py
 db.py
+!app/datapipeline/src/db.py
 sharepoint.py
+!app/datapipeline/src/sharepoint.py
 evaluator.py
+!app/datapipeline/src/evaluator.py
 utils.py
+!app/datapipeline/src/utils.py
 main_new.py
 
 
