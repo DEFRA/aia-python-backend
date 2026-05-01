@@ -108,9 +108,23 @@ Returns the full page body via `canvasLayout.horizontalSections[].columns[].webp
 Page-level `lastModifiedDateTime` is used when available; site-level timestamp is the fallback.
 
 ### 4. Change Detection
-Before calling the LLM the pipeline checks `data_pipeline.policy_document_sync`:
-- If `last_modified` is unchanged since the last run → **skip** (no LLM call, no DB write)
-- If changed or never synced → proceed
+Before calling the LLM the pipeline checks `data_pipeline.policy_document_sync` using two independent signals:
+
+| Signal | Description |
+|--------|-------------|
+| `last_modified` | `lastModifiedDateTime` from the Graph API response |
+| `content_size` | UTF-8 byte length of the fetched page content |
+
+A document is considered **changed** (and will be re-processed) if any of these conditions hold:
+
+- It has never been synced (`sync_record` is `None`).
+- Both timestamps are absent → `content_size` is the sole signal.
+- One side has a timestamp and the other does not.
+- The stored `last_modified` differs from the freshly fetched value.
+- Timestamps match but `content_size` differs — catches edits on pages that do not update the SharePoint `lastModifiedDateTime` header.
+- Sync record exists but has no stored `content_size` (old record pre-dating this column) — re-process once to capture the size.
+
+If neither signal indicates a change → **skip** (no LLM call, no DB write).
 
 ### 5. Question Extraction (Anthropic Bedrock)
 The LLM receives the page content plus a category hint and returns a JSON array of `ExtractedQuestion` objects:
@@ -120,11 +134,12 @@ The LLM receives the page content plus a category hint and returns a JSON array 
   {
     "question_text": "Does the system encrypt data at rest?",
     "reference": "Section 3.2",
-    "source_excerpt": "All data must be encrypted at rest using AES-256.",
-    "categories": ["security"]
+    "source_excerpt": "All data must be encrypted at rest using AES-256."
   }
 ]
 ```
+
+Category is a document-level attribute sourced from `source_policy_docs.category` — it is stored on `policy_documents` and is not included in individual question records.
 
 The system prompt is loaded from `prompts/policy_evaluation_prompt.md` — edit the prompt there without touching Python code.
 
@@ -150,8 +165,7 @@ Policy text extracted from the SharePoint page canvas...
   {
     "question_text": "Does the solution follow the defined architecture principles?",
     "reference": "Section 2",
-    "source_excerpt": "All solutions must adhere to the strategic architecture principles.",
-    "categories": ["technical"]
+    "source_excerpt": "All solutions must adhere to the strategic architecture principles."
   }
 ]
 ```
@@ -163,13 +177,14 @@ Results are written to the `data_pipeline` schema:
 
 | Table | Purpose |
 |-------|---------|
-| `source_policy_docs` | Source — active policy URLs (read only) |
-| `policy_documents` | One row per unique policy URL processed |
-| `questions` | Extracted questions linked to a policy document |
-| `question_categories` | Junction table — question ↔ category mapping |
-| `policy_document_sync` | Housekeeping — last-modified timestamp per URL |
+| `source_policy_docs` | Input config — policy URLs to process (read by pipeline) |
+| `policy_documents` | One row per unique policy URL processed; carries `category` |
+| `questions` | Extracted evaluation questions linked to a policy document |
+| `policy_document_sync` | Housekeeping — change-detection state per URL |
 
-**Re-run behaviour (idempotent):** when a changed page is processed, existing questions for that `policy_doc_id` are deleted before inserting the new set. This prevents stale questions from accumulating across runs. `question_categories` rows are removed automatically via `ON DELETE CASCADE`.
+**Re-run behaviour (idempotent):** when a changed page is processed, existing questions for that `policy_doc_id` are deleted before inserting the new set. This prevents stale questions accumulating across runs.
+
+**Inactive source cleanup:** when a `source_policy_docs` row has `isactive = false` the pipeline deletes the corresponding `policy_documents` row (cascades to `questions`) so stale data is not served to assessment agents.
 
 **Question-level `isactive` flag:** every question has an `isactive BOOLEAN NOT NULL DEFAULT TRUE` column. Set it to `false` to exclude a specific question from agent assessment runs without deleting it. The pipeline always inserts new questions as active; deactivation is a manual, deliberate action.
 
@@ -182,6 +197,91 @@ UPDATE data_pipeline.questions SET isactive = true WHERE question_id = '<uuid>';
 ```
 
 Agents querying for assessment questions must filter `WHERE isactive = true`.
+
+---
+
+## Database Schema (`data_pipeline`)
+
+Schema DDL is in [`db/init.sql`](db/init.sql). Applied automatically when the Podman PostgreSQL container first starts; run manually for other environments.
+
+### `source_policy_docs`
+Input configuration — the list of SharePoint URLs the pipeline should process.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `url_id` | `SERIAL` | Primary key |
+| `url` | `TEXT NOT NULL UNIQUE` | Full SharePoint URL |
+| `filename` | `TEXT NOT NULL` | Human-readable name for the document |
+| `category` | `TEXT NOT NULL` | Agent type: `security`, `technical`, etc. |
+| `type` | `TEXT NOT NULL DEFAULT 'page'` | `page` or `pdf` |
+| `isactive` | `BOOLEAN NOT NULL DEFAULT TRUE` | `false` → pipeline deletes data and skips |
+
+> Setting `isactive = false` on the next pipeline run will delete the corresponding `policy_documents` row and cascade to `questions`.
+
+### `policy_documents`
+One row per successfully processed policy URL.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `policy_doc_id` | `UUID` | Primary key |
+| `source_url` | `TEXT NOT NULL UNIQUE` | Matches `source_policy_docs.url` |
+| `file_name` | `TEXT NOT NULL` | Derived from the last URL path segment |
+| `category` | `TEXT NOT NULL` | Denormalised from `source_policy_docs.category` |
+| `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | Insert timestamp |
+
+### `questions`
+LLM-extracted evaluation questions, each linked to a policy document.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `question_id` | `UUID` | Primary key |
+| `question_text` | `TEXT NOT NULL` | The assessable compliance question |
+| `reference` | `TEXT NOT NULL` | Section / clause reference (e.g. `Section 3.2`) |
+| `source_excerpt` | `TEXT NOT NULL` | Verbatim passage from the policy (max 200 chars) |
+| `policy_doc_id` | `UUID NOT NULL` | FK → `policy_documents` `ON DELETE CASCADE` |
+| `isactive` | `BOOLEAN NOT NULL DEFAULT TRUE` | `false` excludes from agent assessment |
+| `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | Insert timestamp |
+
+> **Querying:** always filter `WHERE isactive = true` and join to `policy_documents` to filter by `category`.
+
+### `policy_document_sync`
+Change-detection housekeeping. Tracks the last processed state of each URL so the pipeline can skip re-processing unchanged content.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `url_hash` | `CHAR(64)` | Primary key — SHA-256 hex of `source_url` |
+| `source_url` | `TEXT NOT NULL` | The original URL (stored alongside hash for readability) |
+| `last_modified` | `TIMESTAMPTZ` | `lastModifiedDateTime` from the Graph API response (nullable — some pages omit it) |
+| `content_size` | `INTEGER` | UTF-8 byte length of fetched content — second change signal |
+| `last_synced_at` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | When the pipeline last processed this URL |
+| `policy_doc_id` | `UUID` | FK → `policy_documents` `ON DELETE SET NULL` |
+
+> The `url_hash` PK avoids indexing long URLs with special characters. `ON DELETE SET NULL` means the sync record is retained when a policy document is cleaned up, so the pipeline still knows the URL was previously synced.
+
+### Schema Relationships
+
+```
+source_policy_docs (input config)
+        │
+        │  pipeline reads → writes
+        ▼
+policy_documents ──────────────────────── policy_document_sync
+  policy_doc_id (PK)                         url_hash (PK)
+  source_url                                 source_url
+  file_name                                  last_modified
+  category  ◄── denormalised from            content_size
+  created_at     source_policy_docs          policy_doc_id (FK, SET NULL on delete)
+        │
+        │  ON DELETE CASCADE
+        ▼
+    questions
+      question_id (PK)
+      question_text
+      reference
+      source_excerpt
+      policy_doc_id (FK)
+      isactive
+```
 
 ---
 
@@ -225,11 +325,10 @@ Used when `USE_LOCAL_POLICY_SOURCES=true`. Entries with `isactive: false` are sk
   {
     "url_id": 1,
     "url": "https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx",
-    "desp": "Strategic Architecture Principles",
+    "filename": "Strategic Architecture Principles",
     "category": "technical",
     "type": "page",
-    "isactive": true,
-    "datasize": null
+    "isactive": true
   }
 ]
 ```
@@ -444,9 +543,10 @@ Check CloudWatch Logs (`/aws/lambda/aia-datapipeline`) for per-URL progress and 
 
 ## Key Design Decisions
 
-- **Normalised schema** — questions and categories are stored in separate tables rather than JSONB blobs, enabling indexed queries by category, policy document, or question text.
-- **`url_hash` as sync key** — `policy_document_sync` uses a SHA-256 hex digest of the source URL as its primary key, avoiding issues with long URLs and special characters.
-- **Change detection** — `lastModifiedDateTime` from Graph API is compared against the stored value; unchanged pages are skipped without calling the LLM.
+- **Category at document level** — category is a property of the policy source URL, not of individual questions. It is stored in `source_policy_docs.category`, denormalised into `policy_documents.category` at write time, and used to route assessment queries. There is no per-question category junction table.
+- **`url_hash` as sync key** — `policy_document_sync` uses a SHA-256 hex digest of the source URL as its primary key, avoiding issues with long URLs and special characters in an index.
+- **Dual-signal change detection** — `policy_document_sync` stores both `last_modified` (from the Graph API `lastModifiedDateTime` header) and `content_size` (UTF-8 byte length of the fetched text). A page is re-processed if either signal changes. This guards against SharePoint pages that silently update content without advancing the `lastModifiedDateTime` timestamp.
+- **Inactive source cleanup** — when `source_policy_docs.isactive` is set to `false`, the pipeline deletes the corresponding `policy_documents` row on the next run (cascades to `questions`). This ensures stale questions from deactivated sources are never served to assessment agents.
 - **Full page content via canvasLayout** — the pipeline fetches actual SharePoint page text through the Graph Pages API (`/pages/microsoft.graph.sitePage?$expand=canvasLayout`), not just site metadata. This yields the complete policy body for LLM extraction. Site metadata is used only as a fallback for non-SitePages URLs or when the pages API fails.
 - **Idempotent question writes** — on a changed page, existing questions are deleted before the new set is inserted. Stale questions do not accumulate across re-runs.
 - **Question-level `isactive` flag** — `questions.isactive` defaults to `true` for every inserted row. Operators can set individual questions to `false` to exclude them from agent assessment without losing the record. The pipeline never touches this column after insertion; deactivation is always a manual action. Agents must filter `WHERE isactive = true` when fetching questions.
