@@ -1,4 +1,4 @@
-"""Agent Worker — SQS polling loop for the ECS Fargate Agent Service.
+"""Relay Service — SQS polling loop for the ECS Fargate Relay Service.
 
 Polls aia-tasks, dispatches each TaskMessage to the correct specialist agent,
 fetches checklist questions from PostgreSQL, and publishes a StatusMessage to
@@ -36,7 +36,7 @@ from app.services.s3_service import S3Service
 from app.services.sqs_service import SQSService
 from app.utils.logger import get_logger
 
-logger = get_logger("app.agent_worker")
+logger = get_logger("app.relay_service")
 
 # Covers the maximum expected LLM call; set on the receive call so the message
 # stays invisible while the agent runs.
@@ -129,7 +129,7 @@ async def run_worker() -> None:
     task_url = app_config.sqs.task_queue_url
     status_url = app_config.sqs.status_queue_url
 
-    logger.info("Agent worker started — polling %s", task_url)
+    logger.info("Relay service started — polling %s", task_url)
 
     while True:
         try:
@@ -162,7 +162,7 @@ async def run_worker() -> None:
                         "Unhandled task error — message not deleted (will retry): %s", exc
                     )
         except asyncio.CancelledError:
-            logger.info("Agent worker stopped")
+            logger.info("Relay service stopped")
             return
         except Exception as exc:
             logger.exception("Worker poll error: %s", exc)

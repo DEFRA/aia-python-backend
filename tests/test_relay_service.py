@@ -1,4 +1,4 @@
-"""Tests for app.agent_worker.worker — dispatch and polling loop."""
+"""Tests for app.relay_service.worker — dispatch and polling loop."""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def _make_agent_result() -> Any:
 
 @pytest.mark.asyncio
 async def test_get_document_returns_inline_content() -> None:
-    from app.agent_worker.worker import _get_document
+    from app.relay_service.worker import _get_document
 
     task = _make_task(file_content="Inline text")
     s3 = AsyncMock()
@@ -81,7 +81,7 @@ async def test_get_document_returns_inline_content() -> None:
 
 @pytest.mark.asyncio
 async def test_get_document_downloads_from_s3_when_no_inline() -> None:
-    from app.agent_worker.worker import _get_document
+    from app.relay_service.worker import _get_document
 
     task = _make_task(file_content=None)
     s3 = AsyncMock()
@@ -98,7 +98,7 @@ async def test_get_document_downloads_from_s3_when_no_inline() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_returns_error_for_unknown_agent_type() -> None:
-    from app.agent_worker.worker import dispatch
+    from app.relay_service.worker import dispatch
 
     task = _make_task(agent_type="does_not_exist")
     s3 = AsyncMock()
@@ -117,7 +117,7 @@ async def test_dispatch_returns_error_for_unknown_agent_type() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_returns_populated_status_on_success() -> None:
-    from app.agent_worker.worker import dispatch
+    from app.relay_service.worker import dispatch
 
     task = _make_task()
     s3 = AsyncMock()
@@ -126,18 +126,18 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
     mock_agent.assess.return_value = result
 
     with (
-        patch("app.agent_worker.worker._get_db_config") as mock_db_cfg,
+        patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.agent_worker.worker.fetch_assessment_by_category",
+            "app.relay_service.worker.fetch_assessment_by_category",
             new=AsyncMock(return_value=([], "https://example.com")),
         ),
-        patch("app.agent_worker.worker.make_llm_client", return_value=MagicMock()),
+        patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
-            "app.agent_worker.worker.AGENT_REGISTRY",
+            "app.relay_service.worker.AGENT_REGISTRY",
             {"security": lambda **_: mock_agent},
         ),
         patch(
-            "app.agent_worker.worker.CONFIG_REGISTRY",
+            "app.relay_service.worker.CONFIG_REGISTRY",
             {"security": MagicMock(return_value=MagicMock())},
         ),
     ):
@@ -158,7 +158,7 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_captures_agent_exception_as_error() -> None:
-    from app.agent_worker.worker import dispatch
+    from app.relay_service.worker import dispatch
 
     task = _make_task()
     s3 = AsyncMock()
@@ -166,18 +166,18 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
     mock_agent.assess.side_effect = ValueError("LLM parse error")
 
     with (
-        patch("app.agent_worker.worker._get_db_config") as mock_db_cfg,
+        patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.agent_worker.worker.fetch_assessment_by_category",
+            "app.relay_service.worker.fetch_assessment_by_category",
             new=AsyncMock(return_value=([], "https://example.com")),
         ),
-        patch("app.agent_worker.worker.make_llm_client", return_value=MagicMock()),
+        patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
-            "app.agent_worker.worker.AGENT_REGISTRY",
+            "app.relay_service.worker.AGENT_REGISTRY",
             {"security": lambda **_: mock_agent},
         ),
         patch(
-            "app.agent_worker.worker.CONFIG_REGISTRY",
+            "app.relay_service.worker.CONFIG_REGISTRY",
             {"security": MagicMock(return_value=MagicMock())},
         ),
     ):
@@ -196,7 +196,7 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
 @pytest.mark.asyncio
 async def test_run_worker_processes_one_message_then_cancels() -> None:
     """Worker receives one message, dispatches, publishes, deletes, then is cancelled."""
-    from app.agent_worker.worker import run_worker
+    from app.relay_service.worker import run_worker
 
     task = _make_task()
     raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-abc"}
@@ -216,13 +216,13 @@ async def test_run_worker_processes_one_message_then_cancels() -> None:
     )
 
     with (
-        patch("app.agent_worker.worker.SQSService", return_value=mock_sqs),
-        patch("app.agent_worker.worker.S3Service", return_value=AsyncMock()),
+        patch("app.relay_service.worker.SQSService", return_value=mock_sqs),
+        patch("app.relay_service.worker.S3Service", return_value=AsyncMock()),
         patch(
-            "app.agent_worker.worker.dispatch",
+            "app.relay_service.worker.dispatch",
             new=AsyncMock(return_value=mock_status),
         ),
-        patch("app.agent_worker.worker.app_config") as mock_cfg,
+        patch("app.relay_service.worker.app_config") as mock_cfg,
     ):
         mock_cfg.sqs.task_queue_url = "http://localhost/tasks"
         mock_cfg.sqs.status_queue_url = "http://localhost/status"

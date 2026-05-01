@@ -1,4 +1,4 @@
-"""ECS Fargate Agent Service entry point.
+"""ECS Fargate Relay Service entry point.
 
 Starts a FastAPI app with a /health endpoint for ECS health checks and
 launches the SQS polling worker as a background asyncio task.
@@ -14,11 +14,11 @@ from typing import AsyncGenerator
 import uvicorn
 from fastapi import FastAPI
 
-from app.agent_worker.worker import run_worker
+from app.relay_service.worker import run_worker
 from app.core.config import config
 from app.utils.logger import get_logger
 
-logger = get_logger("app.agent_worker.main")
+logger = get_logger("app.relay_service.main")
 
 _WORKER_PORT = 8002
 
@@ -29,7 +29,7 @@ _worker_task: asyncio.Task | None = None
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     global _worker_task  # noqa: PLW0603
     _worker_task = asyncio.create_task(run_worker())
-    logger.info("Agent worker process started")
+    logger.info("Relay service process started")
     yield
     if _worker_task:
         _worker_task.cancel()
@@ -37,10 +37,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
             await _worker_task
         except asyncio.CancelledError:
             pass
-    logger.info("Agent worker process stopped")
+    logger.info("Relay service process stopped")
 
 
-app = FastAPI(title="AIA Agent Worker", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="AIA Relay Service", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -50,7 +50,7 @@ async def health() -> dict[str, str]:
 
 def main() -> None:
     uvicorn.run(
-        "app.agent_worker.main:app",
+        "app.relay_service.main:app",
         host=config.app.host,
         port=_WORKER_PORT,
         reload=config.app.env == "development",
@@ -61,5 +61,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        logger.critical("Fatal agent worker error: %s", exc)
+        logger.critical("Fatal relay service error: %s", exc)
         sys.exit(1)
