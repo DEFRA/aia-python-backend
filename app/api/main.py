@@ -23,7 +23,9 @@ async def lifespan(_: FastAPI):
             await init_db()
             logger.info("PostgreSQL initialised")
         except Exception as exc:
-            logger.warning("PostgreSQL unavailable at startup — DB endpoints will fail: %s", exc)
+            logger.warning(
+                "PostgreSQL unavailable at startup — DB endpoints will fail: %s", exc
+            )
     yield
     await close_postgres_pool()
 

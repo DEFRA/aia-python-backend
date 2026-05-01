@@ -1,4 +1,13 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 
 from app.core.enums import DocumentStatus
 from app.models.result_record import ResultRecord
@@ -46,7 +55,9 @@ async def upload_document(
     if not doc_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=messages.FILE_ALREADY_UPLOADED.format(file_name=fileName, user_id=user_id),
+            detail=messages.FILE_ALREADY_UPLOADED.format(
+                file_name=fileName, user_id=user_id
+            ),
         )
 
     s3_key = service.get_s3_key(doc_id, fileName)
@@ -89,7 +100,12 @@ async def fetch_upload_history(
         limit = _MAX_HISTORY_LIMIT
     logger.info("History request userId=%s page=%d limit=%d", user_id, page, limit)
     records, total = await service.fetch_history(user_id, page=page, limit=limit)
-    return {"documents": [r.model_dump() for r in records], "total": total, "page": page, "limit": limit}
+    return {
+        "documents": [r.model_dump() for r in records],
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
 
 
 @router.get(
@@ -106,7 +122,9 @@ async def get_document(
     logger.debug("Document fetch userId=%s documentId=%s", user_id, document_id)
     record = await service.fetch_result(document_id, user_id)
     if record is None:
-        logger.warning("Document not found userId=%s documentId=%s", user_id, document_id)
+        logger.warning(
+            "Document not found userId=%s documentId=%s", user_id, document_id
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=messages.DOC_NOT_FOUND.format(doc_id=document_id),

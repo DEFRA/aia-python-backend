@@ -53,13 +53,10 @@ async def fetch_assessment_by_category(
         await conn.close()
 
     if not rows:
-        raise UnknownCategoryError(
-            f"No active questions found for category: {category!r}"
-        )
+        raise UnknownCategoryError(f"No active questions found for category: {category!r}")
 
     questions: list[QuestionItem] = [
-        QuestionItem(question=row["question_text"], reference=row["reference"])
-        for row in rows
+        QuestionItem(question=row["question_text"], reference=row["reference"]) for row in rows
     ]
     category_url: str = rows[0]["source_url"]
     logger.info(

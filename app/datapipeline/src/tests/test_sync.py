@@ -72,7 +72,12 @@ class TestGetSyncRecord:
         assert get_sync_record(conn, _URL) is None
 
     def test_returns_row_dict(self) -> None:
-        row = {"url_hash": url_to_hash(_URL), "source_url": _URL, "last_modified": _TS, "content_size": _SIZE}
+        row = {
+            "url_hash": url_to_hash(_URL),
+            "source_url": _URL,
+            "last_modified": _TS,
+            "content_size": _SIZE,
+        }
         conn = MagicMock()
         conn.cursor.return_value = self._make_cursor(row)
         result = get_sync_record(conn, _URL)
@@ -106,11 +111,11 @@ class TestUpsertSyncRecord:
         conn = self._make_conn()
         upsert_sync_record(conn, _URL, _TS, _SIZE, "doc-uuid-123")
         params = conn.cursor.return_value.execute.call_args[0][1]
-        assert params[0] == url_to_hash(_URL)   # url_hash
-        assert params[1] == _URL                # source_url
-        assert params[2] == _TS                 # last_modified
-        assert params[3] == _SIZE               # content_size
-        assert params[4] == "doc-uuid-123"      # policy_doc_id
+        assert params[0] == url_to_hash(_URL)  # url_hash
+        assert params[1] == _URL  # source_url
+        assert params[2] == _TS  # last_modified
+        assert params[3] == _SIZE  # content_size
+        assert params[4] == "doc-uuid-123"  # policy_doc_id
 
     def test_sql_includes_content_size(self) -> None:
         conn = self._make_conn()

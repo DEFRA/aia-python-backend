@@ -75,7 +75,9 @@ class TestInsertPolicyDocument:
         cursor.fetchone.return_value = (returned_id,)
         conn = _make_conn(cursor)
 
-        result = insert_policy_document(conn, "https://sp.com/page", "page.aspx", "security")
+        result = insert_policy_document(
+            conn, "https://sp.com/page", "page.aspx", "security"
+        )
 
         assert result == returned_id
 
@@ -132,13 +134,19 @@ class TestInsertQuestions:
         conn = _make_conn(cursor)
 
         questions = [
-            ExtractedQuestion(question_text="Q1?", reference="Sec 1", source_excerpt="Excerpt 1"),
-            ExtractedQuestion(question_text="Q2?", reference="Sec 2", source_excerpt="Excerpt 2"),
+            ExtractedQuestion(
+                question_text="Q1?", reference="Sec 1", source_excerpt="Excerpt 1"
+            ),
+            ExtractedQuestion(
+                question_text="Q2?", reference="Sec 2", source_excerpt="Excerpt 2"
+            ),
         ]
         insert_questions(conn, "doc-uuid-123", questions)
 
         execute_calls = cursor.execute.call_args_list
-        question_inserts = [c for c in execute_calls if "data_pipeline.questions" in str(c)]
+        question_inserts = [
+            c for c in execute_calls if "data_pipeline.questions" in str(c)
+        ]
         assert len(question_inserts) == 2
 
     def test_empty_questions_list_returns_zero(self) -> None:
@@ -155,12 +163,20 @@ class TestFetchAllPolicySources:
     def test_returns_all_sources_including_inactive(self) -> None:
         rows = [
             {
-                "url_id": 1, "url": "https://sp.com/active", "filename": "Active",
-                "category": "security", "type": "page", "isactive": True,
+                "url_id": 1,
+                "url": "https://sp.com/active",
+                "filename": "Active",
+                "category": "security",
+                "type": "page",
+                "isactive": True,
             },
             {
-                "url_id": 2, "url": "https://sp.com/inactive", "filename": "Inactive",
-                "category": "technical", "type": "page", "isactive": False,
+                "url_id": 2,
+                "url": "https://sp.com/inactive",
+                "filename": "Inactive",
+                "category": "technical",
+                "type": "page",
+                "isactive": False,
             },
         ]
         conn = _make_conn(_make_cursor(rows))

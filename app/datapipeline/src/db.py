@@ -43,7 +43,9 @@ def fetch_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySou
     return [PolicySource(**dict(row)) for row in rows]
 
 
-def fetch_all_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySource]:
+def fetch_all_policy_sources(
+    conn: psycopg2.extensions.connection,
+) -> list[PolicySource]:
     """Fetch ALL policy sources (active and inactive) from data_pipeline.source_policy_docs."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -55,7 +57,12 @@ def fetch_all_policy_sources(conn: psycopg2.extensions.connection) -> list[Polic
         )
         rows = cur.fetchall()
     active = sum(1 for r in rows if r["isactive"])
-    logger.info("Fetched %d policy source(s) (%d active, %d inactive)", len(rows), active, len(rows) - active)
+    logger.info(
+        "Fetched %d policy source(s) (%d active, %d inactive)",
+        len(rows),
+        active,
+        len(rows) - active,
+    )
     return [PolicySource(**dict(row)) for row in rows]
 
 
@@ -78,7 +85,9 @@ def delete_policy_document_by_url(
         count: int = cur.rowcount
     conn.commit()
     if count:
-        logger.info("Deleted policy_document and cascaded questions/categories for url=%s", url)
+        logger.info(
+            "Deleted policy_document and cascaded questions/categories for url=%s", url
+        )
     return count
 
 
@@ -109,7 +118,12 @@ def insert_policy_document(
         result = cur.fetchone()
         returned_id: str = result[0]
     conn.commit()
-    logger.info("Upserted policy_document policy_doc_id=%s url=%s category=%s", returned_id, source_url, category)
+    logger.info(
+        "Upserted policy_document policy_doc_id=%s url=%s category=%s",
+        returned_id,
+        source_url,
+        category,
+    )
     return returned_id
 
 
@@ -128,7 +142,9 @@ def delete_questions_for_doc(
         )
         count: int = cur.rowcount
     conn.commit()
-    logger.info("Deleted %d stale question(s) for policy_doc_id=%s", count, policy_doc_id)
+    logger.info(
+        "Deleted %d stale question(s) for policy_doc_id=%s", count, policy_doc_id
+    )
     return count
 
 
@@ -156,7 +172,13 @@ def insert_questions(
                     (question_id, question_text, reference, source_excerpt, policy_doc_id)
                 VALUES (%s::uuid, %s, %s, %s, %s::uuid)
                 """,
-                (question_id, q.question_text, q.reference, q.source_excerpt, policy_doc_id),
+                (
+                    question_id,
+                    q.question_text,
+                    q.reference,
+                    q.source_excerpt,
+                    policy_doc_id,
+                ),
             )
             count += 1
     conn.commit()

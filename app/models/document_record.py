@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Dict, Optional
 from pydantic import BaseModel
 
+
 class DocumentRecord(BaseModel):
     doc_id: Optional[str] = None
     template_type: Optional[str] = None

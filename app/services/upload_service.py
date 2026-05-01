@@ -26,7 +26,9 @@ class UploadService:
         self.context = context
         self.orchestrator_service = orchestrator_service
 
-    async def process_upload_request(self, request: UploadRequest, user_id: str) -> Optional[str]:
+    async def process_upload_request(
+        self, request: UploadRequest, user_id: str
+    ) -> Optional[str]:
         is_duplicate = await self.repo.check_duplicate(user_id, request.fileName)
         if is_duplicate:
             return None

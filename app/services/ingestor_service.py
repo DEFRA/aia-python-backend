@@ -41,6 +41,8 @@ class IngestorService:
 
         extracted = "\n".join(lines)
         logger.debug(
-            "Extracted %d chars from DOCX (%d bytes input)", len(extracted), len(file_bytes)
+            "Extracted %d chars from DOCX (%d bytes input)",
+            len(extracted),
+            len(file_bytes),
         )
         return extracted

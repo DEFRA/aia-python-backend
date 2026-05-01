@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import anthropic
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Provider routing
@@ -47,7 +45,6 @@ def test_bedrock_provider_returns_async_anthropic_bedrock() -> None:
 
 def test_provider_read_from_env_var() -> None:
     """LLM_PROVIDER env var overrides config.yaml value."""
-    import importlib
     import os
 
     import src.utils.llm_client as llm_module
@@ -58,17 +55,16 @@ def test_provider_read_from_env_var() -> None:
     ):
         mock_bedrock.return_value = MagicMock()
         # Reload to bust the module-level import; call directly
-        client = llm_module.make_llm_client()
+        llm_module.make_llm_client()
 
     mock_bedrock.assert_called_once_with()
 
 
 def test_default_provider_is_anthropic() -> None:
     """With no env override, the default provider is 'anthropic'."""
-    from src.config import LLMConfig
-
     # Clear any cached YAML to get a clean read
     import src.config as cfg_mod
+    from src.config import LLMConfig
 
     original_cache = cfg_mod._YAML_CACHE
     cfg_mod._YAML_CACHE = None
@@ -93,6 +89,5 @@ def test_invalid_provider_raises() -> None:
 
     from src.config import LLMConfig
 
-    with patch.dict(os.environ, {"LLM_PROVIDER": "openai"}):
-        with pytest.raises(ValidationError):
-            LLMConfig()
+    with patch.dict(os.environ, {"LLM_PROVIDER": "openai"}), pytest.raises(ValidationError):
+        LLMConfig()

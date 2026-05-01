@@ -97,7 +97,10 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
             "main.fetch_assessment_by_category",
             new=AsyncMock(return_value=(questions, "https://example.test/")),
         ),
-        patch("main.DatabaseConfig", return_value=MagicMock(dsn="postgresql://test:test@localhost/test")),
+        patch(
+            "main.DatabaseConfig",
+            return_value=MagicMock(dsn="postgresql://test:test@localhost/test"),
+        ),
         patch.dict(
             "src.handlers.agent.AGENT_REGISTRY",
             {"security": mock_security_cls, "technical": mock_technical_cls},

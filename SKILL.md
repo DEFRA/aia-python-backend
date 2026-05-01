@@ -5,7 +5,8 @@ Practical recipes for common tasks in this codebase. Complements `CLAUDE.md`.
 Recipes 1–14 cover the **Lambda agent pipeline** (`app/agents/evaluation/`).  
 Recipes 15–16 cover the **CoreBackend & Orchestrator FastAPI service** (`app/api/`, `app/orchestrator/`).  
 Recipe 17 covers **Podman** (local container runtime).  
-Recipe 18 covers **moto_server** (local SQS + S3 mock for E2E testing).
+Recipe 18 covers **moto_server** (local SQS + S3 mock for E2E testing).  
+Recipe 19 covers **pre-commit** (git hooks: security scanning, ruff, mypy, pytest).
 
 ---
 
@@ -858,3 +859,77 @@ PYTHONPATH=. pytest tests/test_orchestrator_session.py -v
 PYTHONPATH=. pytest tests/test_orchestrator_summary.py -v
 PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
 ```
+
+---
+
+## Recipe 19 — pre-commit hooks (security, ruff, mypy, pytest)
+
+All hooks use `language: system` — they run against tools in the **active conda/venv environment**. No GitHub downloads; works behind corporate SSL proxies.
+
+### One-time setup
+
+```bash
+pip install -r requirements-dev.txt          # adds pre-commit + detect-secrets
+pre-commit install                            # wire the pre-commit stage
+pre-commit install --hook-type pre-push       # wire the pre-push stage (pytest)
+detect-secrets scan > .secrets.baseline      # allowlist existing known non-secrets
+```
+
+### Hook summary
+
+| Stage | Hook | What it does |
+|-------|------|--------------|
+| pre-commit | `detect-secrets` | Baseline-driven secret scanner; blocks new secrets only |
+| pre-commit | `gitleaks` | Pattern scanner for 150+ provider token types (skips gracefully if not installed: `brew install gitleaks`) |
+| pre-commit | `detect-private-key` | Regex scan for PEM private-key headers |
+| pre-commit | `no-commit-to-main` | Blocks direct commits to the `main` branch |
+| pre-commit | `check-merge-conflict` | Detects unresolved `<<<<<<` / `>>>>>>>` markers |
+| pre-commit | `check-large-files` | Blocks files over 500 KB |
+| pre-commit | `check-yaml` / `check-json` / `check-toml` | Syntax validation |
+| pre-commit | `ruff-lint` | `ruff check --fix` scoped to `app/` |
+| pre-commit | `ruff-format` | `ruff format` scoped to `app/` |
+| pre-commit | `mypy` | Type-checks `app/agents/evaluation/` |
+| pre-push | `pytest-evaluation` | Runs evaluation handler + DB tests |
+| pre-push | `pytest-datapipeline` | Runs datapipeline tests |
+
+Hook scripts live in `scripts/hooks/` (pure Python, no external dependencies beyond stdlib + PyYAML/tomllib).
+
+### Running manually
+
+```bash
+# Run all pre-commit hooks against every file
+pre-commit run --all-files
+
+# Run just one hook
+pre-commit run ruff-lint --all-files
+pre-commit run detect-secrets --all-files
+
+# Simulate the pre-push stage
+pre-commit run --all-files --hook-stage pre-push
+```
+
+### Allowlisting a false-positive secret
+
+```bash
+detect-secrets audit .secrets.baseline
+# mark the entry as a false positive in the interactive CLI
+```
+
+### Updating the secrets baseline after adding new test fixtures
+
+```bash
+detect-secrets scan --baseline .secrets.baseline
+```
+
+### Skipping hooks in an emergency (use sparingly)
+
+```bash
+SKIP=mypy git commit -m "chore: emergency fix"   # skip one hook by id
+git commit --no-verify                            # skip all hooks
+```
+
+### Adding a new hook
+
+1. Add a Python script to `scripts/hooks/` (exit code 0 = pass, non-zero = fail).
+2. Add a stanza to `.pre-commit-config.yaml` under `repo: local`.
+3. Run `pre-commit run <id> --all-files` to verify it behaves correctly.

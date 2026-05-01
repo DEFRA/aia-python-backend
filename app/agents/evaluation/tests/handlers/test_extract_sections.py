@@ -289,9 +289,7 @@ def _patch_loader() -> ExitStack:
     )
     mock_db = MagicMock()
     mock_db.dsn = "postgresql://test:test@localhost/test"
-    stack.enter_context(
-        patch("src.handlers.extract_sections._get_db_config", return_value=mock_db)
-    )
+    stack.enter_context(patch("src.handlers.extract_sections._get_db_config", return_value=mock_db))
     return stack
 
 

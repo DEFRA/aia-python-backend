@@ -68,9 +68,11 @@ async def test_raises_unknown_category_error_when_no_rows() -> None:
     mock_conn = AsyncMock()
     mock_conn.fetch.return_value = []
 
-    with patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)):
-        with pytest.raises(UnknownCategoryError, match="no-such-category"):
-            await fetch_assessment_by_category("dsn", "no-such-category")
+    with (
+        patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)),
+        pytest.raises(UnknownCategoryError, match="no-such-category"),
+    ):
+        await fetch_assessment_by_category("dsn", "no-such-category")
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +98,11 @@ async def test_connection_closed_when_fetch_raises() -> None:
     mock_conn = AsyncMock()
     mock_conn.fetch.side_effect = asyncpg.PostgresConnectionError("connection lost")
 
-    with patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)):
-        with pytest.raises(asyncpg.PostgresConnectionError):
-            await fetch_assessment_by_category("dsn", "security")
+    with (
+        patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)),
+        pytest.raises(asyncpg.PostgresConnectionError),
+    ):
+        await fetch_assessment_by_category("dsn", "security")
 
     mock_conn.close.assert_awaited_once()
 

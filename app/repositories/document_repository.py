@@ -1,4 +1,3 @@
-import json
 from typing import List, Optional
 
 import asyncpg
@@ -28,7 +27,9 @@ class DocumentRepository:
             )
         return row is not None
 
-    async def insert_document(self, request: UploadRequest, doc_id: str, user_id: str) -> str:
+    async def insert_document(
+        self, request: UploadRequest, doc_id: str, user_id: str
+    ) -> str:
         now = self.context.get_current_timestamp()
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -74,7 +75,9 @@ class DocumentRepository:
                 doc_id,
             )
 
-    async def fetch_history(self, user_id: str, page: int = 1, limit: int = 20) -> tuple[List[HistoryRecord], int]:
+    async def fetch_history(
+        self, user_id: str, page: int = 1, limit: int = 20
+    ) -> tuple[List[HistoryRecord], int]:
         offset = (page - 1) * limit
         async with self.pool.acquire() as conn:
             total_row = await conn.fetchrow(
@@ -199,6 +202,7 @@ class DocumentRepository:
 
     async def cleanup_stuck_documents(self, timeout_minutes: int = 15) -> int:
         from datetime import timedelta
+
         now = self.context.get_current_timestamp()
         threshold = now - timedelta(minutes=timeout_minutes)
         async with self.pool.acquire() as conn:

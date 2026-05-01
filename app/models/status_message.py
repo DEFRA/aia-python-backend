@@ -9,7 +9,7 @@ class StatusMessage(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    task_id: str        # "{documentId}_{agentType}"
+    task_id: str  # "{documentId}_{agentType}"
     document_id: str
     agent_type: str
     result: dict[str, Any]

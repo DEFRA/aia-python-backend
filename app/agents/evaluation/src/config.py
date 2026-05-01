@@ -147,9 +147,7 @@ class LLMConfig(BaseSettings):
     key in ``config.yaml``.
     """
 
-    provider: Literal["anthropic", "bedrock"] = Field(
-        default="anthropic", alias="LLM_PROVIDER"
-    )
+    provider: Literal["anthropic", "bedrock"] = Field(default="anthropic", alias="LLM_PROVIDER")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
     settings_customise_sources = _make_customise_sources("llm")

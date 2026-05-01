@@ -154,7 +154,8 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
 
         try:
             questions, category_url = await fetch_assessment_by_category(
-                DatabaseConfig().dsn, display_key
+                DatabaseConfig().dsn,  # type: ignore[call-arg]
+                display_key,
             )
         except UnknownCategoryError:
             logger.warning(

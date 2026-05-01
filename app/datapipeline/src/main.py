@@ -237,7 +237,9 @@ def run() -> dict[str, int]:
 
         # 5. Persist to Phase 1 tables (replace, not accumulate)
         try:
-            policy_doc_id = insert_policy_document(conn, url, file_name, source.category)
+            policy_doc_id = insert_policy_document(
+                conn, url, file_name, source.category
+            )
             delete_questions_for_doc(conn, policy_doc_id)
             insert_questions(conn, policy_doc_id, questions)
             upsert_sync_record(conn, url, last_modified, content_size, policy_doc_id)
@@ -256,7 +258,12 @@ def run() -> dict[str, int]:
         processed += 1
 
     conn.close()
-    summary = {"processed": processed, "skipped": skipped, "failed": failed, "cleaned": cleaned}
+    summary = {
+        "processed": processed,
+        "skipped": skipped,
+        "failed": failed,
+        "cleaned": cleaned,
+    }
     logger.info("Pipeline complete: %s", summary)
     return summary
 

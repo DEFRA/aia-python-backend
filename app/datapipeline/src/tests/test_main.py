@@ -109,9 +109,9 @@ class TestRunSummary:
         from app.datapipeline.src.main import run
 
         mocks = _build_mocks()
-        mocks["_build_sharepoint_client"].return_value.read_page_content.side_effect = (
-            RuntimeError("SP down")
-        )
+        mocks[
+            "_build_sharepoint_client"
+        ].return_value.read_page_content.side_effect = RuntimeError("SP down")
         with patch.multiple("app.datapipeline.src.main", **mocks):
             summary = run()
 
@@ -165,8 +165,8 @@ class TestRunSummary:
         mocks["delete_questions_for_doc"].side_effect = lambda *_: call_order.append(
             "delete"
         )
-        mocks["insert_questions"].side_effect = (
-            lambda *_: call_order.append("insert") or 1
+        mocks["insert_questions"].side_effect = lambda *_: (
+            call_order.append("insert") or 1
         )
         with patch.multiple("app.datapipeline.src.main", **mocks):
             run()
@@ -237,7 +237,9 @@ class TestInactiveSourceCleanup:
         with patch.multiple("app.datapipeline.src.main", **mocks):
             run()
 
-        mocks["_build_sharepoint_client"].return_value.read_page_content.assert_not_called()
+        mocks[
+            "_build_sharepoint_client"
+        ].return_value.read_page_content.assert_not_called()
 
     def test_mixed_sources_processed_and_cleaned(self) -> None:
         from app.datapipeline.src.main import run

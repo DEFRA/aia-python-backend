@@ -1,4 +1,3 @@
-import json
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -31,7 +30,9 @@ class SQSService:
         body = task.model_dump_json(by_alias=True)
         logger.info(
             "Publishing task task_id=%s agent_type=%s to %s",
-            task.task_id, task.agent_type, config.sqs.task_queue_url,
+            task.task_id,
+            task.agent_type,
+            config.sqs.task_queue_url,
         )
         async with self._get_client() as client:
             response = await client.send_message(

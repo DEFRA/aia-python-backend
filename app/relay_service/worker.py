@@ -9,7 +9,6 @@ aia-status. One message is processed at a time; visibility timeout is set to
 from __future__ import annotations
 
 import asyncio
-import logging
 import sys
 from pathlib import Path
 
@@ -27,19 +26,22 @@ if str(_EVAL_ROOT) not in sys.path:
 # Load the evaluation module's own .env so DatabaseConfig picks up DB_HOST/NAME/USER/PASSWORD.
 # This must happen before any src.* import that triggers Pydantic settings initialisation.
 from dotenv import load_dotenv as _load_dotenv  # noqa: E402
-_load_dotenv(_EVAL_ROOT / ".env", override=False)  # override=False: root .env values take precedence
+
+_load_dotenv(
+    _EVAL_ROOT / ".env", override=False
+)  # override=False: root .env values take precedence
 
 from src.config import DatabaseConfig  # noqa: E402
 from src.db.questions_repo import fetch_assessment_by_category  # noqa: E402
 from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
 from src.utils.llm_client import make_llm_client  # noqa: E402
 
-from app.core.config import config as app_config
-from app.models.status_message import StatusMessage
-from app.models.task_message import TaskMessage
-from app.services.s3_service import S3Service
-from app.services.sqs_service import SQSService
-from app.utils.logger import get_logger
+from app.core.config import config as app_config  # noqa: E402
+from app.models.status_message import StatusMessage  # noqa: E402
+from app.models.task_message import TaskMessage  # noqa: E402
+from app.services.s3_service import S3Service  # noqa: E402
+from app.services.sqs_service import SQSService  # noqa: E402
+from app.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger("app.relay_service")
 
@@ -187,7 +189,8 @@ async def run_worker() -> None:
                     )
                 except Exception as exc:
                     logger.exception(
-                        "Unhandled task error — message not deleted (will retry): %s", exc
+                        "Unhandled task error — message not deleted (will retry): %s",
+                        exc,
                     )
         except asyncio.CancelledError:
             logger.info("Relay service stopped")

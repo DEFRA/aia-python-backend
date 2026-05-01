@@ -59,7 +59,7 @@ def _get_db_config() -> DatabaseConfig:
     """Return the module-level DatabaseConfig singleton, creating on first call."""
     global _db_config  # noqa: PLW0603
     if _db_config is None:
-        _db_config = DatabaseConfig()
+        _db_config = DatabaseConfig()  # type: ignore[call-arg]
     return _db_config
 
 

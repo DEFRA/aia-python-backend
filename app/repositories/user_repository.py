@@ -27,7 +27,11 @@ class UserRepository:
                 )
             if row is None:
                 return None
-            return UserRecord(userId=row["user_id"], email=row["email"], name=row["name"])
+            return UserRecord(
+                userId=row["user_id"], email=row["email"], name=row["name"]
+            )
         except Exception:
-            logger.warning("Could not fetch user %s from DB; falling back to guest user", user_id)
+            logger.warning(
+                "Could not fetch user %s from DB; falling back to guest user", user_id
+            )
             return GUEST_USER

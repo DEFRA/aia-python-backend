@@ -46,10 +46,14 @@ app = FastAPI(title="AIA Orchestrator", version="1.0.0", lifespan=lifespan)
 
 
 @app.post("/orchestrate", status_code=202)
-async def orchestrate(request: OrchestrateRequest, background_tasks: BackgroundTasks) -> dict:
+async def orchestrate(
+    request: OrchestrateRequest, background_tasks: BackgroundTasks
+) -> dict:
     logger.info(
         "Orchestrate request received doc_id=%s s3_key=%s template_type=%s",
-        request.document_id, request.s3_key, request.template_type,
+        request.document_id,
+        request.s3_key,
+        request.template_type,
     )
     background_tasks.add_task(
         _process_document,
@@ -95,11 +99,16 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
         await asyncio.gather(*[sqs.send_task(t) for t in tasks])
         logger.info(
             "Dispatched %d task(s) for doc_id=%s template_type=%s agents=%s",
-            len(tasks), doc_id, template_type, agent_types,
+            len(tasks),
+            doc_id,
+            template_type,
+            agent_types,
         )
 
         expected_task_ids = {t.task_id for t in tasks}
-        session = await _session_store.create(doc_id, template_type, s3_key, expected_task_ids)
+        session = await _session_store.create(
+            doc_id, template_type, s3_key, expected_task_ids
+        )
 
         timed_out = False
         try:
@@ -111,7 +120,8 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
             timed_out = True
             logger.warning(
                 "Agent timeout reached for doc_id=%s after %ds",
-                doc_id, config.orchestrator.agent_timeout_seconds,
+                doc_id,
+                config.orchestrator.agent_timeout_seconds,
             )
 
         expected = set(session.expected_task_ids)
@@ -120,7 +130,9 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
 
         if not timed_out:
             result_md = _summary_generator.generate(collected)
-            await repo.update_status(doc_id, DocumentStatus.COMPLETE.value, result_md=result_md)
+            await repo.update_status(
+                doc_id, DocumentStatus.COMPLETE.value, result_md=result_md
+            )
             logger.info("Document completed doc_id=%s", doc_id)
         elif not collected:
             await repo.update_status(
@@ -139,7 +151,11 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 result_md=result_md,
                 error_message=f"Agents did not respond within timeout: {missing_types}",
             )
-            logger.warning("Document partially completed doc_id=%s missing=%s", doc_id, missing_types)
+            logger.warning(
+                "Document partially completed doc_id=%s missing=%s",
+                doc_id,
+                missing_types,
+            )
 
     except Exception as exc:
         logger.exception("Document processing failed doc_id=%s: %s", doc_id, exc)
@@ -161,7 +177,9 @@ async def _status_queue_poller() -> None:
 
     while True:
         try:
-            messages = await sqs.receive_messages(queue_url, max_messages=10, wait_seconds=20)
+            messages = await sqs.receive_messages(
+                queue_url, max_messages=10, wait_seconds=20
+            )
             for msg in messages:
                 receipt = msg["receipt_handle"]
                 try:
@@ -174,10 +192,15 @@ async def _status_queue_poller() -> None:
                     await sqs.delete_message(queue_url, receipt)
                     logger.info(
                         "Result recorded task_id=%s all_received=%s",
-                        status_msg.task_id, all_received,
+                        status_msg.task_id,
+                        all_received,
                     )
                 except Exception as exc:
-                    logger.exception("Failed to process status message: %s — body=%s", exc, msg["body"])
+                    logger.exception(
+                        "Failed to process status message: %s — body=%s",
+                        exc,
+                        msg["body"],
+                    )
         except asyncio.CancelledError:
             logger.info("Status queue poller stopped")
             return

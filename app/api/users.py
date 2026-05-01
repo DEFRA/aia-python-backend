@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
 from app.models.user_record import UserRecord
 from app.repositories.user_repository import GUEST_USER, UserRepository
 from app.core.dependencies import get_user_repository, verify_auth
-from app.core.messages import messages
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/users", tags=["users"])

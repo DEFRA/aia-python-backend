@@ -39,7 +39,9 @@ class SessionStore:
             self._sessions[doc_id] = session
         return session
 
-    async def record_result(self, doc_id: str, task_id: str, result: dict[str, Any]) -> bool:
+    async def record_result(
+        self, doc_id: str, task_id: str, result: dict[str, Any]
+    ) -> bool:
         """
         Records an agent result for the given document.
         Returns True if all expected results have now been collected.
@@ -49,7 +51,9 @@ class SessionStore:
             if session is None:
                 return False
             session.collected_results[task_id] = result
-            all_received = session.expected_task_ids.issubset(session.collected_results.keys())
+            all_received = session.expected_task_ids.issubset(
+                session.collected_results.keys()
+            )
             if all_received:
                 session.completion_event.set()
             return all_received
