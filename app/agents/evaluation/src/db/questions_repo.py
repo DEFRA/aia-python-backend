@@ -18,9 +18,8 @@ logger: logging.Logger = logging.getLogger(__name__)
 _FETCH_QUESTIONS_SQL = """
     SELECT q.question_text, q.reference, pd.source_url
     FROM data_pipeline.questions q
-    JOIN data_pipeline.question_categories qc ON q.question_id = qc.question_id
     JOIN data_pipeline.policy_documents pd ON q.policy_doc_id = pd.policy_doc_id
-    WHERE LOWER(qc.category) = LOWER($1)
+    WHERE LOWER(pd.category) = LOWER($1)
       AND q.isactive = true
     ORDER BY pd.created_at DESC, q.created_at ASC
 """

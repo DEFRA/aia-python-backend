@@ -19,7 +19,6 @@ class ExtractedQuestion(BaseModel):
     question_text: str
     reference: str  # e.g. "Section 3.2", "C1.a"
     source_excerpt: str  # verbatim passage from the policy document
-    categories: list[str]  # e.g. ["security", "technical"]
 
 
 class SyncRecord(BaseModel):

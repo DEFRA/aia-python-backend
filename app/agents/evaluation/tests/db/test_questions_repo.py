@@ -123,6 +123,6 @@ async def test_sql_filters_by_category_case_insensitive_and_isactive() -> None:
     assert "LOWER($1)" in sql
     assert "q.isactive = true" in sql
     assert "data_pipeline.questions" in sql
-    assert "data_pipeline.question_categories" in sql
     assert "data_pipeline.policy_documents" in sql
+    assert "pd.category" in sql
     assert passed_category == "Security"

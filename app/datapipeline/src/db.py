@@ -86,28 +86,30 @@ def insert_policy_document(
     conn: psycopg2.extensions.connection,
     source_url: str,
     file_name: str,
+    category: str,
 ) -> str:
     """Upsert a policy document record and return its policy_doc_id.
 
     Uses ON CONFLICT to handle re-runs — if the URL already exists the
-    file_name is updated and the existing policy_doc_id is returned.
+    file_name and category are updated and the existing policy_doc_id is returned.
     """
     policy_doc_id = new_uuid()
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, file_name)
-            VALUES (%s::uuid, %s, %s)
+            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, file_name, category)
+            VALUES (%s::uuid, %s, %s, %s)
             ON CONFLICT (source_url) DO UPDATE
-                SET file_name = EXCLUDED.file_name
+                SET file_name = EXCLUDED.file_name,
+                    category  = EXCLUDED.category
             RETURNING policy_doc_id::text
             """,
-            (policy_doc_id, source_url, file_name),
+            (policy_doc_id, source_url, file_name, category),
         )
         result = cur.fetchone()
         returned_id: str = result[0]
     conn.commit()
-    logger.info("Upserted policy_document policy_doc_id=%s url=%s", returned_id, source_url)
+    logger.info("Upserted policy_document policy_doc_id=%s url=%s category=%s", returned_id, source_url, category)
     return returned_id
 
 
@@ -156,15 +158,6 @@ def insert_questions(
                 """,
                 (question_id, q.question_text, q.reference, q.source_excerpt, policy_doc_id),
             )
-            for category in q.categories:
-                cur.execute(
-                    """
-                    INSERT INTO data_pipeline.question_categories (question_id, category)
-                    VALUES (%s::uuid, %s)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    (question_id, category),
-                )
             count += 1
     conn.commit()
     logger.info("Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id)

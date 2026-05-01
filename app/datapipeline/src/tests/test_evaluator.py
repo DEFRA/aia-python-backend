@@ -14,7 +14,6 @@ _VALID_JSON = json.dumps(
             "question_text": "Does the system encrypt data at rest?",
             "reference": "Section 3.2",
             "source_excerpt": "All data must be encrypted at rest using AES-256.",
-            "categories": ["security"],
         }
     ]
 )
@@ -72,7 +71,7 @@ class TestQuestionExtractorExtract:
         assert isinstance(q, ExtractedQuestion)
         assert q.question_text == "Does the system encrypt data at rest?"
         assert q.reference == "Section 3.2"
-        assert q.categories == ["security"]
+        assert q.source_excerpt == "All data must be encrypted at rest using AES-256."
 
     @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
     def test_handles_json_fences_in_response(self, mock_bedrock_cls: MagicMock) -> None:

@@ -235,7 +235,7 @@ def run() -> dict[str, int]:
 
         # 5. Persist to Phase 1 tables (replace, not accumulate)
         try:
-            policy_doc_id = insert_policy_document(conn, url, file_name)
+            policy_doc_id = insert_policy_document(conn, url, file_name, source.category)
             delete_questions_for_doc(conn, policy_doc_id)
             insert_questions(conn, policy_doc_id, questions)
             upsert_sync_record(conn, url, file_name, last_modified, policy_doc_id)

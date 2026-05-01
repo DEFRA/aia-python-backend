@@ -76,7 +76,7 @@ class TestInsertPolicyDocument:
         cursor.fetchone.return_value = (returned_id,)
         conn = _make_conn(cursor)
 
-        result = insert_policy_document(conn, "https://sp.com/page", "page.aspx")
+        result = insert_policy_document(conn, "https://sp.com/page", "page.aspx", "security")
 
         assert result == returned_id
 
@@ -85,7 +85,7 @@ class TestInsertPolicyDocument:
         cursor.fetchone.return_value = ("some-uuid",)
         conn = _make_conn(cursor)
 
-        insert_policy_document(conn, "https://sp.com/page", "page.aspx")
+        insert_policy_document(conn, "https://sp.com/page", "page.aspx", "security")
 
         conn.commit.assert_called_once()
 
@@ -94,7 +94,7 @@ class TestInsertPolicyDocument:
         cursor.fetchone.return_value = ("some-uuid",)
         conn = _make_conn(cursor)
 
-        insert_policy_document(conn, "https://sp.com/page", "page.aspx")
+        insert_policy_document(conn, "https://sp.com/page", "page.aspx", "security")
 
         sql = cursor.execute.call_args[0][0]
         assert "ON CONFLICT" in sql.upper()
@@ -107,7 +107,6 @@ class TestInsertQuestions:
                 question_text=f"Question {i}?",
                 reference=f"Section {i}",
                 source_excerpt=f"Excerpt {i}",
-                categories=["security"],
             )
             for i in range(n)
         ]
@@ -129,23 +128,19 @@ class TestInsertQuestions:
 
         conn.commit.assert_called_once()
 
-    def test_inserts_categories_for_each_question(self) -> None:
+    def test_inserts_one_row_per_question(self) -> None:
         cursor = _make_cursor()
         conn = _make_conn(cursor)
 
         questions = [
-            ExtractedQuestion(
-                question_text="Q?",
-                reference="Sec 1",
-                source_excerpt="Excerpt",
-                categories=["security", "technical"],
-            )
+            ExtractedQuestion(question_text="Q1?", reference="Sec 1", source_excerpt="Excerpt 1"),
+            ExtractedQuestion(question_text="Q2?", reference="Sec 2", source_excerpt="Excerpt 2"),
         ]
         insert_questions(conn, "doc-uuid-123", questions)
 
         execute_calls = cursor.execute.call_args_list
-        category_inserts = [c for c in execute_calls if "question_categories" in str(c)]
-        assert len(category_inserts) == 2
+        question_inserts = [c for c in execute_calls if "data_pipeline.questions" in str(c)]
+        assert len(question_inserts) == 2
 
     def test_empty_questions_list_returns_zero(self) -> None:
         cursor = _make_cursor()

@@ -16,6 +16,35 @@ DO $$ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Migration: move category from question_categories to policy_documents
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    -- Add category column to policy_documents if not already present
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'policy_documents'
+          AND column_name  = 'category'
+    ) THEN
+        ALTER TABLE data_pipeline.policy_documents ADD COLUMN category TEXT;
+        -- Back-fill from question_categories via the most common category per document
+        UPDATE data_pipeline.policy_documents pd
+        SET    category = (
+            SELECT qc.category
+            FROM   data_pipeline.question_categories qc
+            JOIN   data_pipeline.questions q ON q.question_id = qc.question_id
+            WHERE  q.policy_doc_id = pd.policy_doc_id
+            GROUP  BY qc.category
+            ORDER  BY COUNT(*) DESC
+            LIMIT  1
+        );
+        ALTER TABLE data_pipeline.policy_documents ALTER COLUMN category SET NOT NULL;
+    END IF;
+    -- Drop the junction table once data is migrated
+    DROP TABLE IF EXISTS data_pipeline.question_categories;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Source: active policy URLs to process
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
@@ -35,6 +64,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policy_documents (
     policy_doc_id UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     source_url    TEXT        NOT NULL UNIQUE,
     file_name     TEXT        NOT NULL,
+    category      TEXT        NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -50,16 +80,6 @@ CREATE TABLE IF NOT EXISTS data_pipeline.questions (
         REFERENCES data_pipeline.policy_documents(policy_doc_id) ON DELETE CASCADE,
     isactive       BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ---------------------------------------------------------------------------
--- Output: question → category junction
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_pipeline.question_categories (
-    question_id UUID NOT NULL
-        REFERENCES data_pipeline.questions(question_id) ON DELETE CASCADE,
-    category    TEXT NOT NULL,
-    PRIMARY KEY (question_id, category)
 );
 
 -- ---------------------------------------------------------------------------
