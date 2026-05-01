@@ -248,6 +248,77 @@ class TestLocalSourcesFeatureFlag:
         local_mock.assert_called_once_with("/custom/path/sources.json")
 
 
+class TestDebugOutput:
+    def test_debug_file_written_when_flag_true(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "true")
+        monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
+        from app.datapipeline.src.main import run
+
+        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+            run()
+
+        files = list(tmp_path.iterdir())
+        assert len(files) == 1
+        assert files[0].suffix == ".txt"
+
+    def test_debug_file_contains_three_sections(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "true")
+        monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
+        from app.datapipeline.src.main import run
+
+        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+            run()
+
+        text = list(tmp_path.iterdir())[0].read_text(encoding="utf-8")
+        assert "=== SOURCE URL ===" in text
+        assert "=== RAW CONTENT ===" in text
+        assert "=== QUESTIONS GENERATED ===" in text
+        assert _URL in text
+
+    def test_debug_file_not_written_when_flag_false(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "false")
+        monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
+        from app.datapipeline.src.main import run
+
+        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+            run()
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_debug_file_not_written_when_flag_absent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        monkeypatch.delenv("SAVE_DEBUG_OUTPUT", raising=False)
+        monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
+        from app.datapipeline.src.main import run
+
+        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+            run()
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_pipeline_continues_when_debug_write_fails(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "true")
+        # point to a path that can't be created (file exists where dir should be)
+        bad_dir = tmp_path / "blocked.txt"
+        bad_dir.write_text("I am a file, not a dir")
+        monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(bad_dir / "subdir"))
+        from app.datapipeline.src.main import run
+
+        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+            summary = run()
+
+        assert summary["processed"] == 1  # pipeline completed despite write error
+
+
 def _build_mocks(
     sources: list[PolicySource] | None = None,
     sync_changed: bool = True,

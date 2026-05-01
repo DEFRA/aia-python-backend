@@ -20,6 +20,7 @@ AWS Lambda (data pipeline)
         │       ├── Fetch page content via Microsoft Graph API (SharePoint)
         │       ├── Check change — skip if last_modified unchanged
         │       ├── Extract evaluation questions via Anthropic Bedrock (LLM)
+        │       ├── [flag] Write debug file (URL + content + questions)
         │       └── Write to data_pipeline normalised tables (PostgreSQL)
         │
         ▼
@@ -34,6 +35,8 @@ PostgreSQL — data_pipeline schema
 app/datapipeline/
 ├── data/
 │   └── policy_sources.json          # Local policy source list (feature-flag mode)
+├── debug/                           # Debug output files (git-ignored, SAVE_DEBUG_OUTPUT=true)
+│   └── .gitignore
 ├── prompts/
 │   └── policy_evaluation_prompt.md  # LLM system prompt (edit without touching Python)
 ├── src/
@@ -124,7 +127,37 @@ The LLM receives the page content plus a category hint and returns a JSON array 
 
 The system prompt is loaded from `prompts/policy_evaluation_prompt.md` — edit the prompt there without touching Python code.
 
-### 6. Persist to PostgreSQL
+### 6. Debug Output (optional)
+When `SAVE_DEBUG_OUTPUT=true`, the pipeline writes a plain-text file for each successfully processed URL **before** the DB write. This lets you inspect exactly what was fetched and what questions were generated without querying the database.
+
+**File location:** `app/datapipeline/debug/` by default (override with `DEBUG_OUTPUT_DIR`).
+
+**File name:** derived from the last URL path segment — e.g. `Strategic-Architecture-Principles.aspx.txt`.
+
+**File format:**
+```
+=== SOURCE URL ===
+https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx
+
+=== RAW CONTENT ===
+Strategic Architecture Principles
+
+Policy text extracted from the SharePoint page canvas...
+
+=== QUESTIONS GENERATED ===
+[
+  {
+    "question_text": "Does the solution follow the defined architecture principles?",
+    "reference": "Section 2",
+    "source_excerpt": "All solutions must adhere to the strategic architecture principles.",
+    "categories": ["technical"]
+  }
+]
+```
+
+The debug write is **best-effort** — if the file cannot be written (e.g. permissions, disk space) a warning is logged and the pipeline continues normally. The `debug/` directory is git-ignored so these files are never committed.
+
+### 7. Persist to PostgreSQL
 Results are written to the `data_pipeline` schema:
 
 | Table | Purpose |
@@ -165,6 +198,8 @@ Results are written to the `data_pipeline` schema:
 | `AWS_SESSION_TOKEN` | — | AWS session token (temporary credentials) |
 | `USE_LOCAL_POLICY_SOURCES` | `false` | Set to `true` to load policy URLs from the bundled JSON file instead of the database |
 | `LOCAL_POLICY_SOURCES_PATH` | `data/policy_sources.json` | Override the local sources file path (used when `USE_LOCAL_POLICY_SOURCES=true`) |
+| `SAVE_DEBUG_OUTPUT` | `false` | Set to `true` to write a per-URL debug file containing the source URL, raw content, and extracted questions |
+| `DEBUG_OUTPUT_DIR` | `app/datapipeline/debug/` | Directory for debug files (used when `SAVE_DEBUG_OUTPUT=true`) |
 
 ---
 
@@ -207,6 +242,12 @@ python -m app.datapipeline.src.main
 # Run with local sources file (no DB read for source list)
 USE_LOCAL_POLICY_SOURCES=true python -m app.datapipeline.src.main
 
+# Run with debug output enabled — writes one .txt file per URL to app/datapipeline/debug/
+SAVE_DEBUG_OUTPUT=true python -m app.datapipeline.src.main
+
+# Combine both flags (useful for local inspection without a live DB)
+USE_LOCAL_POLICY_SOURCES=true SAVE_DEBUG_OUTPUT=true python -m app.datapipeline.src.main
+
 # Stop / remove the container when done
 # Default container name is 'aiadocuments' (set DATAPIPELINE_CONTAINER to override)
 podman stop aiadocuments
@@ -231,4 +272,5 @@ pytest app/datapipeline/src/tests/ --cov=app/datapipeline/src --cov-report=term-
 - **Idempotent question writes** — on a changed page, existing questions are deleted before the new set is inserted. Stale questions do not accumulate across re-runs.
 - **Prompt in Markdown** — the LLM system prompt lives in `prompts/policy_evaluation_prompt.md` and is loaded at cold-start via `Path`, keeping it reviewable and editable outside Python code.
 - **Feature flag for source list** — `USE_LOCAL_POLICY_SOURCES=true` allows the pipeline to run in development or test environments without a populated `source_path_policydoc` table.
+- **Debug output flag** — `SAVE_DEBUG_OUTPUT=true` writes a plain-text file per URL (source URL + raw content + questions JSON) to `app/datapipeline/debug/`. The write is best-effort and never blocks the pipeline. Files are git-ignored. Intended for local inspection and troubleshooting only — never enable in production.
 - **psycopg2 (sync)** — the Lambda uses synchronous psycopg2, appropriate for a single-threaded Lambda handler. The evaluation pipeline (ECS) uses asyncpg.

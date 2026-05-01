@@ -15,6 +15,12 @@ Feature flag — local source list:
   app/datapipeline/data/policy_sources.json; override with
   LOCAL_POLICY_SOURCES_PATH=<absolute path>.
 
+Feature flag — debug output:
+  Set SAVE_DEBUG_OUTPUT=true to write a plain-text file per processed URL
+  containing the source URL, raw fetched content, and extracted questions.
+  Files land in DEBUG_OUTPUT_DIR (default: app/datapipeline/debug/).
+  Intended for local inspection only — debug/ is git-ignored.
+
 Run locally:
     python -m app.datapipeline.src.main
 
@@ -23,6 +29,7 @@ Deployed as an AWS Lambda (see lambda_function.py for the handler wrapper).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -66,6 +73,7 @@ _REQUIRED_ENV = [
 _DEFAULT_LOCAL_SOURCES_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "policy_sources.json"
 )
+_DEFAULT_DEBUG_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "debug"
 
 
 def _load_sources(conn: psycopg2.extensions.connection) -> list:
@@ -83,6 +91,35 @@ def _load_sources(conn: psycopg2.extensions.connection) -> list:
         )
         return load_local_policy_sources(path)
     return fetch_policy_sources(conn)
+
+
+def _write_debug_file(
+    url: str,
+    content: str,
+    questions: list,
+    output_dir: Path,
+) -> None:
+    """Write a plain-text debug file with URL, raw content, and questions.
+
+    Best-effort — errors are logged but never propagate to the caller.
+    File name is derived from the last URL path segment (e.g. DataPolicy.aspx.txt).
+    """
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_stem = page_name_from_url(url)
+        out_path = output_dir / f"{file_stem}.txt"
+        questions_json = json.dumps(
+            [q.model_dump() for q in questions], indent=2, ensure_ascii=False
+        )
+        out_path.write_text(
+            f"=== SOURCE URL ===\n{url}\n\n"
+            f"=== RAW CONTENT ===\n{content}\n\n"
+            f"=== QUESTIONS GENERATED ===\n{questions_json}\n",
+            encoding="utf-8",
+        )
+        logger.info("Debug file written: %s", out_path)
+    except Exception as exc:
+        logger.warning("Failed to write debug file for url=%s: %s", url, exc)
 
 
 def _get_db_connection() -> psycopg2.extensions.connection:
@@ -176,7 +213,14 @@ def run() -> dict[str, int]:
             failed += 1
             continue
 
-        # 4. Persist to Phase 1 tables (replace, not accumulate)
+        # 4. Debug output (optional)
+        if os.environ.get("SAVE_DEBUG_OUTPUT", "false").lower() == "true":
+            debug_dir = Path(
+                os.environ.get("DEBUG_OUTPUT_DIR", str(_DEFAULT_DEBUG_OUTPUT_DIR))
+            )
+            _write_debug_file(url, content, questions, debug_dir)
+
+        # 5. Persist to Phase 1 tables (replace, not accumulate)
         try:
             policy_doc_id = insert_policy_document(conn, url, file_name)
             delete_questions_for_doc(conn, policy_doc_id)
