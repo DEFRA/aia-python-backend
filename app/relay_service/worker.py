@@ -32,7 +32,10 @@ _load_dotenv(
 )  # override=False: root .env values take precedence
 
 from src.config import DatabaseConfig  # noqa: E402
-from src.db.questions_repo import fetch_assessment_by_category  # noqa: E402
+from src.db.questions_repo import (  # noqa: E402
+    fetch_policy_doc_by_category,
+    fetch_questions_by_policy_doc_id,
+)
 from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
 from src.utils.llm_client import make_llm_client  # noqa: E402
 
@@ -94,7 +97,8 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
 
     document = await _get_document(task, s3)
     dsn = _get_db_config().dsn
-    questions, category_url = await fetch_assessment_by_category(dsn, agent_type)
+    policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category(dsn, agent_type)
+    questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
 
     client = make_llm_client()
     agent_config = CONFIG_REGISTRY[agent_type]()
@@ -105,7 +109,7 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
             agent.assess(
                 document=document,
                 questions=questions,
-                category_url=category_url,
+                policy_doc_url=policy_doc_url,
             ),
             timeout=_AGENT_TIMEOUT_SECONDS,
         )

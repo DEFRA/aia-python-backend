@@ -7,7 +7,7 @@ Covers:
 - Failure status message published on agent exception
 - CloudWatch metrics emission (duration, success, failure)
 - Unknown agent type raises ValueError
-- AgentTaskBody schema enforces typed questions + required categoryUrl
+- AgentTaskBody schema enforces typed questions + required policyDocUrl
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ _DEFAULT_QUESTIONS: list[dict[str, str]] = [
     {"question": "Is encryption used?", "reference": "Ref-2"},
 ]
 
-_DEFAULT_CATEGORY_URL: str = "https://example.test/category"
+_DEFAULT_POLICY_DOC_URL: str = "https://example.test/category"
 
 
 def _build_sqs_event(
@@ -79,7 +79,7 @@ def _build_sqs_event(
         "document_id": "doc-001",
         "agentType": agent_type,
         "questions": _DEFAULT_QUESTIONS,
-        "categoryUrl": _DEFAULT_CATEGORY_URL,
+        "policyDocUrl": _DEFAULT_POLICY_DOC_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     if document is not None:
@@ -135,7 +135,7 @@ def test_agent_task_body_validates_typed_questions() -> None:
         "agentType": "technical",
         "document": "Some text",
         "questions": _DEFAULT_QUESTIONS,
-        "categoryUrl": _DEFAULT_CATEGORY_URL,
+        "policyDocUrl": _DEFAULT_POLICY_DOC_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     body: AgentTaskBody = AgentTaskBody.model_validate(body_dict)
@@ -143,7 +143,7 @@ def test_agent_task_body_validates_typed_questions() -> None:
     assert body.agentType == "technical"
     assert body.document == "Some text"
     assert body.s3PayloadKey is None
-    assert body.categoryUrl == _DEFAULT_CATEGORY_URL
+    assert body.policyDocUrl == _DEFAULT_POLICY_DOC_URL
     assert all(isinstance(q, QuestionItem) for q in body.questions)
     assert body.questions[0].question == "Is auth defined?"
     assert body.questions[0].reference == "Ref-1"
@@ -156,7 +156,7 @@ def test_agent_task_body_allows_s3_pointer() -> None:
         "agentType": "technical",
         "s3PayloadKey": "payloads/doc-002.txt",
         "questions": _DEFAULT_QUESTIONS,
-        "categoryUrl": _DEFAULT_CATEGORY_URL,
+        "policyDocUrl": _DEFAULT_POLICY_DOC_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     body: AgentTaskBody = AgentTaskBody.model_validate(body_dict)
@@ -171,15 +171,15 @@ def test_agent_task_body_rejects_legacy_string_questions() -> None:
         "agentType": "security",
         "document": "x",
         "questions": ["Is MFA enforced?", "Is encryption applied?"],
-        "categoryUrl": _DEFAULT_CATEGORY_URL,
+        "policyDocUrl": _DEFAULT_POLICY_DOC_URL,
         "enqueuedAt": "2026-04-14T10:00:00Z",
     }
     with pytest.raises(ValidationError):
         AgentTaskBody.model_validate(body_dict)
 
 
-def test_agent_task_body_requires_category_url() -> None:
-    """``categoryUrl`` is required and missing it must raise ``ValidationError``."""
+def test_agent_task_body_requires_policy_doc_url() -> None:
+    """``policyDocUrl`` is required and missing it must raise ``ValidationError``."""
     body_dict: dict[str, Any] = {
         "document_id": "doc-004",
         "agentType": "security",
@@ -240,11 +240,11 @@ async def test_handler_dispatches_to_security_agent(monkeypatch: pytest.MonkeyPa
     assert round_trip.status == "completed"
     mock_agent_cls.assert_called_once()
 
-    # Verify the agent instance was called with typed QuestionItem objects and category_url
+    # Verify the agent instance was called with typed QuestionItem objects and policy_doc_url
     mock_instance = mock_agent_cls.return_value
     mock_instance.assess.assert_awaited_once()
     call_kwargs = mock_instance.assess.await_args.kwargs
-    assert call_kwargs["category_url"] == _DEFAULT_CATEGORY_URL
+    assert call_kwargs["policy_doc_url"] == _DEFAULT_POLICY_DOC_URL
     assert all(isinstance(q, QuestionItem) for q in call_kwargs["questions"])
 
 

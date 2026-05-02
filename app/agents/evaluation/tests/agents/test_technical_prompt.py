@@ -22,18 +22,18 @@ def test_technical_prompt_renders_xml_questions_and_url() -> None:
         '2. <question reference="T2.b">Are retention schedules documented for personal data?'
         "</question>"
     )
-    category_url: str = "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/"
+    policy_doc_url: str = "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/"
     document: str = "Sample policy text."
 
     rendered: str = template.format(
         document=document,
-        category_url=category_url,
+        category_url=policy_doc_url,
         questions=questions_block,
     )
 
     assert "<document>" in rendered
     assert "Sample policy text." in rendered
-    assert f"<category_url>{category_url}</category_url>" in rendered
+    assert f"<category_url>{policy_doc_url}</category_url>" in rendered
     assert '<question reference="T1.a">' in rendered
     assert '<question reference="T2.b">' in rendered
     assert '"Technical"' in rendered

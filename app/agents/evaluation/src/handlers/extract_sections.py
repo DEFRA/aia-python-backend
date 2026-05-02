@@ -19,7 +19,7 @@ from typing import Any
 
 from src.agents.schemas import DocumentTaggedDetail
 from src.config import CloudWatchConfig, DatabaseConfig, PipelineConfig
-from src.db.questions_repo import fetch_assessment_by_category
+from src.db.questions_repo import fetch_policy_doc_by_category, fetch_questions_by_policy_doc_id
 from src.handlers.agent import AgentTaskBody
 from src.utils.payload_offload import resolve_payload
 
@@ -296,7 +296,7 @@ async def _enqueue_sqs_message(  # noqa: PLR0913
             "agentType": agent_type,
             "s3PayloadKey": s3_key,
             "questions": payload["questions"],
-            "categoryUrl": payload["categoryUrl"],
+            "policyDocUrl": payload["policyDocUrl"],
             "enqueuedAt": payload["enqueuedAt"],
         }
     )
@@ -362,9 +362,10 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     for agent_type in _get_pipeline_config().agent_types:
         sections: list[dict[str, Any]] = extract_sections_for_agent(tagged_chunks, agent_type)
-        questions, category_url = await fetch_assessment_by_category(
+        policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category(
             _get_db_config().dsn, agent_type
         )
+        questions = await fetch_questions_by_policy_doc_id(_get_db_config().dsn, policy_doc_id)
         document_text: str = _sections_to_text(sections)
 
         body: AgentTaskBody = AgentTaskBody(
@@ -372,7 +373,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             agentType=agent_type,
             document=document_text,
             questions=questions,
-            categoryUrl=category_url,
+            policyDocUrl=policy_doc_url,
             enqueuedAt=enqueued_at,
         )
         payloads.append(body.model_dump(mode="json"))

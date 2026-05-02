@@ -88,7 +88,7 @@ class SecurityAgent:
         self,
         document: str,
         questions: list[QuestionItem],
-        category_url: str,
+        policy_doc_url: str,
     ) -> AgentResult:
         """Run a security assessment of a document against a checklist.
 
@@ -96,8 +96,8 @@ class SecurityAgent:
             document: Full text of the document to assess.
             questions: Ordered list of ``QuestionItem`` objects pairing each
                 checklist question with its authoritative reference identifier.
-            category_url: Category-level reference URL echoed into every
-                assessment row's ``Reference.url`` field.
+            policy_doc_url: SharePoint reference URL for the policy document,
+                echoed into every assessment row's ``Reference.url`` field.
 
         Returns:
             An AgentResult containing per-question assessments, a final summary,
@@ -110,7 +110,7 @@ class SecurityAgent:
         user_content: str = _USER_TEMPLATE.format(
             document=document,
             questions=_format_questions_block(questions),
-            category_url=category_url,
+            category_url=policy_doc_url,
         )
 
         try:

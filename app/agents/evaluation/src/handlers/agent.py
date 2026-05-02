@@ -62,7 +62,7 @@ class SpecialistAgent(Protocol):
         self,
         document: str,
         questions: list[QuestionItem],
-        category_url: str,
+        policy_doc_url: str,
     ) -> AgentResult: ...
 
 
@@ -98,8 +98,8 @@ class AgentTaskBody(BaseModel):
 
     ``questions`` is a list of typed ``QuestionItem`` instances (each pairing a
     checklist question with its authoritative reference identifier).
-    ``categoryUrl`` carries the per-category SharePoint reference URL echoed
-    into every assessment row's ``Reference.url`` field.
+    ``policyDocUrl`` carries the SharePoint reference URL for the policy document
+    echoed into every assessment row's ``Reference.url`` field.
     """
 
     document_id: str
@@ -107,7 +107,7 @@ class AgentTaskBody(BaseModel):
     document: str | None = None
     s3PayloadKey: str | None = None
     questions: list[QuestionItem]
-    categoryUrl: str
+    policyDocUrl: str
     enqueuedAt: str
 
 
@@ -317,7 +317,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         result: AgentResult = await agent.assess(
             document=document,
             questions=body.questions,
-            category_url=body.categoryUrl,
+            policy_doc_url=body.policyDocUrl,
         )
         duration_ms = (time.monotonic() - start) * 1000
         completed_at: str = datetime.now(tz=UTC).isoformat()

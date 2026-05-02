@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 from src.agents.schemas import AgentResult, TaggedChunk
 from src.agents.tagging_agent import TaggingAgent
 from src.config import DatabaseConfig, LocalRunnerConfig, PipelineConfig, TaggingAgentConfig
-from src.db.questions_repo import fetch_assessment_by_category
+from src.db.questions_repo import fetch_policy_doc_by_category, fetch_questions_by_policy_doc_id
 from src.handlers.agent import (
     AGENT_REGISTRY,
     CONFIG_REGISTRY,
@@ -153,9 +153,13 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
             continue
 
         try:
-            questions, category_url = await fetch_assessment_by_category(
+            policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category(
                 DatabaseConfig().dsn,  # type: ignore[call-arg]
-                display_key,
+                agent_type,
+            )
+            questions = await fetch_questions_by_policy_doc_id(
+                DatabaseConfig().dsn,  # type: ignore[call-arg]
+                policy_doc_id,
             )
         except UnknownCategoryError:
             logger.warning(
@@ -173,7 +177,7 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
             agentType=agent_type,
             document=document_text,
             questions=questions,
-            categoryUrl=category_url,
+            policyDocUrl=policy_doc_url,
             enqueuedAt=enqueued_at,
         )
         agent_tasks.append(body)
@@ -207,7 +211,7 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
         result: AgentResult = await agent.assess(
             document=body.document or "",
             questions=body.questions,
-            category_url=body.categoryUrl,
+            policy_doc_url=body.policyDocUrl,
         )
 
         section_key: str = runner_config.display_keys[agent_type]

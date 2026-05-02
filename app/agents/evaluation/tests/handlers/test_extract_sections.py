@@ -16,7 +16,7 @@ from src.agents.schemas import DocumentTaggedDetail, QuestionItem
 # Fixtures and helpers
 # ---------------------------------------------------------------------------
 
-_TEST_CATEGORY_URL: str = "https://example.test/category"
+_TEST_POLICY_DOC_URL: str = "https://example.test/category"
 
 
 def _make_event(
@@ -112,7 +112,7 @@ def _sample_tagged_chunks() -> list[dict[str, Any]]:
 
 
 def _mock_assessment_items() -> list[QuestionItem]:
-    """Default questions returned by the patched ``fetch_assessment_by_category``."""
+    """Default questions returned by the patched ``fetch_questions_by_policy_doc_id``."""
     return [
         QuestionItem(question="Is MFA enabled?", reference="Ref-1"),
         QuestionItem(question="Are logs centralised?", reference="Ref-2"),
@@ -279,12 +279,20 @@ class TestSectionsToText:
 
 
 def _patch_loader() -> ExitStack:
-    """Patch ``fetch_assessment_by_category`` and ``_get_db_config`` together."""
+    """Patch ``fetch_policy_doc_by_category``, ``fetch_questions_by_policy_doc_id``,
+    and ``_get_db_config`` together.
+    """
     stack = ExitStack()
     stack.enter_context(
         patch(
-            "src.handlers.extract_sections.fetch_assessment_by_category",
-            new=AsyncMock(return_value=(_mock_assessment_items(), _TEST_CATEGORY_URL)),
+            "src.handlers.extract_sections.fetch_policy_doc_by_category",
+            new=AsyncMock(return_value=("test-policy-doc-id", _TEST_POLICY_DOC_URL)),
+        )
+    )
+    stack.enter_context(
+        patch(
+            "src.handlers.extract_sections.fetch_questions_by_policy_doc_id",
+            new=AsyncMock(return_value=_mock_assessment_items()),
         )
     )
     mock_db = MagicMock()
@@ -397,7 +405,7 @@ class TestHandler:
         assert len(sent_messages) == 2  # noqa: PLR2004 — two agents
 
     @pytest.mark.asyncio
-    async def test_payload_contains_category_url_and_typed_questions(self) -> None:
+    async def test_payload_contains_policy_doc_url_and_typed_questions(self) -> None:
         """Each enqueued payload deserialises into ``AgentTaskBody`` cleanly."""
         from src.handlers.agent import AgentTaskBody
 
@@ -430,7 +438,7 @@ class TestHandler:
             await _handler(event, {})
 
         body: AgentTaskBody = AgentTaskBody.model_validate_json(sent_messages[0]["MessageBody"])
-        assert body.categoryUrl == _TEST_CATEGORY_URL
+        assert body.policyDocUrl == _TEST_POLICY_DOC_URL
         assert all(isinstance(q, QuestionItem) for q in body.questions)
         assert body.questions[0].question == "Is MFA enabled?"
         assert body.questions[0].reference == "Ref-1"
@@ -501,7 +509,7 @@ class TestHandler:
         assert len(s3_puts) > 0, "Expected at least one S3 put_object call"
 
         for pointer in pointer_messages:
-            assert pointer.categoryUrl == _TEST_CATEGORY_URL
+            assert pointer.policyDocUrl == _TEST_POLICY_DOC_URL
             assert isinstance(pointer.questions, list)
             assert all(isinstance(q, QuestionItem) for q in pointer.questions)
             assert pointer.s3PayloadKey is not None
