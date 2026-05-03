@@ -184,6 +184,7 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 document_title=document_title,
                 section_labels=_pipeline_cfg.section_labels,
                 agent_type_order=_pipeline_cfg.agent_types,
+                max_priority_actions=_pipeline_cfg.max_priority_actions,
             )
             await repo.update_status(
                 doc_id, DocumentStatus.COMPLETE.value, result_md=result_md
@@ -202,6 +203,7 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 document_title=document_title,
                 section_labels=_pipeline_cfg.section_labels,
                 agent_type_order=_pipeline_cfg.agent_types,
+                max_priority_actions=_pipeline_cfg.max_priority_actions,
             )
             missing = expected - collected.keys()
             # Extract agent_type from task_id for the warning message.

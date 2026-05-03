@@ -17,6 +17,7 @@ class SummaryGenerator(Protocol):
         document_title: str,
         section_labels: dict[str, str],
         agent_type_order: list[str],
+        max_priority_actions: int = 10,
     ) -> str: ...
 
 
@@ -29,6 +30,7 @@ class MarkdownReportGenerator:
         document_title: str,
         section_labels: dict[str, str],
         agent_type_order: list[str],
+        max_priority_actions: int = 10,
     ) -> str:
         lines: list[str] = [f"# {document_title}", ""]
         for agent_type in agent_type_order:
@@ -40,7 +42,9 @@ class MarkdownReportGenerator:
             lines.append("---")
             lines.append("")
         lines.extend(
-            self._render_final_summary(results, section_labels, agent_type_order)
+            self._render_final_summary(
+                results, section_labels, agent_type_order, max_priority_actions
+            )
         )
         return "\n".join(lines)
 
@@ -74,13 +78,17 @@ class MarkdownReportGenerator:
         results: dict[str, list[AgentResult | None]],
         section_labels: dict[str, str],
         agent_type_order: list[str],
+        max_priority_actions: int,
     ) -> list[str]:
-        lines = ["## Final Evaluation Summary", ""]
+        lines: list[str] = ["## Final Evaluation Summary", ""]
+        # ── Scorecard ─────────────────────────────────────────────────────────
         lines.append("### Cross-Category Scorecard")
         lines.append("")
         lines.append("| Category | 🟢 Green | 🟡 Amber | 🔴 Red | Score |")
         lines.append("|---|---|---|---|---|")
         total_g = total_a = total_r = 0
+        # category_score[label] = % green (lower = worse)
+        category_score: dict[str, int] = {}
         for agent_type in agent_type_order:
             result_list = [r for r in results.get(agent_type, []) if r is not None]
             if not result_list:
@@ -106,6 +114,7 @@ class MarkdownReportGenerator:
             )
             total = g + a + r
             score = round((g / total) * 100) if total > 0 else 0
+            category_score[label] = score
             lines.append(f"| {label} | {g} | {a} | {r} | {score}% |")
             total_g += g
             total_a += a
@@ -116,8 +125,12 @@ class MarkdownReportGenerator:
             f"| **Overall** | **{total_g}** | **{total_a}** | **{total_r}** | **{overall_score}%** |"
         )
         lines.append("")
-        lines.append("### Priority Actions")
-        lines.append("")
+
+        # ── Priority Actions ──────────────────────────────────────────────────
+        # Collect all Red/Amber findings, then sort:
+        #   1. Red before Amber
+        #   2. Within each tier, worst category first (lowest % green score)
+        #   3. Within same category+tier, preserve original question order
         priority: list[tuple[str, AssessmentRow]] = []
         for agent_type in agent_type_order:
             result_list = [r for r in results.get(agent_type, []) if r is not None]
@@ -128,13 +141,29 @@ class MarkdownReportGenerator:
                 for row in result.assessments:
                     if row.Rating in ("Red", "Amber"):
                         priority.append((label, row))
-        priority.sort(key=lambda x: (0 if x[1].Rating == "Red" else 1, x[0]))
-        for i, (label, row) in enumerate(priority, 1):
+
+        priority.sort(
+            key=lambda x: (
+                0 if x[1].Rating == "Red" else 1,  # Red before Amber
+                category_score.get(x[0], 100),  # worst category first
+            )
+        )
+
+        total_priority = len(priority)
+        capped = priority[:max_priority_actions]
+        heading = (
+            f"### Priority Actions (showing top {len(capped)} of {total_priority})"
+        )
+        lines.append(heading)
+        lines.append("")
+        for i, (label, row) in enumerate(capped, 1):
             emoji = self._RATING_EMOJI.get(row.Rating, "")
             lines.append(
                 f"{i}. {emoji} **{label}** — {row.Question} *({row.Reference})*"
             )
         lines.append("")
+
+        # ── Overall Conclusion ────────────────────────────────────────────────
         lines.append("### Overall Conclusion")
         lines.append("")
         risk = self._classify_risk(total_r, total_a)

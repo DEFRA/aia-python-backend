@@ -235,6 +235,7 @@ class PipelineConfig(BaseSettings):
         default_factory=dict,
         alias="PIPELINE_AGENT_TAG_MAP",
     )
+    max_priority_actions: int = Field(default=10, alias="MAX_PRIORITY_ACTIONS")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
     settings_customise_sources = _make_customise_sources("pipeline")
