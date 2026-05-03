@@ -116,7 +116,7 @@ repos:
 
       - id: mypy
         name: "types: mypy (evaluation)"
-        entry: bash -c 'python -m mypy --config-file app/agents/evaluation/pyproject.toml "$@"'
+        entry: bash -c 'python -m mypy --config-file app/agents/evaluation/pyproject.toml "$@"' --
         language: system
         types: [python]
         files: "^app/agents/evaluation/(src/|tests/|main\\.py)"

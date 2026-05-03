@@ -17,25 +17,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agents.schemas import (
-    AgentResult,
-    AssessmentRow,
+    AgentLLMOutput,
     QuestionItem,
+    RawAssessmentRow,
     Summary,
     TaggedChunk,
 )
 
 
-def _sample_result(rating: str = "Green") -> AgentResult:
-    """Return a minimal valid ``AgentResult`` for mocking."""
-    return AgentResult(
-        policy_doc_filename="policy.pdf",
-        policy_doc_url="https://example.test/",
-        assessments=[
-            AssessmentRow(
-                Question="Q1",
+def _sample_llm_output(rating: str = "Green") -> AgentLLMOutput:
+    """Return a minimal valid ``AgentLLMOutput`` for mocking."""
+    return AgentLLMOutput(
+        rows=[
+            RawAssessmentRow(
+                question_id="q-001",
                 Rating=rating,  # type: ignore[arg-type]
                 Comments="OK.",
-                Reference="G1.a",
             ),
         ],
         summary=Summary(
@@ -71,11 +68,11 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
     ]
 
     mock_security: MagicMock = MagicMock()
-    mock_security.assess = AsyncMock(return_value=_sample_result("Green"))
+    mock_security.assess = AsyncMock(return_value=_sample_llm_output("Green"))
     mock_security_cls: MagicMock = MagicMock(return_value=mock_security)
 
     mock_technical: MagicMock = MagicMock()
-    mock_technical.assess = AsyncMock(return_value=_sample_result("Amber"))
+    mock_technical.assess = AsyncMock(return_value=_sample_llm_output("Amber"))
     mock_technical_cls: MagicMock = MagicMock(return_value=mock_technical)
 
     with (
