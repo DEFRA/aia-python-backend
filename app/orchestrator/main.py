@@ -12,7 +12,8 @@ if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
 from src.agents.schemas import AgentResult  # noqa: E402
-from src.config import PipelineConfig  # noqa: E402
+from src.config import DatabaseConfig, PipelineConfig  # noqa: E402
+from src.db.questions_repo import fetch_all_policy_docs_by_category  # noqa: E402
 from src.utils.document_parser import _parse_bytes  # noqa: E402
 
 from app.core.config import config  # noqa: E402
@@ -101,18 +102,37 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
             if len(file_content.encode()) <= config.orchestrator.max_inline_bytes
             else None
         )
-        tasks = [
-            TaskMessage(
-                task_id=f"{doc_id}_{agent_type}",
-                document_id=doc_id,
-                agent_type=agent_type,
-                template_type=template_type,
-                file_content=inline_content,
-                s3_bucket=None if inline_content is not None else config.s3.bucket_name,
-                s3_key=None if inline_content is not None else s3_key,
-            )
-            for agent_type in agent_types
-        ]
+
+        # Fan-out: one task per (agent_type, policy_doc).
+        # Fetch all policy docs for each agent_type so every document is assessed.
+        db_config = DatabaseConfig()
+        dsn = db_config.dsn
+        tasks: list[TaskMessage] = []
+        for agent_type in agent_types:
+            policy_docs = await fetch_all_policy_docs_by_category(dsn, agent_type)
+            if not policy_docs:
+                logger.warning(
+                    "No policy docs found for agent_type=%r doc_id=%s — skipping",
+                    agent_type,
+                    doc_id,
+                )
+                continue
+            for policy_doc_id, _url, _filename in policy_docs:
+                tasks.append(
+                    TaskMessage(
+                        task_id=f"{doc_id}_{agent_type}_{policy_doc_id}",
+                        document_id=doc_id,
+                        agent_type=agent_type,
+                        template_type=template_type,
+                        policy_doc_id=policy_doc_id,
+                        file_content=inline_content,
+                        s3_bucket=None
+                        if inline_content is not None
+                        else config.s3.bucket_name,
+                        s3_key=None if inline_content is not None else s3_key,
+                    )
+                )
+
         await asyncio.gather(*[sqs.send_task(t) for t in tasks])
         logger.info(
             "Dispatched %d task(s) for doc_id=%s template_type=%s agents=%s",
@@ -146,10 +166,17 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
         await _session_store.remove(doc_id)
 
         _pipeline_cfg = PipelineConfig()
-        by_agent_type: dict[str, Any] = {
-            task_id.rsplit("_", 1)[1]: result for task_id, result in collected.items()
-        }
-        document_title = Path(s3_key).name
+
+        # Group results by agent_type — each value is a list of AgentResult (or None on error).
+        by_agent_type: dict[str, list[Any]] = {}
+        for task_id, result in collected.items():
+            # task_id format: "{doc_id}_{agent_type}_{policy_doc_id}"
+            parts = task_id.split("_")
+            agent_type = parts[1]
+            by_agent_type.setdefault(agent_type, []).append(result)
+
+        # s3_key = "{doc_id}_{original_filename}" — strip the doc_id prefix for display
+        document_title = Path(s3_key).name.removeprefix(f"{doc_id}_")
 
         if not timed_out:
             result_md = _summary_generator.generate(
@@ -177,7 +204,8 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 agent_type_order=_pipeline_cfg.agent_types,
             )
             missing = expected - collected.keys()
-            missing_types = ", ".join(t.rsplit("_", 1)[-1] for t in missing)
+            # Extract agent_type from task_id for the warning message.
+            missing_types = ", ".join(t.split("_")[1] for t in missing)
             await repo.update_status(
                 doc_id,
                 DocumentStatus.PARTIAL_COMPLETE.value,

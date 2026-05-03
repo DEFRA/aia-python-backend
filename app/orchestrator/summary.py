@@ -13,7 +13,7 @@ from src.agents.schemas import AgentResult, AssessmentRow  # noqa: E402
 class SummaryGenerator(Protocol):
     def generate(
         self,
-        results: dict[str, AgentResult | None],
+        results: dict[str, list[AgentResult | None]],
         document_title: str,
         section_labels: dict[str, str],
         agent_type_order: list[str],
@@ -25,18 +25,18 @@ class MarkdownReportGenerator:
 
     def generate(
         self,
-        results: dict[str, AgentResult | None],
+        results: dict[str, list[AgentResult | None]],
         document_title: str,
         section_labels: dict[str, str],
         agent_type_order: list[str],
     ) -> str:
         lines: list[str] = [f"# {document_title}", ""]
         for agent_type in agent_type_order:
-            result = results.get(agent_type)
-            if result is None:
+            result_list = [r for r in results.get(agent_type, []) if r is not None]
+            if not result_list:
                 continue
             label = section_labels.get(agent_type, agent_type.title())
-            lines.extend(self._render_category_section(result, label))
+            lines.extend(self._render_category_section(result_list, label))
             lines.append("---")
             lines.append("")
         lines.extend(
@@ -44,29 +44,34 @@ class MarkdownReportGenerator:
         )
         return "\n".join(lines)
 
-    def _render_category_section(self, result: AgentResult, label: str) -> list[str]:
-        lines = [f"## {label}", ""]
-        lines.append(f"### {result.policy_doc_filename}")
-        lines.append(f"[View document]({result.policy_doc_url})")
-        lines.append("")
-        lines.append("| Question | Reference | Rating | Comments |")
-        lines.append("|---|---|---|---|")
-        for row in result.assessments:
-            emoji = self._RATING_EMOJI.get(row.Rating, "")
-            q = row.Question.replace("|", "\\|")
-            c = row.Comments.replace("|", "\\|")
-            lines.append(f"| {q} | {row.Reference} | {emoji} {row.Rating} | {c} |")
-        lines.append("")
-        lines.append("**Summary**")
-        lines.append(
-            f"{result.summary.Interpretation} — {result.summary.Overall_Comments}"
-        )
-        lines.append("")
+    def _render_category_section(
+        self,
+        results: list[AgentResult],
+        label: str,
+    ) -> list[str]:
+        lines: list[str] = [f"## {label}", ""]
+        for result in results:
+            lines.append(f"### {result.policy_doc_filename}")
+            lines.append(f"[View document]({result.policy_doc_url})")
+            lines.append("")
+            lines.append("| Question | Reference | Rating | Comments |")
+            lines.append("|---|---|---|---|")
+            for row in result.assessments:
+                emoji = self._RATING_EMOJI.get(row.Rating, "")
+                q = row.Question.replace("|", "\\|")
+                c = row.Comments.replace("|", "\\|")
+                lines.append(f"| {q} | {row.Reference} | {emoji} {row.Rating} | {c} |")
+            lines.append("")
+            lines.append("**Summary**")
+            lines.append(
+                f"{result.summary.Interpretation} — {result.summary.Overall_Comments}"
+            )
+            lines.append("")
         return lines
 
     def _render_final_summary(
         self,
-        results: dict[str, AgentResult | None],
+        results: dict[str, list[AgentResult | None]],
         section_labels: dict[str, str],
         agent_type_order: list[str],
     ) -> list[str]:
@@ -77,13 +82,28 @@ class MarkdownReportGenerator:
         lines.append("|---|---|---|---|---|")
         total_g = total_a = total_r = 0
         for agent_type in agent_type_order:
-            result = results.get(agent_type)
-            if result is None:
+            result_list = [r for r in results.get(agent_type, []) if r is not None]
+            if not result_list:
                 continue
             label = section_labels.get(agent_type, agent_type.title())
-            g = sum(1 for r in result.assessments if r.Rating == "Green")
-            a = sum(1 for r in result.assessments if r.Rating == "Amber")
-            r = sum(1 for r in result.assessments if r.Rating == "Red")
+            g = sum(
+                1
+                for result in result_list
+                for r in result.assessments
+                if r.Rating == "Green"
+            )
+            a = sum(
+                1
+                for result in result_list
+                for r in result.assessments
+                if r.Rating == "Amber"
+            )
+            r = sum(
+                1
+                for result in result_list
+                for r in result.assessments
+                if r.Rating == "Red"
+            )
             total = g + a + r
             score = round((g / total) * 100) if total > 0 else 0
             lines.append(f"| {label} | {g} | {a} | {r} | {score}% |")
@@ -100,13 +120,14 @@ class MarkdownReportGenerator:
         lines.append("")
         priority: list[tuple[str, AssessmentRow]] = []
         for agent_type in agent_type_order:
-            result = results.get(agent_type)
-            if result is None:
+            result_list = [r for r in results.get(agent_type, []) if r is not None]
+            if not result_list:
                 continue
             label = section_labels.get(agent_type, agent_type.title())
-            for row in result.assessments:
-                if row.Rating in ("Red", "Amber"):
-                    priority.append((label, row))
+            for result in result_list:
+                for row in result.assessments:
+                    if row.Rating in ("Red", "Amber"):
+                        priority.append((label, row))
         priority.sort(key=lambda x: (0 if x[1].Rating == "Red" else 1, x[0]))
         for i, (label, row) in enumerate(priority, 1):
             emoji = self._RATING_EMOJI.get(row.Rating, "")
@@ -119,13 +140,16 @@ class MarkdownReportGenerator:
         risk = self._classify_risk(total_r, total_a)
         weakest = self._weakest_category(results, section_labels, agent_type_order)
         top = self._top_finding(results, agent_type_order)
-        n_red = total_r
-        n_categories = sum(1 for at in agent_type_order if results.get(at) is not None)
+        n_categories = sum(
+            1
+            for at in agent_type_order
+            if any(r is not None for r in results.get(at, []))
+        )
         lines.append(
             f"The assessment reviewed {total_all} controls across {n_categories} policy areas. "
             f"Overall compliance stands at **{overall_score}% — {risk}** "
             f"({total_g} Green, {total_a} Amber, {total_r} Red). "
-            f"{weakest} is the weakest area with {n_red} critical gap(s). "
+            f"{weakest} is the weakest area with {total_r} critical gap(s). "
             f'Most urgent finding: *"{top}"* — immediate remediation required.'
         )
         lines.append("")
@@ -140,17 +164,22 @@ class MarkdownReportGenerator:
 
     def _weakest_category(
         self,
-        results: dict[str, AgentResult | None],
+        results: dict[str, list[AgentResult | None]],
         section_labels: dict[str, str],
         agent_type_order: list[str],
     ) -> str:
         worst_label = ""
         worst_score = -1
         for agent_type in agent_type_order:
-            result = results.get(agent_type)
-            if result is None:
+            result_list = [r for r in results.get(agent_type, []) if r is not None]
+            if not result_list:
                 continue
-            bad = sum(1 for r in result.assessments if r.Rating in ("Red", "Amber"))
+            bad = sum(
+                1
+                for result in result_list
+                for r in result.assessments
+                if r.Rating in ("Red", "Amber")
+            )
             if bad > worst_score:
                 worst_score = bad
                 worst_label = section_labels.get(agent_type, agent_type.title())
@@ -158,15 +187,14 @@ class MarkdownReportGenerator:
 
     def _top_finding(
         self,
-        results: dict[str, AgentResult | None],
+        results: dict[str, list[AgentResult | None]],
         agent_type_order: list[str],
     ) -> str:
         for rating in ("Red", "Amber"):
             for agent_type in agent_type_order:
-                result = results.get(agent_type)
-                if result is None:
-                    continue
-                for row in result.assessments:
-                    if row.Rating == rating:
-                        return row.Question
+                result_list = [r for r in results.get(agent_type, []) if r is not None]
+                for result in result_list:
+                    for row in result.assessments:
+                        if row.Rating == rating:
+                            return row.Question
         return "No findings"

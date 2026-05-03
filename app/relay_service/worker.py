@@ -36,6 +36,7 @@ from src.config import DatabaseConfig  # noqa: E402
 from src.utils.document_parser import _parse_bytes  # noqa: E402
 from src.db.questions_repo import (  # noqa: E402
     fetch_policy_doc_by_category,
+    fetch_policy_doc_by_id,
     fetch_questions_by_policy_doc_id,
 )
 from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
@@ -114,11 +115,22 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
 
     document = await _get_document(task, s3)
     dsn = _get_db_config().dsn
-    (
-        policy_doc_id,
-        policy_doc_url,
-        policy_doc_filename,
-    ) = await fetch_policy_doc_by_category(dsn, agent_type)
+
+    # When the orchestrator specifies a policy_doc_id, use it directly to avoid
+    # the LIMIT 1 category lookup that would otherwise return only one of many docs.
+    if task.policy_doc_id is not None:
+        (
+            policy_doc_id,
+            policy_doc_url,
+            policy_doc_filename,
+        ) = await fetch_policy_doc_by_id(dsn, task.policy_doc_id)
+    else:
+        (
+            policy_doc_id,
+            policy_doc_url,
+            policy_doc_filename,
+        ) = await fetch_policy_doc_by_category(dsn, agent_type)
+
     questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
 
     client = make_llm_client()
@@ -230,10 +242,11 @@ async def _process_message(
         try:
             task = TaskMessage.model_validate_json(msg["body"])
             logger.info(
-                "Received task_id=%s agent_type=%s doc_id=%s",
+                "Received task_id=%s agent_type=%s doc_id=%s policy_doc_id=%s",
                 task.task_id,
                 task.agent_type,
                 task.document_id,
+                task.policy_doc_id,
             )
             status = await dispatch(task, s3)
             await sqs.publish(status_url, status.model_dump_json(by_alias=True))

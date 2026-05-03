@@ -37,7 +37,9 @@ class UploadService:
         return doc_id
 
     def get_s3_key(self, doc_id: str, file_name: str) -> str:
-        return f"{doc_id}_{file_name}"
+        base = f"{doc_id}_{file_name}"
+        prefix = self.config.s3.upload_prefix
+        return f"{prefix}/{base}" if prefix else base
 
     async def get_processing_document_ids(self, user_id: str) -> list[str]:
         return await self.repo.get_processing_document_ids(user_id)

@@ -26,6 +26,9 @@ class AWSConfig(BaseModel):
 
 class S3Config(BaseModel):
     bucket_name: str = "docsupload"
+    upload_prefix: str = (
+        ""  # e.g. "uploaded_docs" → keys land at {prefix}/{doc_id}_{filename}
+    )
 
 
 class SQSConfig(BaseModel):
@@ -83,6 +86,7 @@ class AppConfig(BaseSettings):
 
     # S3
     s3_bucket: str = Field("docsupload", alias="S3_BUCKET_NAME")
+    s3_upload_prefix: str = Field("", alias="S3_UPLOAD_PREFIX")
 
     # SQS
     sqs_task_url: str = Field(
@@ -139,7 +143,7 @@ class AppConfig(BaseSettings):
 
     @property
     def s3(self) -> S3Config:
-        return S3Config(bucket_name=self.s3_bucket)
+        return S3Config(bucket_name=self.s3_bucket, upload_prefix=self.s3_upload_prefix)
 
     @property
     def sqs(self) -> SQSConfig:
