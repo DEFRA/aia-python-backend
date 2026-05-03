@@ -106,10 +106,10 @@ def insert_policy_document(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, file_name, category)
+            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, filename, category)
             VALUES (%s::uuid, %s, %s, %s)
             ON CONFLICT (source_url) DO UPDATE
-                SET file_name = EXCLUDED.file_name,
+                SET filename  = EXCLUDED.filename,
                     category  = EXCLUDED.category
             RETURNING policy_doc_id::text
             """,
@@ -169,7 +169,7 @@ def insert_questions(
             cur.execute(
                 """
                 INSERT INTO data_pipeline.questions
-                    (question_id, question_text, reference, source_excerpt, policy_doc_id)
+                    (id, question_text, reference, source_excerpt, policy_doc_id)
                 VALUES (%s::uuid, %s, %s, %s, %s::uuid)
                 """,
                 (
