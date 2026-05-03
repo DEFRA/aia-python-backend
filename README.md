@@ -81,7 +81,7 @@ app/
 │   ├── history_record.py     # { documentId, originalFilename, templateType, status, ... }
 │   ├── result_record.py      # { ..., resultMd, errorMessage }
 │   ├── user_record.py        # { userId, email, name }
-│   ├── task_message.py       # SQS message published to aia-tasks
+│   ├── task_message.py       # SQS message published to aia-tasks (s3_bucket/s3_key optional — None for inline)
 │   ├── status_message.py     # SQS message received from aia-status
 │   ├── orchestrate_request.py# Payload for POST /orchestrate
 │   └── document_record.py
@@ -97,11 +97,11 @@ app/
 ├── orchestrator/
 │   ├── main.py     # FastAPI service :8001 — POST /orchestrate + status queue poller
 │   ├── session.py  # In-memory per-document agent dispatch state
-│   └── summary.py  # SummaryGenerator protocol + MarkdownSummaryGenerator
+│   └── summary.py  # SummaryGenerator protocol + MarkdownReportGenerator
 ├── relay_service/
 │   ├── __init__.py
 │   ├── main.py     # FastAPI app :8002 — lifespan starts SQS polling loop + /health
-│   └── worker.py   # run_worker() polling loop + dispatch() — bridges TaskMessage → AgentResult → StatusMessage
+│   └── worker.py   # run_worker() concurrent polling loop — asyncio.create_task per message, Semaphore-bounded
 └── utils/
     ├── postgres.py   # Connection pool, schema init (document_uploads + users tables)
     ├── auth.py       # JWT validation (HS256)
@@ -125,7 +125,7 @@ tests/
 ├── test_sqs_service.py                 # SQS send/receive/delete
 ├── test_upload_router.py               # CoreBackend upload/history/result endpoints
 ├── test_orchestrator_session.py        # SessionStore — create, record, remove, events
-├── test_orchestrator_summary.py        # MarkdownSummaryGenerator — all result formats
+├── test_orchestrator_summary.py        # MarkdownReportGenerator — all result formats
 └── test_orchestrator_processing.py     # POST /orchestrate + _process_document pipeline
 ```
 
@@ -166,7 +166,7 @@ Key environment variables:
 | `STATUS_QUEUE_URL` | SQS queue polled by Orchestrator | `…/aia-status` |
 | `ORCHESTRATOR_URL` | Orchestrator base URL (called by CoreBackend) | `http://localhost:8001` |
 | `ORCHESTRATOR_PORT` | Port the Orchestrator listens on | `8001` |
-| `ORCHESTRATOR_AGENT_TIMEOUT_SECONDS` | Max wait for agent responses | `480` |
+| `AGENT_TIMEOUT_SECONDS` | Max wait for agent responses | `480` |
 | `ORCHESTRATOR_DEFAULT_AGENT_TYPE` | Fallback agent type for unknown templates | `general` |
 
 ## Running in Development
@@ -225,13 +225,13 @@ PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
 | File | What it covers | Needs infrastructure |
 |------|---------------|----------------------|
 | `test_orchestrator_session.py` | `SessionStore` — create, record results, completion event, remove | No |
-| `test_orchestrator_summary.py` | `MarkdownSummaryGenerator` — all result shapes and formatting | No |
+| `test_orchestrator_summary.py` | `MarkdownReportGenerator` — per-category tables, scorecard, priority actions | No |
 | `test_orchestrator_processing.py` | `POST /orchestrate` endpoint + `_process_document` (COMPLETE, PARTIAL_COMPLETE, ERROR paths) | No (mocked) |
 | `test_upload_router.py` | CoreBackend upload/history/result endpoints | No (mocked) |
 | `test_document_repository.py` | `DocumentRepository` DB queries | No (mocked) |
 | `test_ingestor_service.py` | DOCX text extraction | No |
 | `test_sqs_service.py` | SQS send/receive/delete | No (mocked) |
-| `test_relay_service.py` | Relay Service `dispatch()`, `_get_document()`, `run_worker()` polling loop | No (mocked) |
+| `test_relay_service.py` | Relay Service `_process_message()`, `_get_document()`, concurrent `run_worker()` loop | No (mocked) |
 
 > Orchestrator and Relay Service tests use `pytest-asyncio`. This is included in `requirements-dev.txt`.
 
@@ -278,7 +278,7 @@ python scripts/mock_agent.py --count 5 --rating Red --delay 1
 | `--rating` | `Green` \| `Amber` \| `Red` | random | Rating included in every mock assessment |
 | `--delay` | float (seconds) | 0 | Wait before publishing the response (simulates LLM latency) |
 
-The fabricated result matches the `AgentResult` shape expected by the Orchestrator — it includes `assessments`, `metadata`, and `final_summary` fields so the summary generator and DB write proceed normally.
+The fabricated result matches the `AgentResult` shape expected by the Orchestrator — it includes `assessments` (list of `AssessmentRow` with `question_id`, `Rating`, `Comments`, `Reference`), `summary`, `policy_doc_filename`, and `policy_doc_url` fields so the summary generator and DB write proceed normally.
 
 ---
 
