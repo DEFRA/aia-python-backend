@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
 CREATE TABLE IF NOT EXISTS data_pipeline.policy_documents (
     policy_doc_id UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     source_url    TEXT        NOT NULL UNIQUE,
-    file_name     TEXT        NOT NULL,
+    filename      TEXT        NOT NULL,
     category      TEXT        NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policy_documents (
 -- Output: extracted evaluation questions
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS data_pipeline.questions (
-    question_id    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     question_text  TEXT        NOT NULL,
     reference      TEXT        NOT NULL,
     source_excerpt TEXT        NOT NULL,
