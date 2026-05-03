@@ -33,6 +33,7 @@ _load_dotenv(
 
 from src.agents.schemas import AgentLLMOutput, AgentResult, AssessmentRow  # noqa: E402
 from src.config import DatabaseConfig  # noqa: E402
+from src.utils.document_parser import _parse_bytes  # noqa: E402
 from src.db.questions_repo import (  # noqa: E402
     fetch_policy_doc_by_category,
     fetch_questions_by_policy_doc_id,
@@ -71,6 +72,15 @@ def _get_db_config() -> DatabaseConfig:
     return _db_config
 
 
+def _extract_text(file_bytes: bytes, s3_key: str) -> str:
+    """Extract plain text from PDF, DOCX, or UTF-8 text files."""
+    lower = s3_key.lower()
+    if lower.endswith(".pdf") or lower.endswith(".docx"):
+        chunks = _parse_bytes(file_bytes, s3_key, "")
+        return "\n\n".join(c["text"] for c in chunks if c.get("text"))
+    return file_bytes.decode("utf-8", errors="replace")
+
+
 async def _get_document(task: TaskMessage, s3: S3Service) -> str:
     """Return document text — inline from task or fetched from S3."""
     if task.file_content is not None:
@@ -80,7 +90,7 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
             f"TaskMessage has no file_content and no s3_key/s3_bucket: task_id={task.task_id}"
         )
     file_bytes = await s3.download_file(task.s3_key, bucket=task.s3_bucket)
-    return file_bytes.decode("utf-8")
+    return _extract_text(file_bytes, task.s3_key)
 
 
 async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:

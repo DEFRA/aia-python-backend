@@ -8,20 +8,20 @@
 # "anthropic" uses the direct Anthropic API (ANTHROPIC_API_KEY required).
 # "bedrock"   uses AWS Bedrock (AWS credentials required; no API key needed).
 llm:
-  provider: "anthropic"
+  provider: "bedrock"
 
 # --- Agent models ---
 agents:
   security:
-    model: "claude-sonnet-4-6"
+    model: "anthropic.claude-sonnet-4-6"
     max_tokens: 4096
     temperature: 0.0
   technical:
-    model: "claude-sonnet-4-6"
+    model: "anthropic.claude-sonnet-4-6"
     max_tokens: 16000
     temperature: 0.0
   tagging:
-    model: "claude-sonnet-4-6"
+    model: "anthropic.claude-sonnet-4-6"
     batch_size: 15
     max_tokens: 4096
     temperature: 0.0

@@ -13,6 +13,7 @@ if str(_EVAL_ROOT) not in sys.path:
 
 from src.agents.schemas import AgentResult  # noqa: E402
 from src.config import PipelineConfig  # noqa: E402
+from src.utils.document_parser import _parse_bytes  # noqa: E402
 
 from app.core.config import config  # noqa: E402
 from app.core.enums import DocumentStatus  # noqa: E402
@@ -22,7 +23,6 @@ from app.models.task_message import TaskMessage  # noqa: E402
 from app.orchestrator.session import SessionStore  # noqa: E402
 from app.orchestrator.summary import MarkdownReportGenerator  # noqa: E402
 from app.repositories.document_repository import DocumentRepository  # noqa: E402
-from app.services.ingestor_service import IngestorService  # noqa: E402
 from app.services.s3_service import S3Service  # noqa: E402
 from app.services.sqs_service import SQSService  # noqa: E402
 from app.utils.app_context import AppContext  # noqa: E402
@@ -73,19 +73,27 @@ async def orchestrate(
     return {"status": "accepted"}
 
 
+def _extract_text(file_bytes: bytes, s3_key: str) -> str:
+    """Extract plain text from PDF, DOCX, or UTF-8 text files."""
+    lower = s3_key.lower()
+    if lower.endswith(".pdf") or lower.endswith(".docx"):
+        chunks = _parse_bytes(file_bytes, s3_key, "")
+        return "\n\n".join(c["text"] for c in chunks if c.get("text"))
+    return file_bytes.decode("utf-8", errors="replace")
+
+
 async def _process_document(doc_id: str, s3_key: str, template_type: str) -> None:
     pool = await get_postgres_pool()
     context = AppContext()
     repo = DocumentRepository(pool, context)
     s3 = S3Service()
     sqs = SQSService()
-    ingestor = IngestorService()
 
     try:
         await repo.update_status(doc_id, DocumentStatus.PROCESSING.value)
 
         file_bytes = await s3.download_file(s3_key)
-        file_content = ingestor.extract_text_from_docx(file_bytes)
+        file_content = _extract_text(file_bytes, s3_key)
 
         agent_types = config.get_agent_types(template_type)
         inline_content = (

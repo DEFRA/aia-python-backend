@@ -108,10 +108,11 @@ app/
     ├── app_context.py
     └── logger.py
 scripts/
-├── mock_agent.py           # Test harness — simulates Relay Service (left-hand side)
-├── mock_orchestrator.py    # Test harness — simulates CoreBackend + Orchestrator (right-hand side)
+├── start-aia.sh              # Connectivity checks + start all three services
+├── start-datapipeline-dev.sh # Start Podman PostgreSQL container
+├── mock_agent.py             # Test harness — simulates Relay Service (right side)
+├── mock_orchestrator.py      # Test harness — simulates CoreBackend + Orchestrator (left side)
 ├── start-localstack.sh
-├── start-datapipeline-dev.sh
 └── start_dev_server.sh
 docs/
 ├── corebackend-api.md                  # Full API reference for frontend integration
@@ -147,6 +148,8 @@ source .venv/bin/activate
 ```bash
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
+# Evaluation pipeline extras (agents, PDF parsing, report generation)
+pip install -r app/agents/evaluation/requirements.txt
 ```
 
 ### 4. Configure environment variables
@@ -168,27 +171,53 @@ Key environment variables:
 | `ORCHESTRATOR_PORT` | Port the Orchestrator listens on | `8001` |
 | `AGENT_TIMEOUT_SECONDS` | Max wait for agent responses | `480` |
 | `ORCHESTRATOR_DEFAULT_AGENT_TYPE` | Fallback agent type for unknown templates | `general` |
+| `LLM_PROVIDER` | LLM backend — `bedrock` (AWS) or `anthropic` (direct API) | `bedrock` |
+| `AWS_ACCESS_KEY_ID` | AWS access key (STS short-lived credentials supported) | — |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key | — |
+| `AWS_SESSION_TOKEN` | STS session token (required for temporary credentials) | — |
+| `AWS_DEFAULT_REGION` | AWS region for S3, SQS, and Bedrock | `eu-west-2` |
+
+The evaluation pipeline also reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (individual vars) in addition to `POSTGRES_URI`.
 
 ## Running in Development
 
-### 1. Start local infrastructure (PostgreSQL + LocalStack)
+### 1. Start the PostgreSQL container (Podman)
+
 ```bash
-docker compose up -d
+./scripts/start-datapipeline-dev.sh
 ```
 
-Docker Compose starts PostgreSQL and LocalStack. LocalStack initialises the `aia-tasks` and `aia-status` SQS queues and the `docsupload` S3 bucket automatically.
+This starts a Podman-managed PostgreSQL container named `aiadocuments` on port 5432, applies `app/datapipeline/db/init.sql` (schema + seed data), and waits until ready.  S3, SQS, and Bedrock run on real AWS — no LocalStack required.
 
-### 2. Start CoreBackend (port 8086)
+### 2. Start all three services with one command
+
 ```bash
-uvicorn app.api.main:app --host 127.0.0.1 --port 8086 --reload
+./scripts/start-aia.sh
 ```
 
-### 3. Start the Orchestrator (port 8001, separate terminal)
-```bash
-uvicorn app.orchestrator.main:app --host 127.0.0.1 --port 8001 --reload
+The script:
+1. Verifies connectivity to PostgreSQL, S3, SQS (both queues), and Bedrock before starting anything.
+2. Starts CoreBackend (`:8086`), Orchestrator (`:8001`), and Relay Service (`:8002`) as background processes with individual log files under `logs/`.
+3. Confirms each service is still alive 2 seconds after launch and prints the health check URLs.
+
+```
+  Core Backend   →  http://127.0.0.1:8086/health
+  Orchestrator   →  http://127.0.0.1:8001
+  Relay Service  →  http://127.0.0.1:8002/health
 ```
 
-Swagger UI:
+Other modes:
+
+```bash
+./scripts/start-aia.sh --check   # connectivity checks only — no services started
+./scripts/start-aia.sh --logs    # tail all three log files (Ctrl-C to stop)
+./scripts/start-aia.sh --stop    # gracefully stop all running services
+```
+
+> **STS credentials** expire every few hours. Refresh `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` in `.env`, then re-run `./scripts/start-aia.sh --check` to confirm before starting services.
+
+### Swagger UI
+
 - CoreBackend — `http://127.0.0.1:8086/docs`
 - Orchestrator — `http://127.0.0.1:8001/docs`
 
@@ -241,14 +270,14 @@ Two standalone scripts in `scripts/` let you test either half of the pipeline in
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  CoreBackend + Orchestrator  ←─── aia-tasks ───→  Relay Service       │
-│                              ───→ aia-status ───→                    │
-│                                                                       │
-│  mock_orchestrator.py        ←─── aia-tasks ───→  Relay Service       │
-│  (replaces left side)        ───→ aia-status ───→                    │
-│                                                                       │
-│  CoreBackend + Orchestrator  ←─── aia-tasks ───→  mock_agent.py      │
-│                              ───→ aia-status ───→  (replaces right)  │
+│  CoreBackend + Orchestrator  ───→ aia-tasks  ───→  Relay Service     │
+│                              ←─── aia-status ←───                    │
+│                                                                      │
+│  mock_orchestrator.py        ───→ aia-tasks  ───→  Relay Service     │
+│  (replaces left side)        ←─── aia-status ←───                    │
+│                                                                      │
+│  CoreBackend + Orchestrator  ───→ aia-tasks ───→  mock_agent.py      │
+│                              ←─── aia-status ←───  (replaces right)  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -298,8 +327,8 @@ python scripts/mock_orchestrator.py --doc-id my-doc-001
 # Only push a task for the security agent
 python scripts/mock_orchestrator.py --agent-types security
 
-# Push tasks for all three SDA agents
-python scripts/mock_orchestrator.py --agent-types security technical both
+# Push tasks for both SDA agents
+python scripts/mock_orchestrator.py --agent-types security technical
 
 # Send a real file as the document content
 python scripts/mock_orchestrator.py --file app/agents/evaluation/files/security_policy.md
@@ -327,8 +356,8 @@ The Orchestrator fans out to specialist agents based on the document's `template
 
 ```python
 TEMPLATE_AGENTS: dict[str, list[str]] = {
-    "SDA": ["security", "data", "risk", "ea", "solution"],
-    "CHEDP": ["security", "data", "risk"],
+    "SDA": ["security", "technical"],
+    # "CHEDP": ["security", "data", "risk", "ea", "solution"],
 }
 ```
 
@@ -338,43 +367,55 @@ Each agent type in the list becomes one `TaskMessage` on the `aia-tasks` queue. 
 
 ## Verification and Debugging
 
+### Run connectivity checks
+```bash
+./scripts/start-aia.sh --check
+```
+
+Reports PostgreSQL (active question count), S3 (bucket access), SQS tasks queue depth, SQS status queue depth, and a 1-token Bedrock probe call.
+
 ### Check document status in the database
 ```bash
-docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents
+# Connect via Podman container (DB_USER / DB_NAME from .env)
+psql postgresql://aiauser:Admin123\$@localhost:5432/aiadocuments
 
--- Query document lifecycle
+-- Document lifecycle
 SELECT doc_id, file_name, status, uploaded_ts, processed_ts
 FROM document_uploads
 ORDER BY uploaded_ts DESC;
 
--- Check users table
-SELECT * FROM users;
+-- Active questions loaded by data pipeline
+SELECT COUNT(*) FROM data_pipeline.questions WHERE isactive = TRUE;
 ```
 
 ### Check S3 uploads
 ```bash
-AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
-aws s3 ls s3://docsupload --endpoint-url http://localhost:4566 --recursive
+# Requires AWS CLI with credentials from .env (or exported in the shell)
+aws s3 ls s3://<S3_BUCKET_NAME> --recursive
 ```
 
-### Check SQS queues
+### Check SQS queue depth
 ```bash
-AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
 aws sqs get-queue-attributes \
-  --queue-url http://localhost:4566/000000000000/aia-tasks \
-  --endpoint-url http://localhost:4566 \
-  --attribute-names ApproximateNumberOfMessages
+  --queue-url "$TASK_QUEUE_URL" \
+  --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible
 ```
 
-### Reset local state
+### Follow service logs
 ```bash
-# Clear database
-docker exec -it aia-backend-db-1 psql -U aiauser -d aia_documents \
-  -c "TRUNCATE document_uploads; TRUNCATE users CASCADE;"
+./scripts/start-aia.sh --logs      # tail all three at once
+tail -f logs/relay-service.log     # single service
+```
 
-# Clear S3
-AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=eu-west-2 \
-aws s3 rm s3://docsupload --recursive --endpoint-url http://localhost:4566
+### Reset local state between test runs
+```bash
+# Truncate document table so the same file can be re-uploaded
+psql postgresql://aiauser:Admin123\$@localhost:5432/aiadocuments \
+  -c "TRUNCATE document_uploads CASCADE;"
+
+# Purge leftover SQS messages (if a run left tasks behind)
+aws sqs purge-queue --queue-url "$TASK_QUEUE_URL"
+aws sqs purge-queue --queue-url "$STATUS_QUEUE_URL"
 ```
 
 ## Contributing

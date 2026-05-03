@@ -11,7 +11,7 @@ from app.core.enums import LogLevel
 # ---------------------------------------------------------------------------
 
 TEMPLATE_AGENTS: dict[str, list[str]] = {
-    "SDA": ["security", "technical", "both"],
+    "SDA": ["security", "technical"],
     # "CHEDP": ["security", "data", "risk", "ea", "solution"],
 }
 
@@ -20,6 +20,7 @@ class AWSConfig(BaseModel):
     region: str = "eu-west-2"
     access_key_id: str = "test"
     secret_access_key: str = "test"
+    session_token: Optional[str] = None
     endpoint_url: Optional[str] = None
 
 
@@ -77,6 +78,7 @@ class AppConfig(BaseSettings):
     aws_region: str = Field("eu-west-2", alias="AWS_DEFAULT_REGION")
     aws_access_key: str = Field("test", alias="AWS_ACCESS_KEY_ID")
     aws_secret_key: str = Field("test", alias="AWS_SECRET_ACCESS_KEY")
+    aws_session_token: Optional[str] = Field(None, alias="AWS_SESSION_TOKEN")
     aws_endpoint: Optional[str] = Field(None, alias="AWS_ENDPOINT_URL")
 
     # S3
@@ -131,6 +133,7 @@ class AppConfig(BaseSettings):
             region=self.aws_region,
             access_key_id=self.aws_access_key,
             secret_access_key=self.aws_secret_key,
+            session_token=self.aws_session_token,
             endpoint_url=self.aws_endpoint,
         )
 

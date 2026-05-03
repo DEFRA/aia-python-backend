@@ -19,6 +19,8 @@ class S3Service:
             "aws_access_key_id": config.aws.access_key_id,
             "aws_secret_access_key": config.aws.secret_access_key,
         }
+        if config.aws.session_token:
+            client_kwargs["aws_session_token"] = config.aws.session_token
         if config.aws.endpoint_url:
             client_kwargs["endpoint_url"] = config.aws.endpoint_url
 
