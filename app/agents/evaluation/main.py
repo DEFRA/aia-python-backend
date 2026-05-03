@@ -32,22 +32,69 @@ from uuid import uuid4
 
 import anthropic
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
-from src.agents.schemas import AgentResult, TaggedChunk
+from src.agents.schemas import QuestionItem, TaggedChunk
 from src.agents.tagging_agent import TaggingAgent
 from src.config import DatabaseConfig, LocalRunnerConfig, PipelineConfig, TaggingAgentConfig
 from src.db.questions_repo import fetch_policy_doc_by_category, fetch_questions_by_policy_doc_id
 from src.handlers.agent import (
     AGENT_REGISTRY,
     CONFIG_REGISTRY,
-    AgentTaskBody,
     SpecialistAgent,
     SpecialistAgentConfig,
 )
-from src.handlers.extract_sections import extract_sections_for_agent
-from src.handlers.parse import SqsRecordBody, _parse_bytes
+from src.utils.document_parser import _parse_bytes
 from src.utils.exceptions import UnknownCategoryError
 from src.utils.llm_client import make_llm_client
+
+
+class AgentTaskBody(BaseModel):
+    document_id: str
+    agentType: str
+    document: str | None = None
+    s3PayloadKey: str | None = None
+    questions: list[QuestionItem]
+    policyDocUrl: str
+    enqueuedAt: str
+
+
+_agent_tag_map_cache: dict[str, frozenset[str]] | None = None
+
+
+def _get_agent_tag_map() -> dict[str, frozenset[str]]:
+    global _agent_tag_map_cache  # noqa: PLW0603
+    if _agent_tag_map_cache is None:
+        raw: dict[str, list[str]] = PipelineConfig().agent_tag_map
+        _agent_tag_map_cache = {agent: frozenset(tags) for agent, tags in raw.items()}
+    return _agent_tag_map_cache
+
+
+def extract_sections_for_agent(
+    tagged_chunks: list[dict[str, Any]],
+    agent_type: str,
+) -> list[dict[str, Any]]:
+    allowed_tags: frozenset[str] = _get_agent_tag_map()[agent_type]
+    result: list[dict[str, Any]] = []
+    last_heading: dict[str, Any] | None = None
+    heading_added: bool = False
+
+    for chunk in tagged_chunks:
+        if chunk.get("is_heading"):
+            last_heading = chunk
+            heading_added = False
+
+        tags: set[str] = set(chunk.get("tags", []))
+        is_relevant: bool = chunk.get("relevant", False) and bool(tags & allowed_tags)
+
+        if is_relevant:
+            if last_heading and not heading_added:
+                result.append(last_heading)
+                heading_added = True
+            result.append(chunk)
+
+    return result
+
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -116,10 +163,6 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
     """
     runner_config: LocalRunnerConfig = LocalRunnerConfig()
 
-    # ---- Mock Stage 3 input: SQS Tasks message body --------------------
-    sqs_body: SqsRecordBody = SqsRecordBody(document_id=doc_id, s3Key=s3_key)
-    logger.info("Mock SQS Tasks body: %s", sqs_body.model_dump_json())
-
     # ---- Stage 3 -- Parse: read bytes from local disk, parse to chunks --
     file_path: Path = _resolve_local_path(s3_key)
     file_bytes: bytes = file_path.read_bytes()
@@ -153,7 +196,11 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
             continue
 
         try:
-            policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category(
+            (
+                policy_doc_id,
+                policy_doc_url,
+                _policy_doc_filename,
+            ) = await fetch_policy_doc_by_category(
                 DatabaseConfig().dsn,  # type: ignore[call-arg]
                 agent_type,
             )
@@ -208,23 +255,20 @@ async def run_pipeline(s3_key: str, doc_id: str, output_path: Path) -> dict[str,
         )
 
         logger.info("Stage 6 Agent: running %s assessment...", agent_type)
-        result: AgentResult = await agent.assess(
+        llm_output = await agent.assess(
             document=body.document or "",
             questions=body.questions,
-            policy_doc_url=body.policyDocUrl,
         )
 
         section_key: str = runner_config.display_keys[agent_type]
         output[section_key] = {
-            "Assessments": [row.model_dump() for row in result.assessments],
-            "Final_Summary": (result.final_summary.model_dump() if result.final_summary else {}),
+            "Assessments": [row.model_dump() for row in llm_output.rows],
+            "Summary": llm_output.summary.model_dump(),
         }
         logger.info(
-            "Stage 6 complete: agent=%s assessments=%d input_tokens=%d output_tokens=%d",
+            "Stage 6 complete: agent=%s assessments=%d",
             agent_type,
-            len(result.assessments),
-            result.metadata.input_tokens,
-            result.metadata.output_tokens,
+            len(llm_output.rows),
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

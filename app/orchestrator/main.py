@@ -100,8 +100,8 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 agent_type=agent_type,
                 template_type=template_type,
                 file_content=inline_content,
-                s3_bucket=config.s3.bucket_name,
-                s3_key=s3_key,
+                s3_bucket=None if inline_content is not None else config.s3.bucket_name,
+                s3_key=None if inline_content is not None else s3_key,
             )
             for agent_type in agent_types
         ]

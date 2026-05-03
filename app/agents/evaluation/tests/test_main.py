@@ -19,10 +19,8 @@ import pytest
 from src.agents.schemas import (
     AgentResult,
     AssessmentRow,
-    FinalSummary,
-    LLMResponseMeta,
     QuestionItem,
-    Reference,
+    Summary,
     TaggedChunk,
 )
 
@@ -30,21 +28,17 @@ from src.agents.schemas import (
 def _sample_result(rating: str = "Green") -> AgentResult:
     """Return a minimal valid ``AgentResult`` for mocking."""
     return AgentResult(
+        policy_doc_filename="policy.pdf",
+        policy_doc_url="https://example.test/",
         assessments=[
             AssessmentRow(
                 Question="Q1",
                 Rating=rating,  # type: ignore[arg-type]
                 Comments="OK.",
-                Reference=Reference(text="G1.a", url="https://example.test/"),
+                Reference="G1.a",
             ),
         ],
-        metadata=LLMResponseMeta(
-            model="test-model",
-            input_tokens=10,
-            output_tokens=5,
-            stop_reason="end_turn",
-        ),
-        final_summary=FinalSummary(
+        summary=Summary(
             Interpretation="Strong alignment",
             Overall_Comments="OK.",
         ),
@@ -59,13 +53,11 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
     """``run_pipeline`` should dispatch every configured agent_type via the
     registry and write the combined output JSON keyed by ``display_keys``.
     """
-    # Source document for the mock SQS body -- contents are irrelevant
-    # because ``_parse_bytes`` is patched out.
     doc_path: Path = tmp_path / "doc.pdf"
     doc_path.write_bytes(b"%PDF-1.4 stub")
     output_path: Path = tmp_path / "out.json"
 
-    questions: list[QuestionItem] = [QuestionItem(question="Q1", reference="G1.a")]
+    questions: list[QuestionItem] = [QuestionItem(id="q-001", question="Q1", reference="G1.a")]
     tagged_chunks: list[TaggedChunk] = [
         TaggedChunk(
             chunk_index=0,
@@ -94,8 +86,14 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
             return_value=[{"is_heading": False, "text": "body"}],
         ),
         patch(
-            "main.fetch_assessment_by_category",
-            new=AsyncMock(return_value=(questions, "https://example.test/")),
+            "main.fetch_policy_doc_by_category",
+            new=AsyncMock(
+                return_value=("policy-doc-id-001", "https://example.test/", "policy.pdf")
+            ),
+        ),
+        patch(
+            "main.fetch_questions_by_policy_doc_id",
+            new=AsyncMock(return_value=questions),
         ),
         patch(
             "main.DatabaseConfig",
@@ -113,7 +111,6 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
         from main import run_pipeline
 
         s3_key: str = str(doc_path.relative_to(doc_path.parent))
-        # Resolve the doc against tmp_path by monkey-patching _EVAL_DIR.
         monkeypatch.setattr("main._EVAL_DIR", doc_path.parent)
 
         result: dict[str, Any] = await run_pipeline(
@@ -122,13 +119,11 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
             output_path=output_path,
         )
 
-    # Both agents dispatched via the registry
     mock_security_cls.assert_called_once()
     mock_technical_cls.assert_called_once()
     mock_security.assess.assert_awaited_once()
     mock_technical.assess.assert_awaited_once()
 
-    # Output JSON has the SQS Status shape with the configured display keys
     assert output_path.is_file()
     written: dict[str, Any] = json.loads(output_path.read_text(encoding="utf-8"))
     assert written["document_id"] == "UUID-test"

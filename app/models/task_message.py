@@ -14,5 +14,5 @@ class TaskMessage(BaseModel):
     agent_type: str
     template_type: str
     file_content: Optional[str] = None  # null when content exceeds SQS 256 KB limit
-    s3_bucket: str
-    s3_key: str
+    s3_bucket: Optional[str] = None
+    s3_key: Optional[str] = None

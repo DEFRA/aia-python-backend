@@ -219,3 +219,38 @@ def parse_docx(file_bytes: bytes) -> list[dict[str, Any]]:
         idx += 1
 
     return chunks
+
+
+from src.utils.exceptions import ScannedPdfError  # noqa: E402
+
+
+def _parse_bytes(file_bytes: bytes, s3_key: str, doc_id: str) -> list[dict[str, Any]]:
+    """Parse a PDF or DOCX byte stream into chunks.
+
+    Args:
+        file_bytes: Raw document bytes.
+        s3_key: The original S3 key — used for the file extension.
+        doc_id: The document ID — used for error messages.
+
+    Returns:
+        A list of chunk dicts (the document_parser chunk schema).
+
+    Raises:
+        ScannedPdfError: If the PDF has no extractable text layer.
+        ValueError: If the file extension is unsupported.
+    """
+    extension: str = s3_key.rsplit(".", maxsplit=1)[-1].lower() if "." in s3_key else ""
+
+    if extension == "pdf":
+        strategy: str = get_pdf_strategy(file_bytes)
+        if strategy == "vision":
+            raise ScannedPdfError(
+                f"PDF has no extractable text layer: doc_id={doc_id} s3_key={s3_key}"
+            )
+        blocks: list[dict[str, Any]] = extract_text_blocks(file_bytes)
+        return clean_and_chunk(blocks)
+
+    if extension == "docx":
+        return parse_docx(file_bytes)
+
+    raise ValueError(f"Unsupported file extension: '{extension}' for s3_key={s3_key}")

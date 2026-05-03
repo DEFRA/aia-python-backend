@@ -1,6 +1,4 @@
-import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -60,9 +58,9 @@ class TestUploadSuccess:
         assert body["docId"] == MOCK_DOC_ID
         assert body["statusCode"] == 200
         assert body["errorMessage"] == ""
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
 
 
@@ -99,9 +97,9 @@ class TestUploadDuplicate:
         assert body["statusCode"] == 400
         assert body["docId"] == ""
         assert "test.pdf" in body["errorMessage"]
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
 
 
@@ -161,10 +159,10 @@ class TestFetchHistory:
         assert response.status_code == 200
         assert isinstance(response.json(), list)
         mock_service.fetch_history.assert_called_once()
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
         mock_service.fetch_history.assert_called_once()
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
 
     def test_fetch_history_no_auth_returns_401(self):
@@ -196,9 +194,9 @@ class TestGetResult:
             headers=BASE_HEADERS,
         )
         assert response.status_code == 404
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
-        
+
         app.dependency_overrides.pop(get_upload_service, None)
 
     def test_result_no_auth_returns_401(self):

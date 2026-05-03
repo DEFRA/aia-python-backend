@@ -2,13 +2,13 @@
 
 Polls aia-tasks, dispatches each TaskMessage to the correct specialist agent,
 fetches checklist questions from PostgreSQL, and publishes a StatusMessage to
-aia-status. One message is processed at a time; visibility timeout is set to
-600 s to cover the maximum expected LLM call duration.
+aia-status. Messages are dispatched concurrently up to MAX_CONCURRENT_TASKS.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -55,9 +55,11 @@ logger = get_logger("app.relay_service")
 _AGENT_VISIBILITY_TIMEOUT = 600
 
 # Maximum time allowed for a single agent.assess() call.
-# Sourced from ORCHESTRATOR_AGENT_TIMEOUT_SECONDS (default 480 s).
+# Sourced from AGENT_TIMEOUT_SECONDS (default 480 s).
 # Kept below _AGENT_VISIBILITY_TIMEOUT to guarantee the error path completes.
 _AGENT_TIMEOUT_SECONDS: int = app_config.orchestrator_agent_timeout
+
+MAX_CONCURRENT_TASKS: int = int(os.environ.get("MAX_CONCURRENT_TASKS", "10"))
 
 _db_config: DatabaseConfig | None = None
 
@@ -73,6 +75,10 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
     """Return document text — inline from task or fetched from S3."""
     if task.file_content is not None:
         return task.file_content
+    if task.s3_key is None or task.s3_bucket is None:
+        raise ValueError(
+            f"TaskMessage has no file_content and no s3_key/s3_bucket: task_id={task.task_id}"
+        )
     file_bytes = await s3.download_file(task.s3_key, bucket=task.s3_bucket)
     return file_bytes.decode("utf-8")
 
@@ -173,18 +179,11 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
 
 
 async def run_worker() -> None:
-    """Main SQS polling loop — runs until cancelled.
-
-    Each iteration receives at most one message, dispatches it synchronously,
-    publishes the StatusMessage, then deletes the task message.  If dispatch
-    raises (infrastructure failure), the message is left in-flight so its
-    visibility timeout expires and SQS retries it (up to maxReceiveCount
-    before routing to the DLQ).
-    """
     sqs = SQSService()
     s3 = S3Service()
     task_url = app_config.sqs.task_queue_url
     status_url = app_config.sqs.status_queue_url
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
     logger.info("Relay service started — polling %s", task_url)
 
@@ -197,31 +196,45 @@ async def run_worker() -> None:
                 visibility_timeout=_AGENT_VISIBILITY_TIMEOUT,
             )
             for msg in messages:
-                receipt = msg["receipt_handle"]
-                try:
-                    task = TaskMessage.model_validate_json(msg["body"])
-                    logger.info(
-                        "Received task_id=%s agent_type=%s doc_id=%s",
-                        task.task_id,
-                        task.agent_type,
-                        task.document_id,
-                    )
-                    status = await dispatch(task, s3)
-                    await sqs.publish(status_url, status.model_dump_json(by_alias=True))
-                    await sqs.delete_message(task_url, receipt)
-                    logger.info(
-                        "Task complete task_id=%s error=%s",
-                        task.task_id,
-                        status.error,
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "Unhandled task error — message not deleted (will retry): %s",
-                        exc,
-                    )
+                asyncio.create_task(
+                    _process_message(msg, sqs, s3, task_url, status_url, semaphore)
+                )
         except asyncio.CancelledError:
             logger.info("Relay service stopped")
             return
         except Exception as exc:
             logger.exception("Worker poll error: %s", exc)
             await asyncio.sleep(5)
+
+
+async def _process_message(
+    msg: dict,
+    sqs: SQSService,
+    s3: S3Service,
+    task_url: str,
+    status_url: str,
+    semaphore: asyncio.Semaphore,
+) -> None:
+    async with semaphore:
+        receipt = msg["receipt_handle"]
+        try:
+            task = TaskMessage.model_validate_json(msg["body"])
+            logger.info(
+                "Received task_id=%s agent_type=%s doc_id=%s",
+                task.task_id,
+                task.agent_type,
+                task.document_id,
+            )
+            status = await dispatch(task, s3)
+            await sqs.publish(status_url, status.model_dump_json(by_alias=True))
+            await sqs.delete_message(task_url, receipt)
+            logger.info(
+                "Task complete task_id=%s error=%s",
+                task.task_id,
+                status.error,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Unhandled task error — message not deleted (will retry): %s",
+                exc,
+            )

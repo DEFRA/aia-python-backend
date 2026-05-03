@@ -93,6 +93,16 @@ async def test_get_document_downloads_from_s3_when_no_inline() -> None:
     s3.download_file.assert_called_once_with(task.s3_key, bucket=task.s3_bucket)
 
 
+@pytest.mark.asyncio
+async def test_get_document_raises_when_no_content_and_no_s3_fields() -> None:
+    from app.relay_service.worker import _get_document
+
+    task = _make_task(file_content=None, s3_key=None, s3_bucket=None)
+    s3 = AsyncMock()
+    with pytest.raises(ValueError, match="no s3_key/s3_bucket"):
+        await _get_document(task, s3)
+
+
 # ---------------------------------------------------------------------------
 # dispatch — unknown agent type
 # ---------------------------------------------------------------------------
@@ -252,24 +262,21 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
 
 
 # ---------------------------------------------------------------------------
-# run_worker — single iteration smoke test
+# _process_message — success path
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_run_worker_processes_one_message_then_cancels() -> None:
-    """Worker receives one message, dispatches, publishes, deletes, then is cancelled."""
-    from app.relay_service.worker import run_worker
+async def test_process_message_publishes_and_deletes_on_success() -> None:
+    """_process_message publishes StatusMessage and deletes the SQS message on success."""
+    from app.relay_service.worker import _process_message
 
     task = _make_task()
     raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-abc"}
 
     mock_sqs = AsyncMock()
-    # First call returns one message; subsequent calls block until cancelled
-    mock_sqs.receive_messages.side_effect = [
-        [raw_msg],
-        asyncio.CancelledError(),
-    ]
+    mock_s3 = AsyncMock()
+    semaphore = asyncio.Semaphore(10)
 
     mock_status = StatusMessage(
         task_id=task.task_id,
@@ -278,22 +285,38 @@ async def test_run_worker_processes_one_message_then_cancels() -> None:
         result={"assessments": []},
     )
 
-    with (
-        patch("app.relay_service.worker.SQSService", return_value=mock_sqs),
-        patch("app.relay_service.worker.S3Service", return_value=AsyncMock()),
-        patch(
-            "app.relay_service.worker.dispatch",
-            new=AsyncMock(return_value=mock_status),
-        ),
-        patch("app.relay_service.worker.app_config") as mock_cfg,
+    with patch(
+        "app.relay_service.worker.dispatch",
+        new=AsyncMock(return_value=mock_status),
     ):
-        mock_cfg.sqs.task_queue_url = "http://localhost/tasks"
-        mock_cfg.sqs.status_queue_url = "http://localhost/status"
-
-        await run_worker()
+        await _process_message(
+            raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore
+        )
 
     mock_sqs.publish.assert_called_once()
     published_body = json.loads(mock_sqs.publish.call_args[0][1])
     assert published_body["taskId"] == task.task_id
-
     mock_sqs.delete_message.assert_called_once_with("http://localhost/tasks", "rh-abc")
+
+
+@pytest.mark.asyncio
+async def test_process_message_does_not_delete_on_exception() -> None:
+    """_process_message leaves message in-flight when an unexpected exception occurs."""
+    from app.relay_service.worker import _process_message
+
+    task = _make_task()
+    raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-xyz"}
+
+    mock_sqs = AsyncMock()
+    mock_s3 = AsyncMock()
+    semaphore = asyncio.Semaphore(10)
+
+    with patch(
+        "app.relay_service.worker.dispatch",
+        new=AsyncMock(side_effect=RuntimeError("infra failure")),
+    ):
+        await _process_message(
+            raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore
+        )
+
+    mock_sqs.delete_message.assert_not_called()

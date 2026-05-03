@@ -100,9 +100,7 @@ class AppConfig(BaseSettings):
     # Orchestrator
     orchestrator_url: str = Field("http://localhost:8001", alias="ORCHESTRATOR_URL")
     orchestrator_port: int = Field(8001, alias="ORCHESTRATOR_PORT")
-    orchestrator_agent_timeout: int = Field(
-        480, alias="ORCHESTRATOR_AGENT_TIMEOUT_SECONDS"
-    )
+    orchestrator_agent_timeout: int = Field(480, alias="AGENT_TIMEOUT_SECONDS")
     orchestrator_default_agent_type: str = Field(
         "general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE"
     )

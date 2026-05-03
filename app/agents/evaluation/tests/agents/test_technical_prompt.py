@@ -11,31 +11,28 @@ def _load(filename: str) -> str:
     return (_PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
-def test_technical_prompt_renders_xml_questions_and_url() -> None:
-    """Formatting the user template should produce the expected XML question
-    and category URL shape, mirroring the security prompt contract.
+def test_technical_prompt_renders_json_questions() -> None:
+    """Formatting the user template should produce the expected JSON questions
+    block inside <questions> delimiters — no category_url line.
     """
+    import json
+
     template = _load("technical_user.md")
-    questions_block: str = (
-        '1. <question reference="T1.a">Is a Record of Processing Activity (Article 30) '
-        "maintained?</question>\n"
-        '2. <question reference="T2.b">Are retention schedules documented for personal data?'
-        "</question>"
+    questions_block: str = json.dumps(
+        [
+            {"id": "aaaa-0001", "question": "Is a Record of Processing Activity maintained?"},
+            {"id": "bbbb-0002", "question": "Are retention schedules documented?"},
+        ],
+        indent=2,
     )
-    policy_doc_url: str = "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/"
     document: str = "Sample policy text."
 
-    rendered: str = template.format(
-        document=document,
-        category_url=policy_doc_url,
-        questions=questions_block,
-    )
+    rendered: str = template.format(document=document, questions=questions_block)
 
     assert "<document>" in rendered
     assert "Sample policy text." in rendered
-    assert f"<category_url>{policy_doc_url}</category_url>" in rendered
-    assert '<question reference="T1.a">' in rendered
-    assert '<question reference="T2.b">' in rendered
+    assert "<category_url>" not in rendered
+    assert "aaaa-0001" in rendered
     assert '"Technical"' in rendered
 
 
