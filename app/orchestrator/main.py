@@ -1,29 +1,38 @@
 import asyncio
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 
-from app.core.config import config
-from app.core.enums import DocumentStatus
-from app.models.orchestrate_request import OrchestrateRequest
-from app.models.status_message import StatusMessage
-from app.models.task_message import TaskMessage
-from app.orchestrator.session import SessionStore
-from app.orchestrator.summary import MarkdownSummaryGenerator
-from app.repositories.document_repository import DocumentRepository
-from app.services.ingestor_service import IngestorService
-from app.services.s3_service import S3Service
-from app.services.sqs_service import SQSService
-from app.utils.app_context import AppContext
-from app.utils.logger import get_logger
-from app.utils.postgres import close_postgres_pool, get_postgres_pool, init_db
+_EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
+if str(_EVAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVAL_ROOT))
+
+from src.agents.schemas import AgentResult  # noqa: E402
+from src.config import PipelineConfig  # noqa: E402
+
+from app.core.config import config  # noqa: E402
+from app.core.enums import DocumentStatus  # noqa: E402
+from app.models.orchestrate_request import OrchestrateRequest  # noqa: E402
+from app.models.status_message import StatusMessage  # noqa: E402
+from app.models.task_message import TaskMessage  # noqa: E402
+from app.orchestrator.session import SessionStore  # noqa: E402
+from app.orchestrator.summary import MarkdownReportGenerator  # noqa: E402
+from app.repositories.document_repository import DocumentRepository  # noqa: E402
+from app.services.ingestor_service import IngestorService  # noqa: E402
+from app.services.s3_service import S3Service  # noqa: E402
+from app.services.sqs_service import SQSService  # noqa: E402
+from app.utils.app_context import AppContext  # noqa: E402
+from app.utils.logger import get_logger  # noqa: E402
+from app.utils.postgres import close_postgres_pool, get_postgres_pool, init_db  # noqa: E402
 
 logger = get_logger("app.orchestrator")
 
 _session_store = SessionStore()
-_summary_generator = MarkdownSummaryGenerator()
+_summary_generator = MarkdownReportGenerator()
 _poller_task: asyncio.Task | None = None
 
 
@@ -128,8 +137,19 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
         collected = dict(session.collected_results)
         await _session_store.remove(doc_id)
 
+        _pipeline_cfg = PipelineConfig()
+        by_agent_type: dict[str, Any] = {
+            task_id.rsplit("_", 1)[1]: result for task_id, result in collected.items()
+        }
+        document_title = Path(s3_key).name
+
         if not timed_out:
-            result_md = _summary_generator.generate(collected)
+            result_md = _summary_generator.generate(
+                results=by_agent_type,
+                document_title=document_title,
+                section_labels=_pipeline_cfg.section_labels,
+                agent_type_order=_pipeline_cfg.agent_types,
+            )
             await repo.update_status(
                 doc_id, DocumentStatus.COMPLETE.value, result_md=result_md
             )
@@ -142,7 +162,12 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
             )
             logger.error("Document failed (0 responses) doc_id=%s", doc_id)
         else:
-            result_md = _summary_generator.generate(collected)
+            result_md = _summary_generator.generate(
+                results=by_agent_type,
+                document_title=document_title,
+                section_labels=_pipeline_cfg.section_labels,
+                agent_type_order=_pipeline_cfg.agent_types,
+            )
             missing = expected - collected.keys()
             missing_types = ", ".join(t.rsplit("_", 1)[-1] for t in missing)
             await repo.update_status(
@@ -184,10 +209,14 @@ async def _status_queue_poller() -> None:
                 receipt = msg["receipt_handle"]
                 try:
                     status_msg = StatusMessage.model_validate_json(msg["body"])
+                    if status_msg.error:
+                        agent_result = None
+                    else:
+                        agent_result = AgentResult.model_validate(status_msg.result)
                     all_received = await _session_store.record_result(
                         status_msg.document_id,
                         status_msg.task_id,
-                        status_msg.result,
+                        agent_result,
                     )
                     await sqs.delete_message(queue_url, receipt)
                     logger.info(

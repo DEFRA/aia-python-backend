@@ -40,6 +40,9 @@ pipeline:
   agent_types:
     - "security"
     - "technical"
+  section_labels:
+    security: "Security Policy"
+    technical: "Technology Policy"
   sqs_inline_limit: 240000  # bytes - leave headroom below 256 KB
   agent_tag_map:
     security:

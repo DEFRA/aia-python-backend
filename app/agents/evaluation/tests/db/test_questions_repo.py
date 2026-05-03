@@ -16,19 +16,22 @@ from src.utils.exceptions import UnknownCategoryError
 
 
 @pytest.mark.asyncio
-async def test_fetch_policy_doc_returns_id_and_url() -> None:
-    """Returns (policy_doc_id, policy_doc_url) for a matching category."""
+async def test_fetch_policy_doc_returns_id_url_and_filename() -> None:
+    """Returns (policy_doc_id, policy_doc_url, policy_doc_filename) for a matching category."""
     mock_conn = AsyncMock()
     mock_conn.fetchrow.return_value = {
         "policy_doc_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         "source_url": "https://example.com/security",
+        "filename": "security_policy.pdf",
     }
 
     with patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)):
-        policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category("dsn", "security")
+        result = await fetch_policy_doc_by_category("dsn", "security")
+    policy_doc_id, policy_doc_url, policy_doc_filename = result
 
     assert policy_doc_id == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     assert policy_doc_url == "https://example.com/security"
+    assert policy_doc_filename == "security_policy.pdf"
 
 
 @pytest.mark.asyncio
@@ -51,6 +54,7 @@ async def test_fetch_policy_doc_connection_closed_on_success() -> None:
     mock_conn.fetchrow.return_value = {
         "policy_doc_id": "some-uuid",
         "source_url": "https://example.com",
+        "filename": "doc.pdf",
     }
 
     with patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)):
@@ -81,13 +85,21 @@ async def test_fetch_policy_doc_connection_closed_on_error() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_questions_returns_question_items() -> None:
-    """Returns a list of QuestionItem instances."""
+    """Returns a list of QuestionItem instances with id populated."""
     from src.agents.schemas import QuestionItem
 
     mock_conn = AsyncMock()
     mock_conn.fetch.return_value = [
-        {"question_text": "Is MFA enabled?", "reference": "C1.a"},
-        {"question_text": "Is data encrypted at rest?", "reference": "C2.b"},
+        {
+            "id": "aaaaaaaa-0000-0000-0000-000000000001",
+            "question_text": "Is MFA enabled?",
+            "reference": "C1.a",
+        },
+        {
+            "id": "aaaaaaaa-0000-0000-0000-000000000002",
+            "question_text": "Is data encrypted at rest?",
+            "reference": "C2.b",
+        },
     ]
 
     with patch("src.db.questions_repo.asyncpg.connect", AsyncMock(return_value=mock_conn)):
@@ -97,8 +109,10 @@ async def test_fetch_questions_returns_question_items() -> None:
 
     assert len(questions) == 2
     assert all(isinstance(q, QuestionItem) for q in questions)
+    assert questions[0].id == "aaaaaaaa-0000-0000-0000-000000000001"
     assert questions[0].question == "Is MFA enabled?"
     assert questions[0].reference == "C1.a"
+    assert questions[1].id == "aaaaaaaa-0000-0000-0000-000000000002"
 
 
 @pytest.mark.asyncio

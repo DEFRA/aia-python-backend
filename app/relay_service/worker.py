@@ -31,6 +31,7 @@ _load_dotenv(
     _EVAL_ROOT / ".env", override=False
 )  # override=False: root .env values take precedence
 
+from src.agents.schemas import AgentLLMOutput, AgentResult, AssessmentRow  # noqa: E402
 from src.config import DatabaseConfig  # noqa: E402
 from src.db.questions_repo import (  # noqa: E402
     fetch_policy_doc_by_category,
@@ -97,7 +98,11 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
 
     document = await _get_document(task, s3)
     dsn = _get_db_config().dsn
-    policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category(dsn, agent_type)
+    (
+        policy_doc_id,
+        policy_doc_url,
+        policy_doc_filename,
+    ) = await fetch_policy_doc_by_category(dsn, agent_type)
     questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
 
     client = make_llm_client()
@@ -105,13 +110,31 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
     agent = AGENT_REGISTRY[agent_type](client=client, agent_config=agent_config)
 
     try:
-        result = await asyncio.wait_for(
-            agent.assess(
-                document=document,
-                questions=questions,
-                policy_doc_url=policy_doc_url,
-            ),
+        llm_output: AgentLLMOutput = await asyncio.wait_for(
+            agent.assess(document=document, questions=questions),
             timeout=_AGENT_TIMEOUT_SECONDS,
+        )
+
+        question_map = {q.id: q for q in questions}
+        assessments: list[AssessmentRow] = []
+        for row in llm_output.rows:
+            q_item = question_map.get(row.question_id)
+            if q_item is None:
+                raise ValueError(f"LLM returned unknown question_id: {row.question_id}")
+            assessments.append(
+                AssessmentRow(
+                    Question=q_item.question,
+                    Reference=q_item.reference,
+                    Rating=row.Rating,
+                    Comments=row.Comments,
+                )
+            )
+
+        result = AgentResult(
+            policy_doc_filename=policy_doc_filename,
+            policy_doc_url=policy_doc_url,
+            assessments=assessments,
+            summary=llm_output.summary,
         )
         return StatusMessage(
             task_id=task.task_id,

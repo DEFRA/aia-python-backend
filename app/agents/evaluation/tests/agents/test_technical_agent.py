@@ -1,8 +1,6 @@
 """Tests for the TechnicalAgent.
 
-Mirrors the SecurityAgent test contract: assess() returns AgentResult, the
-authoritative reference is echoed verbatim, and malformed payloads raise
-ValueError.
+assess() returns AgentLLMOutput and malformed payloads raise ValueError.
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.schemas import AgentResult, AssessmentRow, FinalSummary, QuestionItem
+from src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary
 from src.agents.technical_agent import TechnicalAgent
 from src.config import TechnicalAgentConfig
 
@@ -22,37 +20,37 @@ from src.config import TechnicalAgentConfig
 # ---------------------------------------------------------------------------
 
 _DOCUMENT: str = "Sample policy document text."
-_CATEGORY_URL: str = "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/"
 _QUESTIONS: list[QuestionItem] = [
-    QuestionItem(question="Is a ROPA maintained?", reference="T1.a"),
-    QuestionItem(question="Are retention schedules documented?", reference="T2.b"),
+    QuestionItem(
+        id="aaaaaaaa-0000-0000-0000-000000000001",
+        question="Is a ROPA maintained?",
+        reference="T1.a",
+    ),
+    QuestionItem(
+        id="aaaaaaaa-0000-0000-0000-000000000002",
+        question="Are retention schedules documented?",
+        reference="T2.b",
+    ),
 ]
 
 
 def _make_technical_payload(
     questions: list[QuestionItem],
-    *,
-    overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Build a valid Technical JSON payload echoing the supplied references."""
-    overrides = overrides or {}
+    """Build a valid Technical JSON payload using question_ids."""
     rows: list[dict[str, Any]] = []
     for item in questions:
         rows.append(
             {
-                "Question": item.question,
+                "question_id": item.id,
                 "Rating": "Green",
                 "Comments": "Section 4.2 documents the requirement.",
-                "Reference": {
-                    "text": overrides.get(item.reference, item.reference),
-                    "url": _CATEGORY_URL,
-                },
             }
         )
     return {
         "Technical": {
             "Assessments": rows,
-            "Final_Summary": {
+            "Summary": {
                 "Interpretation": "Strong alignment",
                 "Overall_Comments": "All requirements addressed.",
             },
@@ -88,41 +86,32 @@ def _make_agent(client: MagicMock) -> TechnicalAgent:
 
 
 @pytest.mark.asyncio
-async def test_technical_agent_assess_returns_agent_result() -> None:
-    """assess() should parse the Technical JSON payload into an AgentResult."""
+async def test_technical_agent_assess_returns_agent_llm_output() -> None:
+    """assess() should parse the Technical JSON payload into an AgentLLMOutput."""
     payload: dict[str, Any] = _make_technical_payload(_QUESTIONS)
     client: MagicMock = _make_mock_client(json.dumps(payload))
     agent: TechnicalAgent = _make_agent(client)
 
-    result: AgentResult = await agent.assess(_DOCUMENT, _QUESTIONS, _CATEGORY_URL)
+    result: AgentLLMOutput = await agent.assess(_DOCUMENT, _QUESTIONS)
 
-    assert isinstance(result, AgentResult)
-    assert len(result.assessments) == len(_QUESTIONS)
-    assert all(isinstance(row, AssessmentRow) for row in result.assessments)
-    assert isinstance(result.final_summary, FinalSummary)
-    assert result.metadata.input_tokens == 120
-    assert result.metadata.output_tokens == 60
+    assert isinstance(result, AgentLLMOutput)
+    assert len(result.rows) == len(_QUESTIONS)
+    assert all(isinstance(row, RawAssessmentRow) for row in result.rows)
+    assert isinstance(result.summary, Summary)
+    assert result.summary.Interpretation == "Strong alignment"
 
 
 @pytest.mark.asyncio
-async def test_technical_agent_validates_reference_echo() -> None:
-    """If the LLM echoes the wrong reference, the value flows through verbatim.
-
-    The agent does not silently rewrite the reference; downstream consumers
-    rely on this behaviour to spot drift between the prompt contract and the
-    actual model output.
-    """
-    payload: dict[str, Any] = _make_technical_payload(
-        _QUESTIONS,
-        overrides={"T1.a": "WRONG-REF"},
-    )
+async def test_technical_agent_rows_have_correct_question_ids() -> None:
+    """Rows in the output must carry the question_id values from the input."""
+    payload: dict[str, Any] = _make_technical_payload(_QUESTIONS)
     client: MagicMock = _make_mock_client(json.dumps(payload))
     agent: TechnicalAgent = _make_agent(client)
 
-    result: AgentResult = await agent.assess(_DOCUMENT, _QUESTIONS, _CATEGORY_URL)
+    result: AgentLLMOutput = await agent.assess(_DOCUMENT, _QUESTIONS)
 
-    assert result.assessments[0].Reference.text == "WRONG-REF"
-    assert result.assessments[1].Reference.text == "T2.b"
+    assert result.rows[0].question_id == "aaaaaaaa-0000-0000-0000-000000000001"
+    assert result.rows[1].question_id == "aaaaaaaa-0000-0000-0000-000000000002"
 
 
 # ---------------------------------------------------------------------------
@@ -137,10 +126,10 @@ async def test_technical_agent_raises_on_invalid_payload() -> None:
     bad_client: MagicMock = _make_mock_client("Not JSON at all")
     agent: TechnicalAgent = _make_agent(bad_client)
     with pytest.raises(ValueError, match="Could not parse assessment response"):
-        await agent.assess(_DOCUMENT, _QUESTIONS, _CATEGORY_URL)
+        await agent.assess(_DOCUMENT, _QUESTIONS)
 
     # Case 2: valid JSON but missing top-level ``Technical`` key
     wrong_key_client: MagicMock = _make_mock_client(json.dumps({"Security": {"Assessments": []}}))
     agent = _make_agent(wrong_key_client)
     with pytest.raises(ValueError, match="Could not parse assessment response"):
-        await agent.assess(_DOCUMENT, _QUESTIONS, _CATEGORY_URL)
+        await agent.assess(_DOCUMENT, _QUESTIONS)

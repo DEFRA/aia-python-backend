@@ -16,7 +16,7 @@ from src.utils.exceptions import UnknownCategoryError
 logger: logging.Logger = logging.getLogger(__name__)
 
 _FETCH_POLICY_DOC_SQL = """
-    SELECT policy_doc_id::text, source_url
+    SELECT policy_doc_id::text, source_url, filename
     FROM data_pipeline.policy_documents
     WHERE LOWER(category) = LOWER($1)
     ORDER BY created_at DESC
@@ -24,7 +24,7 @@ _FETCH_POLICY_DOC_SQL = """
 """
 
 _FETCH_QUESTIONS_SQL = """
-    SELECT question_text, reference
+    SELECT id::text, question_text, reference
     FROM data_pipeline.questions
     WHERE policy_doc_id = $1::uuid
       AND isactive = true
@@ -35,7 +35,7 @@ _FETCH_QUESTIONS_SQL = """
 async def fetch_policy_doc_by_category(
     dsn: str,
     category: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """Resolve a category to the most recently created policy document.
 
     Args:
@@ -44,7 +44,7 @@ async def fetch_policy_doc_by_category(
             Case-insensitive.
 
     Returns:
-        ``(policy_doc_id, policy_doc_url)`` for the most recently created
+        ``(policy_doc_id, policy_doc_url, policy_doc_filename)`` for the most recently created
         policy document in this category.
 
     Raises:
@@ -62,13 +62,14 @@ async def fetch_policy_doc_by_category(
 
     policy_doc_id: str = row["policy_doc_id"]
     policy_doc_url: str = row["source_url"]
+    policy_doc_filename: str = row["filename"]
     logger.info(
         "Resolved category=%r to policy_doc_id=%s policy_doc_url=%s",
         category,
         policy_doc_id,
         policy_doc_url,
     )
-    return policy_doc_id, policy_doc_url
+    return policy_doc_id, policy_doc_url, policy_doc_filename
 
 
 async def fetch_questions_by_policy_doc_id(
@@ -94,7 +95,8 @@ async def fetch_questions_by_policy_doc_id(
         await conn.close()
 
     questions: list[QuestionItem] = [
-        QuestionItem(question=row["question_text"], reference=row["reference"]) for row in rows
+        QuestionItem(id=row["id"], question=row["question_text"], reference=row["reference"])
+        for row in rows
     ]
     logger.info(
         "Fetched %d question(s) for policy_doc_id=%s",

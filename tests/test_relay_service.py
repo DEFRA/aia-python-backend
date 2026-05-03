@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models.status_message import StatusMessage
-from app.models.task_message import TaskMessage
+_EVAL_ROOT = Path(__file__).resolve().parent.parent / "app" / "agents" / "evaluation"
+if str(_EVAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVAL_ROOT))
+
+from src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary  # noqa: E402
+
+from app.models.status_message import StatusMessage  # noqa: E402
+from app.models.task_message import TaskMessage  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,36 +39,30 @@ def _make_task(**overrides: Any) -> TaskMessage:
     return TaskMessage(**defaults)
 
 
-def _make_agent_result() -> Any:
-    """Build a minimal AgentResult using the evaluation module schemas."""
-    from src.agents.schemas import (  # noqa: PLC0415 — evaluation path injected at import
-        AgentResult,
-        AssessmentRow,
-        FinalSummary,
-        LLMResponseMeta,
-        Reference,
-    )
-
-    return AgentResult(
-        assessments=[
-            AssessmentRow(
-                Question="Is MFA enabled?",
+def _make_llm_output() -> AgentLLMOutput:
+    return AgentLLMOutput(
+        rows=[
+            RawAssessmentRow(
+                question_id="q-001",
                 Rating="Green",
                 Comments="MFA is enabled for all users.",
-                Reference=Reference(text="C1.a", url="https://example.com"),
             )
         ],
-        metadata=LLMResponseMeta(
-            model="claude-3-5-haiku-latest",
-            input_tokens=100,
-            output_tokens=50,
-            stop_reason="end_turn",
-        ),
-        final_summary=FinalSummary(
+        summary=Summary(
             Interpretation="The document is compliant.",
             Overall_Comments="No issues found.",
         ),
     )
+
+
+def _make_questions() -> list[QuestionItem]:
+    return [
+        QuestionItem(
+            id="q-001",
+            question="Is MFA enabled?",
+            reference="C1.a",
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -121,15 +123,20 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
 
     task = _make_task()
     s3 = AsyncMock()
-    result = _make_agent_result()
+    llm_output = _make_llm_output()
+    questions = _make_questions()
     mock_agent = AsyncMock()
-    mock_agent.assess.return_value = result
+    mock_agent.assess.return_value = llm_output
 
     with (
         patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_assessment_by_category",
-            new=AsyncMock(return_value=([], "https://example.com")),
+            "app.relay_service.worker.fetch_policy_doc_by_category",
+            new=AsyncMock(return_value=("policy-doc-id-001", "https://example.com", "policy.pdf")),
+        ),
+        patch(
+            "app.relay_service.worker.fetch_questions_by_policy_doc_id",
+            new=AsyncMock(return_value=questions),
         ),
         patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
@@ -162,14 +169,19 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
 
     task = _make_task()
     s3 = AsyncMock()
+    questions = _make_questions()
     mock_agent = AsyncMock()
     mock_agent.assess.side_effect = ValueError("LLM parse error")
 
     with (
         patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_assessment_by_category",
-            new=AsyncMock(return_value=([], "https://example.com")),
+            "app.relay_service.worker.fetch_policy_doc_by_category",
+            new=AsyncMock(return_value=("policy-doc-id-001", "https://example.com", "policy.pdf")),
+        ),
+        patch(
+            "app.relay_service.worker.fetch_questions_by_policy_doc_id",
+            new=AsyncMock(return_value=questions),
         ),
         patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
@@ -201,6 +213,7 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
 
     task = _make_task()
     s3 = AsyncMock()
+    questions = _make_questions()
     mock_agent = AsyncMock()
 
     async def _slow_assess(**_: Any) -> None:
@@ -211,8 +224,12 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
     with (
         patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_assessment_by_category",
-            new=AsyncMock(return_value=([], "https://example.com")),
+            "app.relay_service.worker.fetch_policy_doc_by_category",
+            new=AsyncMock(return_value=("policy-doc-id-001", "https://example.com", "policy.pdf")),
+        ),
+        patch(
+            "app.relay_service.worker.fetch_questions_by_policy_doc_id",
+            new=AsyncMock(return_value=questions),
         ),
         patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
         patch(

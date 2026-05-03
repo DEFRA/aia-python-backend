@@ -22,7 +22,7 @@ import anthropic
 import boto3
 from pydantic import BaseModel
 
-from src.agents.schemas import AgentResult, AgentStatusMessage, QuestionItem
+from src.agents.schemas import AgentLLMOutput, AgentResult, AgentStatusMessage, QuestionItem
 from src.agents.security_agent import SecurityAgent
 from src.agents.technical_agent import TechnicalAgent
 from src.config import (
@@ -62,8 +62,7 @@ class SpecialistAgent(Protocol):
         self,
         document: str,
         questions: list[QuestionItem],
-        policy_doc_url: str,
-    ) -> AgentResult: ...
+    ) -> AgentLLMOutput: ...
 
 
 # Typed factories for the dispatch registries. ``Callable[..., T]`` accepts
@@ -314,10 +313,9 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     duration_ms: float
 
     try:
-        result: AgentResult = await agent.assess(
+        result: AgentResult = await agent.assess(  # type: ignore[assignment]  # Phase 2 cleanup
             document=document,
             questions=body.questions,
-            policy_doc_url=body.policyDocUrl,
         )
         duration_ms = (time.monotonic() - start) * 1000
         completed_at: str = datetime.now(tz=UTC).isoformat()

@@ -5,43 +5,20 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 
-class Reference(BaseModel):
-    """Authoritative reference for a question, echoed verbatim from the input JSON.
-
-    ``text`` carries the per-question reference (e.g. ``"C1.a"``); ``url`` carries
-    the category-level reference URL. Agents must echo these values back as-is and
-    must not invent or rewrite them.
-    """
-
-    text: str
-    url: str | None = None
-
-
 class QuestionItem(BaseModel):
-    """A checklist question paired with its authoritative reference.
-
-    Sourced from the input assessment JSON (see
-    ``app/agents/evaluation/files/system_input_output.md``). Carried through
-    Stage 5 -> Stage 6 in the SQS Tasks message body so each agent can echo
-    ``reference`` back into its output ``Reference`` field.
-    """
-
+    id: str
     question: str
     reference: str
 
 
 class AssessmentRow(BaseModel):
-    """A single checklist question with its rating and supporting comments."""
-
     Question: str
     Rating: Literal["Green", "Amber", "Red"]
     Comments: str
-    Reference: Reference
+    Reference: str
 
 
-class FinalSummary(BaseModel):
-    """Overall summary produced by the LLM after assessing all questions."""
-
+class Summary(BaseModel):
     Interpretation: str
     Overall_Comments: str
 
@@ -55,12 +32,24 @@ class LLMResponseMeta(BaseModel):
     stop_reason: str | None = None
 
 
+class RawAssessmentRow(BaseModel):
+    question_id: str
+    Rating: Literal["Green", "Amber", "Red"]
+    Comments: str
+
+
+class AgentLLMOutput(BaseModel):
+    rows: list[RawAssessmentRow]
+    summary: Summary
+
+
 class AgentResult(BaseModel):
     """Complete result returned by a security or compliance agent."""
 
+    policy_doc_filename: str
+    policy_doc_url: str
     assessments: list[AssessmentRow]
-    metadata: LLMResponseMeta
-    final_summary: FinalSummary | None = None
+    summary: Summary
 
 
 class TaggedChunk(BaseModel):

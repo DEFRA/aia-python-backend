@@ -226,6 +226,10 @@ class PipelineConfig(BaseSettings):
         default_factory=lambda: ["security", "technical"],
         alias="PIPELINE_AGENT_TYPES",
     )
+    section_labels: dict[str, str] = Field(
+        default_factory=lambda: {"security": "Security Policy", "technical": "Technology Policy"},
+        alias="PIPELINE_SECTION_LABELS",
+    )
     sqs_inline_limit: int = Field(default=240_000, alias="PIPELINE_SQS_INLINE_LIMIT")
     agent_tag_map: dict[str, list[str]] = Field(
         default_factory=dict,

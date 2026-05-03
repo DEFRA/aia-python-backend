@@ -7,15 +7,18 @@ from pydantic import ValidationError
 
 from src.agents.schemas import (
     AgentCompleteDetail,
+    AgentLLMOutput,
     AgentResult,
     AssessmentRow,
     DocumentParsedDetail,
     DocumentTaggedDetail,
-    FinalSummary,
     InlinePayload,
     LLMResponseMeta,
+    QuestionItem,
+    RawAssessmentRow,
     S3KeyPayload,
     SectionsReadyDetail,
+    Summary,
 )
 
 # ---------------------------------------------------------------------------
@@ -26,9 +29,137 @@ from src.agents.schemas import (
 def test_existing_models_still_importable() -> None:
     """Existing models must not be broken by adding new ones."""
     assert AssessmentRow is not None
-    assert FinalSummary is not None
+    assert Summary is not None
     assert LLMResponseMeta is not None
     assert AgentResult is not None
+
+
+# ---------------------------------------------------------------------------
+# QuestionItem gains id field
+# ---------------------------------------------------------------------------
+
+
+def test_question_item_requires_id() -> None:
+    """QuestionItem must require an id field."""
+    q = QuestionItem(
+        id="aaaaaaaa-0000-0000-0000-000000000001",
+        question="Is MFA enabled?",
+        reference="C1.a",
+    )
+    assert q.id == "aaaaaaaa-0000-0000-0000-000000000001"
+    assert q.question == "Is MFA enabled?"
+    assert q.reference == "C1.a"
+
+
+# ---------------------------------------------------------------------------
+# AssessmentRow.Reference is now a plain string
+# ---------------------------------------------------------------------------
+
+
+def test_assessment_row_reference_is_string() -> None:
+    """AssessmentRow.Reference must be a plain string, not a nested object."""
+    row = AssessmentRow(
+        Question="Is MFA enabled?",
+        Rating="Green",
+        Comments="MFA is enforced.",
+        Reference="C1.a",
+    )
+    assert isinstance(row.Reference, str)
+    assert row.Reference == "C1.a"
+
+
+# ---------------------------------------------------------------------------
+# Summary (renamed from FinalSummary)
+# ---------------------------------------------------------------------------
+
+
+def test_summary_validates() -> None:
+    """Summary must expose Interpretation and Overall_Comments."""
+    s = Summary(
+        Interpretation="Strong alignment",
+        Overall_Comments="All requirements addressed.",
+    )
+    assert s.Interpretation == "Strong alignment"
+    assert s.Overall_Comments == "All requirements addressed."
+
+
+# ---------------------------------------------------------------------------
+# RawAssessmentRow
+# ---------------------------------------------------------------------------
+
+
+def test_raw_assessment_row_validates() -> None:
+    """RawAssessmentRow must expose question_id, Rating, and Comments."""
+    row = RawAssessmentRow(
+        question_id="aaaaaaaa-0000-0000-0000-000000000001",
+        Rating="Amber",
+        Comments="Partial coverage.",
+    )
+    assert row.question_id == "aaaaaaaa-0000-0000-0000-000000000001"
+    assert row.Rating == "Amber"
+
+
+def test_raw_assessment_row_rejects_invalid_rating() -> None:
+    """RawAssessmentRow must reject ratings outside Green/Amber/Red."""
+    with pytest.raises(ValidationError):
+        RawAssessmentRow(
+            question_id="some-id",
+            Rating="Yellow",  # type: ignore[arg-type]
+            Comments="Invalid.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AgentLLMOutput
+# ---------------------------------------------------------------------------
+
+
+def test_agent_llm_output_validates() -> None:
+    """AgentLLMOutput must expose rows and summary."""
+    output = AgentLLMOutput(
+        rows=[
+            RawAssessmentRow(
+                question_id="aaaaaaaa-0000-0000-0000-000000000001",
+                Rating="Green",
+                Comments="Fully addressed.",
+            )
+        ],
+        summary=Summary(
+            Interpretation="Strong alignment",
+            Overall_Comments="No gaps found.",
+        ),
+    )
+    assert len(output.rows) == 1
+    assert output.summary.Interpretation == "Strong alignment"
+
+
+# ---------------------------------------------------------------------------
+# AgentResult new fields
+# ---------------------------------------------------------------------------
+
+
+def test_agent_result_new_fields() -> None:
+    """AgentResult must expose policy_doc_filename, policy_doc_url, assessments, summary."""
+    result = AgentResult(
+        policy_doc_filename="security_policy.pdf",
+        policy_doc_url="https://example.com/security_policy.pdf",
+        assessments=[
+            AssessmentRow(
+                Question="Is MFA enabled?",
+                Rating="Green",
+                Comments="MFA is enforced.",
+                Reference="C1.a",
+            )
+        ],
+        summary=Summary(
+            Interpretation="Strong alignment",
+            Overall_Comments="All requirements addressed.",
+        ),
+    )
+    assert result.policy_doc_filename == "security_policy.pdf"
+    assert result.policy_doc_url == "https://example.com/security_policy.pdf"
+    assert len(result.assessments) == 1
+    assert result.summary.Interpretation == "Strong alignment"
 
 
 # ---------------------------------------------------------------------------
@@ -172,5 +303,7 @@ def test_removed_models_are_no_longer_importable() -> None:
         "PipelineCompleteDetail",
         "CompiledContentBlock",
         "CompiledResult",
+        "FinalSummary",
+        "Reference",
     ):
         assert not hasattr(schemas, removed), f"{removed} should be removed"

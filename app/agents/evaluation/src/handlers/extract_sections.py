@@ -362,7 +362,7 @@ async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
 
     for agent_type in _get_pipeline_config().agent_types:
         sections: list[dict[str, Any]] = extract_sections_for_agent(tagged_chunks, agent_type)
-        policy_doc_id, policy_doc_url = await fetch_policy_doc_by_category(
+        policy_doc_id, policy_doc_url, _policy_doc_filename = await fetch_policy_doc_by_category(
             _get_db_config().dsn, agent_type
         )
         questions = await fetch_questions_by_policy_doc_id(_get_db_config().dsn, policy_doc_id)

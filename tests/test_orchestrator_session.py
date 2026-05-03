@@ -141,6 +141,20 @@ async def test_record_result_returns_false_for_unknown_doc_id():
 
 
 @pytest.mark.asyncio
+async def test_record_result_rejects_unexpected_task_id():
+    store = SessionStore()
+    await store.create(DOC_ID, TEMPLATE, S3_KEY, {TASK_ID})
+    unexpected = f"{DOC_ID}_other"
+
+    all_done = await store.record_result(DOC_ID, unexpected, {"score": 99})
+
+    assert all_done is False
+    session = store.get(DOC_ID)
+    assert session is not None
+    assert unexpected not in session.collected_results
+
+
+@pytest.mark.asyncio
 async def test_record_result_partial_results_when_both_arrive():
     store = SessionStore()
     task_a = f"{DOC_ID}_agent-a"
