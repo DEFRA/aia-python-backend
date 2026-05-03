@@ -54,13 +54,13 @@ class MarkdownReportGenerator:
             lines.append(f"### {result.policy_doc_filename}")
             lines.append(f"[View document]({result.policy_doc_url})")
             lines.append("")
-            lines.append("| Question | Reference | Rating | Comments |")
+            lines.append("| Question | Rating | Comments | Reference |")
             lines.append("|---|---|---|---|")
             for row in result.assessments:
                 emoji = self._RATING_EMOJI.get(row.Rating, "")
                 q = row.Question.replace("|", "\\|")
                 c = row.Comments.replace("|", "\\|")
-                lines.append(f"| {q} | {row.Reference} | {emoji} {row.Rating} | {c} |")
+                lines.append(f"| {q} | {emoji} {row.Rating} | {c} | {row.Reference} |")
             lines.append("")
             lines.append("**Summary**")
             lines.append(
