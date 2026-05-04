@@ -31,12 +31,16 @@ _load_dotenv(
     _EVAL_ROOT / ".env", override=False
 )  # override=False: root .env values take precedence
 
-from src.agents.schemas import AgentLLMOutput, AgentResult, AssessmentRow  # noqa: E402
+from src.agents.schemas import (  # noqa: E402
+    AgentLLMOutput,
+    AgentResult,
+    AssessmentRow,
+    PolicyDocResult,
+)
 from src.config import DatabaseConfig  # noqa: E402
 from src.utils.document_parser import _parse_bytes  # noqa: E402
 from src.db.questions_repo import (  # noqa: E402
-    fetch_policy_doc_by_category,
-    fetch_policy_doc_by_id,
+    fetch_all_policy_docs_by_category,
     fetch_questions_by_policy_doc_id,
 )
 from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
@@ -95,12 +99,13 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
 
 
 async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
-    """Run one agent task and return a StatusMessage (success or failure).
+    """Run one agent task across ALL policy docs for the agent_type and return a StatusMessage.
 
-    Agent errors are caught and surfaced as a StatusMessage with error set,
-    rather than propagating, so the caller always publishes one result per task.
-    Infrastructure errors (DB down, S3 unavailable) propagate so the caller
-    can leave the message invisible and let it retry via the DLQ path.
+    The Relay Service owns the per-policy-doc fan-out: it fetches every policy document
+    for the given agent_type, runs assessments concurrently, and aggregates results into a
+    single AgentResult.  Individual doc failures are logged and skipped rather than
+    propagated, so a partial result is still publishable.  Infrastructure errors (DB down,
+    S3 unavailable) propagate so the message stays invisible and retries via the DLQ path.
     """
     agent_type = task.agent_type
 
@@ -115,89 +120,90 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
 
     document = await _get_document(task, s3)
     dsn = _get_db_config().dsn
+    policy_docs = await fetch_all_policy_docs_by_category(dsn, agent_type)
 
-    # When the orchestrator specifies a policy_doc_id, use it directly to avoid
-    # the LIMIT 1 category lookup that would otherwise return only one of many docs.
-    if task.policy_doc_id is not None:
-        (
-            policy_doc_id,
-            policy_doc_url,
-            policy_doc_filename,
-        ) = await fetch_policy_doc_by_id(dsn, task.policy_doc_id)
-    else:
-        (
-            policy_doc_id,
-            policy_doc_url,
-            policy_doc_filename,
-        ) = await fetch_policy_doc_by_category(dsn, agent_type)
-
-    questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
+    if not policy_docs:
+        return StatusMessage(
+            task_id=task.task_id,
+            document_id=task.document_id,
+            agent_type=agent_type,
+            result={},
+            error=f"No policy documents found for agent_type={agent_type!r}",
+        )
 
     client = make_llm_client()
     agent_config = CONFIG_REGISTRY[agent_type]()
     agent = AGENT_REGISTRY[agent_type](client=client, agent_config=agent_config)
 
-    try:
-        llm_output: AgentLLMOutput = await asyncio.wait_for(
-            agent.assess(document=document, questions=questions),
-            timeout=_AGENT_TIMEOUT_SECONDS,
-        )
-
-        question_map = {q.id: q for q in questions}
-        assessments: list[AssessmentRow] = []
-        for row in llm_output.rows:
-            q_item = question_map.get(row.question_id)
-            if q_item is None:
-                raise ValueError(f"LLM returned unknown question_id: {row.question_id}")
-            assessments.append(
-                AssessmentRow(
-                    Question=q_item.question,
-                    Reference=q_item.reference,
-                    Rating=row.Rating,
-                    Comments=row.Comments,
-                )
+    async def _assess_one(
+        policy_doc_id: str, policy_doc_url: str, policy_doc_filename: str
+    ) -> PolicyDocResult | None:
+        try:
+            questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
+            llm_output: AgentLLMOutput = await asyncio.wait_for(
+                agent.assess(document=document, questions=questions),
+                timeout=_AGENT_TIMEOUT_SECONDS,
             )
+            question_map = {q.id: q for q in questions}
+            assessments: list[AssessmentRow] = []
+            for row in llm_output.rows:
+                q_item = question_map.get(row.question_id)
+                if q_item is None:
+                    raise ValueError(
+                        f"LLM returned unknown question_id: {row.question_id}"
+                    )
+                assessments.append(
+                    AssessmentRow(
+                        Question=q_item.question,
+                        Reference=q_item.reference,
+                        Rating=row.Rating,
+                        Comments=row.Comments,
+                    )
+                )
+            return PolicyDocResult(
+                policy_doc_filename=policy_doc_filename,
+                policy_doc_url=policy_doc_url,
+                assessments=assessments,
+                summary=llm_output.summary,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Agent timed out after %ds — skipping doc task_id=%s policy_doc=%s",
+                _AGENT_TIMEOUT_SECONDS,
+                task.task_id,
+                policy_doc_filename,
+            )
+            return None
+        except Exception as exc:
+            logger.error(
+                "Agent assessment failed — skipping doc task_id=%s policy_doc=%s: %s",
+                task.task_id,
+                policy_doc_filename,
+                exc,
+            )
+            return None
 
-        result = AgentResult(
-            policy_doc_filename=policy_doc_filename,
-            policy_doc_url=policy_doc_url,
-            assessments=assessments,
-            summary=llm_output.summary,
-        )
-        return StatusMessage(
-            task_id=task.task_id,
-            document_id=task.document_id,
-            agent_type=agent_type,
-            result=result.model_dump(),
-        )
-    except asyncio.TimeoutError:
-        logger.error(
-            "Agent timed out after %ds task_id=%s agent_type=%s",
-            _AGENT_TIMEOUT_SECONDS,
-            task.task_id,
-            agent_type,
-        )
+    raw_results = await asyncio.gather(
+        *[_assess_one(pid, url, fname) for pid, url, fname in policy_docs]
+    )
+    docs = [r for r in raw_results if r is not None]
+
+    if not docs:
         return StatusMessage(
             task_id=task.task_id,
             document_id=task.document_id,
             agent_type=agent_type,
             result={},
-            error=f"Agent timed out after {_AGENT_TIMEOUT_SECONDS}s",
+            error="All policy document assessments failed",
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "Agent assessment failed task_id=%s agent_type=%s: %s",
-            task.task_id,
-            agent_type,
-            exc,
-        )
-        return StatusMessage(
-            task_id=task.task_id,
-            document_id=task.document_id,
-            agent_type=agent_type,
-            result={},
-            error=str(exc),
-        )
+
+    result = AgentResult(agent_type=agent_type, docs=docs)
+    return StatusMessage(
+        task_id=task.task_id,
+        document_id=task.document_id,
+        agent_type=agent_type,
+        result=result.model_dump(),
+    )
 
 
 async def run_worker() -> None:

@@ -43,13 +43,20 @@ class AgentLLMOutput(BaseModel):
     summary: Summary
 
 
-class AgentResult(BaseModel):
-    """Complete result returned by a security or compliance agent."""
+class PolicyDocResult(BaseModel):
+    """Complete result returned by a security or compliance agent for one policy document."""
 
     policy_doc_filename: str
     policy_doc_url: str
     assessments: list[AssessmentRow]
     summary: Summary
+
+
+class AgentResult(BaseModel):
+    """Consolidated result for one agent_type across all its policy documents."""
+
+    agent_type: str
+    docs: list[PolicyDocResult]
 
 
 class TaggedChunk(BaseModel):
@@ -146,13 +153,13 @@ class AgentStatusMessage(BaseModel):
 
     Terminal output of the pipeline.  Consumed by an external front-end /
     downstream service (out of scope for this codebase).  The ``result``
-    field is a validated ``AgentResult`` on success, or ``None`` on failure.
+    field is a validated ``PolicyDocResult`` on success, or ``None`` on failure.
     """
 
     document_id: str
     agentType: str
     status: Literal["completed", "failed"]
-    result: AgentResult | None
+    result: PolicyDocResult | None
     durationMs: float
     completedAt: str
     errorMessage: str | None = None

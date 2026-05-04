@@ -55,21 +55,24 @@ class MarkdownReportGenerator:
     ) -> list[str]:
         lines: list[str] = [f"## {label}", ""]
         for result in results:
-            lines.append(f"### [{result.policy_doc_filename}]({result.policy_doc_url})")
-            lines.append("")
-            lines.append("| Question | Rating | Comments | Reference |")
-            lines.append("|---|---|---|---|")
-            for row in result.assessments:
-                emoji = self._RATING_EMOJI.get(row.Rating, "")
-                q = row.Question.replace("|", "\\|")
-                c = row.Comments.replace("|", "\\|")
-                lines.append(f"| {q} | {emoji} {row.Rating} | {c} | {row.Reference} |")
-            lines.append("")
-            lines.append("**Summary**")
-            lines.append(
-                f"{result.summary.Interpretation} — {result.summary.Overall_Comments}"
-            )
-            lines.append("")
+            for doc in result.docs:
+                lines.append(f"### [{doc.policy_doc_filename}]({doc.policy_doc_url})")
+                lines.append("")
+                lines.append("| Question | Rating | Comments | Reference |")
+                lines.append("|---|---|---|---|")
+                for row in doc.assessments:
+                    emoji = self._RATING_EMOJI.get(row.Rating, "")
+                    q = row.Question.replace("|", "\\|")
+                    c = row.Comments.replace("|", "\\|")
+                    lines.append(
+                        f"| {q} | {emoji} {row.Rating} | {c} | {row.Reference} |"
+                    )
+                lines.append("")
+                lines.append("**Summary**")
+                lines.append(
+                    f"{doc.summary.Interpretation} — {doc.summary.Overall_Comments}"
+                )
+                lines.append("")
         return lines
 
     def _render_final_summary(
@@ -96,19 +99,22 @@ class MarkdownReportGenerator:
             g = sum(
                 1
                 for result in result_list
-                for r in result.assessments
+                for doc in result.docs
+                for r in doc.assessments
                 if r.Rating == "Green"
             )
             a = sum(
                 1
                 for result in result_list
-                for r in result.assessments
+                for doc in result.docs
+                for r in doc.assessments
                 if r.Rating == "Amber"
             )
             r = sum(
                 1
                 for result in result_list
-                for r in result.assessments
+                for doc in result.docs
+                for r in doc.assessments
                 if r.Rating == "Red"
             )
             total = g + a + r
@@ -137,9 +143,10 @@ class MarkdownReportGenerator:
                 continue
             label = section_labels.get(agent_type, agent_type.title())
             for result in result_list:
-                for row in result.assessments:
-                    if row.Rating in ("Red", "Amber"):
-                        priority.append((label, row))
+                for doc in result.docs:
+                    for row in doc.assessments:
+                        if row.Rating in ("Red", "Amber"):
+                            priority.append((label, row))
 
         priority.sort(
             key=lambda x: (
@@ -205,7 +212,8 @@ class MarkdownReportGenerator:
             bad = sum(
                 1
                 for result in result_list
-                for r in result.assessments
+                for doc in result.docs
+                for r in doc.assessments
                 if r.Rating in ("Red", "Amber")
             )
             if bad > worst_score:
@@ -222,7 +230,8 @@ class MarkdownReportGenerator:
             for agent_type in agent_type_order:
                 result_list = [r for r in results.get(agent_type, []) if r is not None]
                 for result in result_list:
-                    for row in result.assessments:
-                        if row.Rating == rating:
-                            return row.Question
+                    for doc in result.docs:
+                        for row in doc.assessments:
+                            if row.Rating == rating:
+                                return row.Question
         return "No findings"

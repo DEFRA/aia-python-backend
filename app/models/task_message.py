@@ -9,7 +9,7 @@ class TaskMessage(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    task_id: str  # deterministic: "{documentId}_{agentType}_{policyDocId}"
+    task_id: str  # deterministic: "{documentId}_{agentType}"
     document_id: str
     agent_type: str
     template_type: str
