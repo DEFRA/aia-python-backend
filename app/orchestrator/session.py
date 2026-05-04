@@ -13,6 +13,7 @@ class DocumentSession:
     collected_results: dict[str, Any] = field(default_factory=dict)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completion_event: asyncio.Event = field(default_factory=asyncio.Event)
+    replaced: bool = False
 
 
 class SessionStore:
@@ -36,6 +37,10 @@ class SessionStore:
             expected_task_ids=expected_task_ids,
         )
         async with self._lock:
+            old = self._sessions.get(doc_id)
+            if old is not None:
+                old.replaced = True
+                old.completion_event.set()
             self._sessions[doc_id] = session
         return session
 
@@ -46,6 +51,8 @@ class SessionStore:
                 return False
             if task_id not in session.expected_task_ids:
                 return False
+            if task_id in session.collected_results:
+                return False  # duplicate delivery — already recorded
             session.collected_results[task_id] = result
             all_received = session.expected_task_ids.issubset(
                 session.collected_results.keys()

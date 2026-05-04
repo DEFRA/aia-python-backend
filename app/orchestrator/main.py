@@ -142,6 +142,22 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
             agent_types,
         )
 
+        if not tasks:
+            await repo.update_status(
+                doc_id,
+                DocumentStatus.ERROR.value,
+                error_message=(
+                    f"No policy documents found for template '{template_type}'. "
+                    "Check that the template type is valid and policy docs are loaded."
+                ),
+            )
+            logger.error(
+                "Document failed — 0 tasks dispatched doc_id=%s template_type=%s",
+                doc_id,
+                template_type,
+            )
+            return
+
         expected_task_ids = {t.task_id for t in tasks}
         session = await _session_store.create(
             doc_id, template_type, s3_key, expected_task_ids
@@ -160,6 +176,13 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 doc_id,
                 config.orchestrator.agent_timeout_seconds,
             )
+
+        if session.replaced:
+            logger.info(
+                "Session for doc_id=%s was superseded by a newer trigger — exiting",
+                doc_id,
+            )
+            return
 
         expected = set(session.expected_task_ids)
         collected = dict(session.collected_results)
