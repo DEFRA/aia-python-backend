@@ -42,3 +42,31 @@ async def test_send_task_failure():
 
         with pytest.raises(Exception, match="SQS Down"):
             await sqs_service.send_task(_make_task())
+
+
+@pytest.mark.asyncio
+async def test_send_task_includes_fifo_params_for_fifo_queue():
+    from unittest.mock import patch as _patch
+    sqs_service = SQSService()
+    mock_client = AsyncMock()
+    mock_client.send_message.return_value = {"MessageId": "msg-fifo"}
+    task = _make_task()
+
+    with (
+        patch.object(SQSService, "_get_client") as mock_get_client,
+        _patch("app.services.sqs_service.config") as mock_cfg,
+    ):
+        mock_cfg.aws.region = "eu-west-2"
+        mock_cfg.aws.access_key_id = "test"
+        mock_cfg.aws.secret_access_key = "test"  # pragma: allowlist secret
+        mock_cfg.aws.session_token = None
+        mock_cfg.aws.endpoint_url = None
+        mock_cfg.sqs.task_queue_url = "http://localhost:4566/000000000000/aia-tasks.fifo"
+        mock_get_client.return_value.__aenter__.return_value = mock_client
+
+        msg_id = await sqs_service.send_task(task)
+
+    assert msg_id == "msg-fifo"
+    call_kwargs = mock_client.send_message.call_args[1]
+    assert call_kwargs["MessageGroupId"] == task.document_id
+    assert call_kwargs["MessageDeduplicationId"] == task.task_id

@@ -322,3 +322,34 @@ async def test_process_message_does_not_delete_on_exception() -> None:
         )
 
     mock_sqs.delete_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_message_retries_delete_on_transient_failure() -> None:
+    """delete_message is retried up to 3 times; success on second attempt deletes the message."""
+    from app.relay_service.worker import _process_message
+
+    task = _make_task()
+    raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-retry"}
+    mock_sqs = AsyncMock()
+    mock_s3 = AsyncMock()
+    semaphore = asyncio.Semaphore(10)
+
+    mock_status = StatusMessage(
+        task_id=task.task_id,
+        document_id=task.document_id,
+        agent_type="security",
+        result={"assessments": []},
+    )
+
+    # First delete call raises; second succeeds
+    mock_sqs.delete_message = AsyncMock(side_effect=[Exception("transient"), None])
+
+    with (
+        patch("app.relay_service.worker.dispatch", new=AsyncMock(return_value=mock_status)),
+        patch("app.relay_service.worker.asyncio.sleep", new=AsyncMock()),
+    ):
+        await _process_message(raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore)
+
+    assert mock_sqs.delete_message.call_count == 2
+    mock_sqs.publish.assert_called_once()

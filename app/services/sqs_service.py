@@ -30,17 +30,22 @@ class SQSService:
     async def send_task(self, task: TaskMessage) -> str:
         """Publishes a TaskMessage to the aia-tasks queue. Returns the SQS MessageId."""
         body = task.model_dump_json(by_alias=True)
+        queue_url = config.sqs.task_queue_url
         logger.info(
             "Publishing task task_id=%s agent_type=%s to %s",
             task.task_id,
             task.agent_type,
-            config.sqs.task_queue_url,
+            queue_url,
         )
+        send_kwargs: dict[str, Any] = {
+            "QueueUrl": queue_url,
+            "MessageBody": body,
+        }
+        if queue_url.endswith(".fifo"):
+            send_kwargs["MessageGroupId"] = task.document_id
+            send_kwargs["MessageDeduplicationId"] = task.task_id
         async with self._get_client() as client:
-            response = await client.send_message(
-                QueueUrl=config.sqs.task_queue_url,
-                MessageBody=body,
-            )
+            response = await client.send_message(**send_kwargs)
         message_id: str = response["MessageId"]
         logger.info("Task published message_id=%s", message_id)
         return message_id

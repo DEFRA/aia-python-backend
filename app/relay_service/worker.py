@@ -55,6 +55,32 @@ from app.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger("app.relay_service")
 
+
+def _on_task_done(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        logger.error("Unhandled exception in message processor", exc_info=exc)
+
+
+async def _delete_with_retry(
+    sqs: SQSService, queue_url: str, receipt: str, task_id: str
+) -> None:
+    for attempt in range(1, 4):
+        try:
+            await sqs.delete_message(queue_url, receipt)
+            return
+        except Exception as exc:
+            if attempt == 3:
+                raise
+            logger.warning(
+                "delete_message attempt %d/3 failed task_id=%s: %s — retrying in %ds",
+                attempt,
+                task_id,
+                exc,
+                attempt,
+            )
+            await asyncio.sleep(attempt)
+
+
 # SQS visibility window — message stays invisible while the agent runs.
 # Must be strictly greater than _AGENT_TIMEOUT_SECONDS so there is always
 # time to publish an error StatusMessage before the message reappears.
@@ -224,9 +250,10 @@ async def run_worker() -> None:
                 visibility_timeout=_AGENT_VISIBILITY_TIMEOUT,
             )
             for msg in messages:
-                asyncio.create_task(
+                t = asyncio.create_task(
                     _process_message(msg, sqs, s3, task_url, status_url, semaphore)
                 )
+                t.add_done_callback(_on_task_done)
         except asyncio.CancelledError:
             logger.info("Relay service stopped")
             return
@@ -256,7 +283,7 @@ async def _process_message(
             )
             status = await dispatch(task, s3)
             await sqs.publish(status_url, status.model_dump_json(by_alias=True))
-            await sqs.delete_message(task_url, receipt)
+            await _delete_with_retry(sqs, task_url, receipt, task.task_id)
             logger.info(
                 "Task complete task_id=%s error=%s",
                 task.task_id,
