@@ -35,7 +35,7 @@ Run `pytest tests/ app/agents/evaluation/tests/` after each deletion.
 | 12 | Archive completed plans | `app/agents/evaluation/plans/` | Create `plans/archive/`. Move plans `01` through `11`, `aia-architecture-brainstorm.md`, `code_review_plan.md`, and `plans/README.md` into it. The handlers they describe (`parse.py`, `tag.py`, `extract_sections.py`) no longer exist. |
 | 13 | Delete EventBridge + payload offload utilities | `src/utils/eventbridge.py`, `src/utils/payload_offload.py` | Lambda/EventBridge deployment path permanently retired. Delete both files and their tests. |
 | 14 | Delete multi-page PDF builder + drop dependency | `app/agents/evaluation/src/utils/pdf_creator_multipage.py`, `requirements.txt` | PDF output is not a future requirement. `git rm` the file, then remove `reportlab` from `requirements.txt`. |
-| 16 | Update stale SQS schema doc | `app/agents/evaluation/files/system_input_output_SQS.md` | Rewrite to reflect current schemas: `TaskMessage` (orchestrator → relay), `StatusMessage` (relay → orchestrator), and `AgentResult` / `PolicyDocResult` (relay internal). Remove old field names `docId` and `Final_Summary`. |
+| 16 | Update stale SQS schema doc | `app/agents/evaluation/files/system_input_output_SQS.md` | Rewrite to reflect current schemas: `TaskMessage` (orchestrator → agent service), `StatusMessage` (agent service → orchestrator), and `AgentResult` / `PolicyDocResult` (agent service internal). Remove old field names `docId` and `Final_Summary`. |
 | 17 | Delete stale local test SDDs | `docs/SDD_100pct_compliant_ECDP.md` | Delete the `.md` file locally (`rm docs/SDD_100pct_compliant_ECDP.md`). Leave `SDD_*.docx` files as-is (not tracked). Add `docs/SDD_*.md` to `.gitignore` to prevent future accidental commits. |
 
 ---
@@ -52,9 +52,9 @@ Run `pytest tests/ app/agents/evaluation/tests/` after each deletion.
 
 | Path | Reason |
 |------|--------|
-| `app/agents/evaluation/src/agents/security_agent.py` | Active Lambda/Relay agent |
-| `app/agents/evaluation/src/agents/technical_agent.py` | Active Lambda/Relay agent |
-| `app/agents/evaluation/src/agents/tagging_agent.py` | Active Lambda/Relay agent |
+| `app/agents/evaluation/src/agents/security_agent.py` | Active Lambda/Agent Service agent |
+| `app/agents/evaluation/src/agents/technical_agent.py` | Active Lambda/Agent Service agent |
+| `app/agents/evaluation/src/agents/tagging_agent.py` | Active Lambda/Agent Service agent |
 | `app/agents/evaluation/src/agents/schemas.py` | Pydantic contracts used by all agents + orchestrator |
 | `app/agents/evaluation/src/config.py` | All config classes for agents, DB, and handlers |
 | `app/agents/evaluation/src/db/questions_repo.py` | All four functions are live (`worker.py` + `main.py`) |
