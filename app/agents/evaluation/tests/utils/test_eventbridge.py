@@ -15,8 +15,8 @@ from src.utils.eventbridge import EventBridgePublisher
 def config() -> EventBridgeConfig:
     """Return a test EventBridgeConfig."""
     return EventBridgeConfig(
-        EVENTBRIDGE_BUS_NAME="test-bus",
-        AWS_REGION="eu-west-2",
+        bus_name="test-bus",
+        region="eu-west-2",
     )
 
 
