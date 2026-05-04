@@ -68,7 +68,7 @@ if [[ "$MODE" == "--logs" ]]; then
     exec tail -f \
         "$LOG_DIR/core-backend.log" \
         "$LOG_DIR/orchestrator.log" \
-        "$LOG_DIR/relay-service.log"
+        "$LOG_DIR/agent-service.log"
 fi
 
 # ── --stop mode ───────────────────────────────────────────────────────────────
@@ -305,7 +305,7 @@ banner "Starting AIA backend services"
 mkdir -p "$LOG_DIR"
 
 # Kill any stale processes from a previous run
-for pattern in "app.api.main:app" "app.orchestrator.main:app" "app.relay_service.main:app"; do
+for pattern in "app.api.main:app" "app.orchestrator.main:app" "app.agent_service.main:app"; do
     pkill -f "$pattern" 2>/dev/null || true
 done
 sleep 1
@@ -328,7 +328,7 @@ start_service() {
 
 start_service "core-backend"  "app.api.main:app"            8086 "$LOG_DIR/core-backend.log"
 start_service "orchestrator"  "app.orchestrator.main:app"   8001 "$LOG_DIR/orchestrator.log"
-start_service "relay-service" "app.relay_service.main:app"  8002 "$LOG_DIR/relay-service.log"
+start_service "agent-service" "app.agent_service.main:app"  8002 "$LOG_DIR/agent-service.log"
 
 # ── Wait then verify all three survived startup ───────────────────────────────
 sleep 2
@@ -351,7 +351,7 @@ if [[ "$ALL_UP" == true ]]; then
     echo ""
     echo "  Core Backend   →  http://127.0.0.1:8086/health"
     echo "  Orchestrator   →  http://127.0.0.1:8001"
-    echo "  Relay Service  →  http://127.0.0.1:8002/health"
+    echo "  Agent Service  →  http://127.0.0.1:8002/health"
     echo ""
     echo "  Follow logs:   ./scripts/start-aia.sh --logs"
     echo "  Stop all:      ./scripts/start-aia.sh --stop"

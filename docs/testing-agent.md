@@ -2,7 +2,7 @@
 
 ---
 name: testing-agent
-description: Establishes a comprehensive test strategy and automated tests for the AIA Backend — covering CoreBackend, Orchestrator, Relay Service, and DataPipeline modules.
+description: Establishes a comprehensive test strategy and automated tests for the AIA Backend — covering CoreBackend, Orchestrator, Agent Service, and DataPipeline modules.
 version: 0.1
 workspace: aia-backend
 last-updated: 2026-05-01
@@ -20,7 +20,7 @@ Provide a safety net that enables confident, incremental development across all 
 |--------|-------------|------|-------------|
 | CoreBackend | `app.api.main:app` | 8086 | REST API, auth, DB writes |
 | Orchestrator | `app.orchestrator.main:app` | 8001 | Fan-out, session, summary, DB |
-| Relay Service | `app.relay_service.main:app` | 8002 | SQS polling, LLM dispatch, status publish |
+| Agent Service | `app.agent_service.main:app` | 8002 | SQS polling, LLM dispatch, status publish |
 | DataPipeline | `app.datapipeline.src.main` | Lambda / CLI | SharePoint fetch, LLM question extraction, DB sync |
 
 ---
@@ -188,7 +188,7 @@ async def test_process_document_writes_error_on_timeout():
 
 ---
 
-## Module 3 — Relay Service (`app/relay_service/`)
+## Module 3 — Agent Service (`app/agent_service/`)
 
 ### Critical Flows
 
@@ -204,20 +204,20 @@ async def test_process_document_writes_error_on_timeout():
 
 ### Existing Tests
 
-- `tests/test_relay_service.py` — dispatch success, unknown agent, S3 fetch path ✅
+- `tests/test_agent_service.py` — dispatch success, unknown agent, S3 fetch path ✅
 
 ### Gap: Tests to Add
 
 ```
-tests/test_relay_service_polling.py    ← run_worker loop: message processed + deleted
-tests/test_relay_service_infra.py      ← DB/S3 error does not delete message
+tests/test_agent_service_polling.py    ← run_worker loop: message processed + deleted
+tests/test_agent_service_infra.py      ← DB/S3 error does not delete message
 ```
 
 ### Sample — dispatch with Unknown Agent Type
 
 ```python
 import pytest
-from app.relay_service.worker import dispatch
+from app.agent_service.worker import dispatch
 from app.models.task_message import TaskMessage
 
 @pytest.mark.asyncio
@@ -245,7 +245,7 @@ async def test_dispatch_unknown_agent_returns_error_status_message():
 @pytest.mark.asyncio
 async def test_dispatch_fetches_from_s3_when_content_is_none():
     from unittest.mock import AsyncMock, patch
-    from app.relay_service.worker import dispatch
+    from app.agent_service.worker import dispatch
     from app.models.task_message import TaskMessage
 
     task = TaskMessage(
@@ -260,7 +260,7 @@ async def test_dispatch_fetches_from_s3_when_content_is_none():
     s3_mock = AsyncMock()
     s3_mock.download_file.return_value = b"Policy content from S3"
 
-    with patch("app.relay_service.worker.AGENT_REGISTRY", {"security": AsyncMock(return_value=AsyncMock(model_dump=lambda: {}))}):
+    with patch("app.agent_service.worker.AGENT_REGISTRY", {"security": AsyncMock(return_value=AsyncMock(model_dump=lambda: {}))}):
         await dispatch(task, s3=s3_mock)
 
     s3_mock.download_file.assert_awaited_once_with(task.s3_key, bucket=task.s3_bucket)
@@ -363,8 +363,8 @@ pytest tests/test_upload_router.py tests/test_document_repository.py tests/test_
 # Orchestrator only
 pytest tests/test_orchestrator_session.py tests/test_orchestrator_summary.py tests/test_orchestrator_processing.py
 
-# Relay Service only
-pytest tests/test_relay_service.py
+# Agent Service only
+pytest tests/test_agent_service.py
 
 # DataPipeline only
 pytest app/datapipeline/src/tests/
@@ -387,7 +387,7 @@ pytest -v --tb=short tests/
 | CoreBackend | No auth unit tests (`verify_auth` scenarios: missing header, sub mismatch) | High |
 | Orchestrator | No timeout → ERROR status test | High |
 | Orchestrator | No PARTIAL_COMPLETE threshold test | Medium |
-| Relay Service | No `run_worker` polling loop test | Medium |
+| Agent Service | No `run_worker` polling loop test | Medium |
 | DataPipeline | No `QuestionExtractor` unit tests | High |
 | DataPipeline | No `lambda_function.handler` smoke test | Medium |
 
