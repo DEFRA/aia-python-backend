@@ -41,3 +41,4 @@ app/agents/evaluation/src/tests/
 
 # MacOS
 .DS_Store
+logs/
