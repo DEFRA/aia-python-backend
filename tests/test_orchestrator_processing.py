@@ -1,18 +1,50 @@
 import asyncio
+import sys
+from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.enums import DocumentStatus
-from app.orchestrator.main import _process_document, app
-from app.orchestrator.session import DocumentSession, SessionStore
+_EVAL_ROOT = Path(__file__).resolve().parent.parent / "app" / "agents" / "evaluation"
+if str(_EVAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVAL_ROOT))
+
+from src.agents.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary  # noqa: E402
+
+from app.core.enums import DocumentStatus  # noqa: E402
+from app.orchestrator.main import _process_document, app  # noqa: E402
+from app.orchestrator.session import DocumentSession  # noqa: E402
 
 DOC_ID = "aaaaaaaa-0000-0000-0000-000000000001"
 S3_KEY = f"{DOC_ID}_test.docx"
 TEMPLATE = "SDA"
 AGENT_TYPE = "general"
 TASK_ID = f"{DOC_ID}_{AGENT_TYPE}"
+
+
+def _make_agent_result() -> AgentResult:
+    return AgentResult(
+        agent_type=AGENT_TYPE,
+        docs=[
+            PolicyDocResult(
+                policy_doc_filename="policy.pdf",
+                policy_doc_url="https://example.com/policy.pdf",
+                assessments=[
+                    AssessmentRow(
+                        Question="Is MFA enabled?",
+                        Rating="Green",
+                        Comments="MFA is enabled.",
+                        Reference="C1.a",
+                    )
+                ],
+                summary=Summary(
+                    Interpretation="Satisfactory",
+                    Overall_Comments="No issues found.",
+                ),
+            )
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +143,7 @@ async def test_process_document_complete_writes_complete_status():
     """All expected results arrive before timeout → COMPLETE with result_md."""
     session = _make_session(
         expected_task_ids={TASK_ID},
-        collected_results={TASK_ID: {"score": 90}},
+        collected_results={TASK_ID: _make_agent_result()},
         event_set=True,
     )
     mock_repo = _make_mock_repo()
@@ -122,14 +154,17 @@ async def test_process_document_complete_writes_complete_status():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="content"),
         patch("app.orchestrator.main._session_store") as mock_store,
+        patch("app.orchestrator.main.PipelineConfig") as mock_pipeline_cfg,
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="content")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
+        mock_pipeline_cfg.return_value.section_labels = {}
+        mock_pipeline_cfg.return_value.agent_types = [AGENT_TYPE]
+        mock_pipeline_cfg.return_value.max_priority_actions = 10
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -139,10 +174,10 @@ async def test_process_document_complete_writes_complete_status():
 
 
 @pytest.mark.asyncio
-async def test_process_document_complete_result_md_contains_assessment_heading():
+async def test_process_document_complete_result_md_contains_document_title():
     session = _make_session(
         expected_task_ids={TASK_ID},
-        collected_results={TASK_ID: {"score": 90}},
+        collected_results={TASK_ID: _make_agent_result()},
         event_set=True,
     )
     mock_repo = _make_mock_repo()
@@ -153,21 +188,26 @@ async def test_process_document_complete_result_md_contains_assessment_heading()
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
+        patch("app.orchestrator.main.PipelineConfig") as mock_pipeline_cfg,
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
+        mock_pipeline_cfg.return_value.section_labels = {}
+        mock_pipeline_cfg.return_value.agent_types = [AGENT_TYPE]
+        mock_pipeline_cfg.return_value.max_priority_actions = 10
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
     _args, _kwargs = mock_repo.update_status.call_args
     result_md = _kwargs.get("result_md") or (_args[2] if len(_args) > 2 else None)
     assert result_md is not None
-    assert "# AI Assessment Report" in result_md
+    # document_title strips the doc_id prefix from the s3_key filename
+    expected_title = Path(S3_KEY).name.removeprefix(f"{DOC_ID}_")
+    assert expected_title in result_md
 
 
 # ---------------------------------------------------------------------------
@@ -187,12 +227,11 @@ async def test_process_document_timeout_zero_results_writes_error():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
@@ -217,12 +256,11 @@ async def test_process_document_timeout_zero_results_does_not_produce_result_md(
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
@@ -244,7 +282,7 @@ async def test_process_document_timeout_partial_results_writes_partial_complete(
     task_b = f"{DOC_ID}_risk"
     session = _make_session(
         expected_task_ids={TASK_ID, task_b},
-        collected_results={TASK_ID: {"score": 80}},
+        collected_results={TASK_ID: _make_agent_result()},
         event_set=False,
     )
     mock_repo = _make_mock_repo()
@@ -255,15 +293,18 @@ async def test_process_document_timeout_partial_results_writes_partial_complete(
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
+        patch("app.orchestrator.main.PipelineConfig") as mock_pipeline_cfg,
         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
+        mock_pipeline_cfg.return_value.section_labels = {}
+        mock_pipeline_cfg.return_value.agent_types = [AGENT_TYPE]
+        mock_pipeline_cfg.return_value.max_priority_actions = 10
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -276,7 +317,7 @@ async def test_process_document_partial_complete_includes_missing_agents_in_erro
     task_b = f"{DOC_ID}_risk"
     session = _make_session(
         expected_task_ids={TASK_ID, task_b},
-        collected_results={TASK_ID: {"score": 80}},
+        collected_results={TASK_ID: _make_agent_result()},
         event_set=False,
     )
     mock_repo = _make_mock_repo()
@@ -287,15 +328,18 @@ async def test_process_document_partial_complete_includes_missing_agents_in_erro
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
+        patch("app.orchestrator.main.PipelineConfig") as mock_pipeline_cfg,
         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
+        mock_pipeline_cfg.return_value.section_labels = {}
+        mock_pipeline_cfg.return_value.agent_types = [AGENT_TYPE]
+        mock_pipeline_cfg.return_value.max_priority_actions = 10
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -309,7 +353,7 @@ async def test_process_document_partial_complete_includes_result_md():
     task_b = f"{DOC_ID}_risk"
     session = _make_session(
         expected_task_ids={TASK_ID, task_b},
-        collected_results={TASK_ID: {"score": 80}},
+        collected_results={TASK_ID: _make_agent_result()},
         event_set=False,
     )
     mock_repo = _make_mock_repo()
@@ -320,15 +364,18 @@ async def test_process_document_partial_complete_includes_result_md():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
+        patch("app.orchestrator.main.PipelineConfig") as mock_pipeline_cfg,
         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
+        mock_pipeline_cfg.return_value.section_labels = {}
+        mock_pipeline_cfg.return_value.agent_types = [AGENT_TYPE]
+        mock_pipeline_cfg.return_value.max_priority_actions = 10
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -351,7 +398,6 @@ async def test_process_document_s3_failure_writes_error_status():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService"),
-        patch("app.orchestrator.main.IngestorService"),
         patch("app.orchestrator.main._session_store"),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(
@@ -374,7 +420,6 @@ async def test_process_document_s3_failure_includes_exception_in_error_message()
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService"),
-        patch("app.orchestrator.main.IngestorService"),
         patch("app.orchestrator.main._session_store"),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(
@@ -402,13 +447,13 @@ async def test_process_document_extraction_failure_writes_error_status():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService"),
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch(
+            "app.orchestrator.main._extract_text",
+            side_effect=ValueError("DOCX file contains no extractable text content."),
+        ),
         patch("app.orchestrator.main._session_store"),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"corrupt-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(
-            side_effect=ValueError("DOCX file contains no extractable text content.")
-        )
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -426,13 +471,13 @@ async def test_process_document_extraction_failure_includes_message():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService"),
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch(
+            "app.orchestrator.main._extract_text",
+            side_effect=ValueError("DOCX file contains no extractable text content."),
+        ),
         patch("app.orchestrator.main._session_store"),
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"bad")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(
-            side_effect=ValueError("DOCX file contains no extractable text content.")
-        )
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -449,7 +494,7 @@ async def test_process_document_extraction_failure_includes_message():
 async def test_process_document_removes_session_after_complete():
     session = _make_session(
         expected_task_ids={TASK_ID},
-        collected_results={TASK_ID: {"score": 90}},
+        collected_results={TASK_ID: _make_agent_result()},
         event_set=True,
     )
     mock_repo = _make_mock_repo()
@@ -460,14 +505,17 @@ async def test_process_document_removes_session_after_complete():
         patch("app.orchestrator.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.main.S3Service") as mock_s3_cls,
         patch("app.orchestrator.main.SQSService") as mock_sqs_cls,
-        patch("app.orchestrator.main.IngestorService") as mock_ingestor_cls,
+        patch("app.orchestrator.main._extract_text", return_value="text"),
         patch("app.orchestrator.main._session_store") as mock_store,
+        patch("app.orchestrator.main.PipelineConfig") as mock_pipeline_cfg,
     ):
         mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"docx-bytes")
-        mock_ingestor_cls.return_value.extract_text_from_docx = MagicMock(return_value="text")
         mock_sqs_cls.return_value.send_task = AsyncMock()
         mock_store.create = AsyncMock(return_value=session)
         mock_store.remove = AsyncMock()
+        mock_pipeline_cfg.return_value.section_labels = {}
+        mock_pipeline_cfg.return_value.agent_types = [AGENT_TYPE]
+        mock_pipeline_cfg.return_value.max_priority_actions = 10
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 

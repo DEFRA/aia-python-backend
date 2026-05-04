@@ -8,6 +8,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class S3Service:
     @asynccontextmanager
     async def _get_client(self):
@@ -18,6 +19,8 @@ class S3Service:
             "aws_access_key_id": config.aws.access_key_id,
             "aws_secret_access_key": config.aws.secret_access_key,
         }
+        if config.aws.session_token:
+            client_kwargs["aws_session_token"] = config.aws.session_token
         if config.aws.endpoint_url:
             client_kwargs["endpoint_url"] = config.aws.endpoint_url
 
@@ -31,7 +34,9 @@ class S3Service:
         bucket: Optional[str] = None,
     ) -> str:
         bucket_name = bucket or config.s3.bucket_name
-        logger.info("Uploading %d bytes to s3://%s/%s", len(file_bytes), bucket_name, s3_key)
+        logger.info(
+            "Uploading %d bytes to s3://%s/%s", len(file_bytes), bucket_name, s3_key
+        )
 
         async with self._get_client() as client:
             await client.put_object(

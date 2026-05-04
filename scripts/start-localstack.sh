@@ -9,5 +9,7 @@ aws --endpoint-url=http://localhost:4566 s3 mb s3://docsupload
 echo "Created S3 bucket: docsupload"
 
 # SQS queues
-aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name task-queue
-aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name status-queue
+aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name aia-tasks
+echo "Created SQS queue: aia-tasks"
+aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name aia-status
+echo "Created SQS queue: aia-status"

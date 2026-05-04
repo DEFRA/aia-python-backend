@@ -1,0 +1,26 @@
+# Works with both:
+#   podman compose up -d
+#   podman-compose up -d
+#   docker compose up -d  (if using Docker Desktop instead)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aia-datapipeline-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-aiadocuments}
+      POSTGRES_USER: ${DB_USER:-aiauser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-Admin123$}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - datapipeline_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-aiauser} -d ${DB_NAME:-aiadocuments}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  datapipeline_pgdata:

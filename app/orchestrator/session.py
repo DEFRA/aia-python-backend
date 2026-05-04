@@ -13,6 +13,7 @@ class DocumentSession:
     collected_results: dict[str, Any] = field(default_factory=dict)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completion_event: asyncio.Event = field(default_factory=asyncio.Event)
+    replaced: bool = False
 
 
 class SessionStore:
@@ -36,20 +37,26 @@ class SessionStore:
             expected_task_ids=expected_task_ids,
         )
         async with self._lock:
+            old = self._sessions.get(doc_id)
+            if old is not None:
+                old.replaced = True
+                old.completion_event.set()
             self._sessions[doc_id] = session
         return session
 
-    async def record_result(self, doc_id: str, task_id: str, result: dict[str, Any]) -> bool:
-        """
-        Records an agent result for the given document.
-        Returns True if all expected results have now been collected.
-        """
+    async def record_result(self, doc_id: str, task_id: str, result: Any) -> bool:
         async with self._lock:
             session = self._sessions.get(doc_id)
             if session is None:
                 return False
+            if task_id not in session.expected_task_ids:
+                return False
+            if task_id in session.collected_results:
+                return False  # duplicate delivery — already recorded
             session.collected_results[task_id] = result
-            all_received = session.expected_task_ids.issubset(session.collected_results.keys())
+            all_received = session.expected_task_ids.issubset(
+                session.collected_results.keys()
+            )
             if all_received:
                 session.completion_event.set()
             return all_received

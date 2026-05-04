@@ -5,43 +5,20 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 
-class Reference(BaseModel):
-    """Authoritative reference for a question, echoed verbatim from the input JSON.
-
-    ``text`` carries the per-question reference (e.g. ``"C1.a"``); ``url`` carries
-    the category-level reference URL. Agents must echo these values back as-is and
-    must not invent or rewrite them.
-    """
-
-    text: str
-    url: str | None = None
-
-
 class QuestionItem(BaseModel):
-    """A checklist question paired with its authoritative reference.
-
-    Sourced from the input assessment JSON (see
-    ``app/agents/evaluation/files/system_input_output.md``). Carried through
-    Stage 5 -> Stage 6 in the SQS Tasks message body so each agent can echo
-    ``reference`` back into its output ``Reference`` field.
-    """
-
+    id: str
     question: str
     reference: str
 
 
 class AssessmentRow(BaseModel):
-    """A single checklist question with its rating and supporting comments."""
-
     Question: str
     Rating: Literal["Green", "Amber", "Red"]
     Comments: str
-    Reference: Reference
+    Reference: str
 
 
-class FinalSummary(BaseModel):
-    """Overall summary produced by the LLM after assessing all questions."""
-
+class Summary(BaseModel):
     Interpretation: str
     Overall_Comments: str
 
@@ -55,16 +32,35 @@ class LLMResponseMeta(BaseModel):
     stop_reason: str | None = None
 
 
-class AgentResult(BaseModel):
-    """Complete result returned by a security or compliance agent."""
+class RawAssessmentRow(BaseModel):
+    question_id: str
+    Rating: Literal["Green", "Amber", "Red"]
+    Comments: str
 
+
+class AgentLLMOutput(BaseModel):
+    rows: list[RawAssessmentRow]
+    summary: Summary
+
+
+class PolicyDocResult(BaseModel):
+    """Complete result returned by a security or compliance agent for one policy document."""
+
+    policy_doc_filename: str
+    policy_doc_url: str
     assessments: list[AssessmentRow]
-    metadata: LLMResponseMeta
-    final_summary: FinalSummary | None = None
+    summary: Summary
+
+
+class AgentResult(BaseModel):
+    """Consolidated result for one agent_type across all its policy documents."""
+
+    agent_type: str
+    docs: list[PolicyDocResult]
 
 
 class TaggedChunk(BaseModel):
-    """A document chunk enriched with security/governance tags."""
+    """A document chunk enriched with security/technical tags."""
 
     chunk_index: int
     page: int
@@ -115,7 +111,7 @@ class DocumentParsedDetail(BaseModel):
     S3 reference (see ``src.utils.payload_offload``).
     """
 
-    docId: str
+    document_id: str
     payload: PayloadEnvelope
 
 
@@ -126,7 +122,7 @@ class DocumentTaggedDetail(BaseModel):
     S3 reference (see ``src.utils.payload_offload``).
     """
 
-    docId: str
+    document_id: str
     payload: PayloadEnvelope
 
 
@@ -136,14 +132,14 @@ class SectionsReadyDetail(BaseModel):
     Emitted once per agent type during the fan-out.
     """
 
-    docId: str
-    agentType: Literal["security", "governance"]
+    document_id: str
+    agentType: Literal["security", "technical"]
 
 
 class AgentCompleteDetail(BaseModel):
     """Detail payload for the ``AgentComplete`` event (Stage 6 terminus marker)."""
 
-    docId: str
+    document_id: str
     agentType: str
 
 
@@ -157,13 +153,13 @@ class AgentStatusMessage(BaseModel):
 
     Terminal output of the pipeline.  Consumed by an external front-end /
     downstream service (out of scope for this codebase).  The ``result``
-    field is a validated ``AgentResult`` on success, or ``None`` on failure.
+    field is a validated ``PolicyDocResult`` on success, or ``None`` on failure.
     """
 
-    docId: str
+    document_id: str
     agentType: str
     status: Literal["completed", "failed"]
-    result: AgentResult | None
+    result: PolicyDocResult | None
     durationMs: float
     completedAt: str
     errorMessage: str | None = None

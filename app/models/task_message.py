@@ -9,10 +9,13 @@ class TaskMessage(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    task_id: str            # deterministic: "{documentId}_{agentType}"
+    task_id: str  # deterministic: "{documentId}_{agentType}"
     document_id: str
     agent_type: str
     template_type: str
+    policy_doc_id: Optional[str] = (
+        None  # when set, relay skips the category LIMIT 1 lookup
+    )
     file_content: Optional[str] = None  # null when content exceeds SQS 256 KB limit
-    s3_bucket: str
-    s3_key: str
+    s3_bucket: Optional[str] = None
+    s3_key: Optional[str] = None

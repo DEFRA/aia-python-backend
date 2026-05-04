@@ -10,28 +10,28 @@ For the full architecture and design rationale, see [`files/system_overview.md`]
 
 Given a document (PDF or DOCX), the pipeline:
 
-1. **Parses** it into chunks.
+1. **Parses** the document into text chunks.
 2. **Tags** each chunk with security / governance taxonomy labels.
 3. **Extracts** the relevant sections per specialist agent.
-4. **Assesses** the sections against the agent's checklist.
-5. **Emits** one assessment result per agent.
+4. **Assesses** the sections against the agent's question set (loaded from PostgreSQL).
+5. **Emits** one `AgentResult` per agent via the SQS Status queue.
 
-Two specialist agents are wired up: **Security** and **Governance**.
+Two specialist agents are wired up: **Security** and **Technical**.
 
-In production each stage is a separate AWS Lambda joined by EventBridge + SQS, with documents in S3 and metrics in CloudWatch. Locally [`main.py`](./main.py) **bypasses all of that** and runs the same business logic in-process — no AWS services are invoked except Bedrock for the model calls. See [Local vs production](#local-vs-production) below.
+In production the Relay Service consumes `TaskMessage`s from the SQS Tasks queue, runs the full parse → tag → extract → assess pipeline in-process, and publishes `StatusMessage`s back to the SQS Status queue for the Orchestrator to pick up. Locally [`main.py`](./main.py) **bypasses all queue infrastructure** and runs the same business logic in-process — no AWS services are invoked except optionally Bedrock or the Anthropic API for model calls. See [Local vs production](#local-vs-production) below.
 
 ---
 
 ## Pipeline
 
 ```
-SQS Tasks ─▶ Parse ─▶ Tag ─▶ Extract Sections ─┬─▶ Security Agent ─┐
-                                               └─▶ Governance Agent ─┴─▶ SQS Status
+Orchestrator ──▶ SQS Tasks ──▶ Relay Service ─┬─▶ Security Agent ─┐
+                                               └─▶ Technical Agent ─┴─▶ SQS Status ──▶ Orchestrator
 ```
 
-- Entry point: SQS Tasks message body `{"docId": "...", "s3Key": "..."}`.
-- Cross-stage payloads use an inline-or-S3 envelope ([`src/utils/payload_offload.py`](./src/utils/payload_offload.py)) — small payloads inline, large ones offloaded to S3.
-- Terminal output: one `AgentStatusMessage` per `(docId, agentType)` on the SQS Status queue. There is no compile / persist / notify stage in this codebase.
+- Entry point: `TaskMessage` on the SQS Tasks queue (`docId`, `agentType`, `fileContent` or S3 reference, `questions`, `policyDocUrl`).
+- The Relay Service runs parse → tag → extract sections → specialist agent in-process for each task.
+- Terminal output: one `StatusMessage` per `(docId, agentType)` on the SQS Status queue. The Orchestrator polls this queue and writes the final `resultMd` to PostgreSQL.
 
 ---
 
@@ -39,20 +39,26 @@ SQS Tasks ─▶ Parse ─▶ Tag ─▶ Extract Sections ─┬─▶ Security 
 
 ```
 app/agents/evaluation/
-├── main.py                      # Local end-to-end runner (mocks SQS)
+├── main.py                      # Local end-to-end runner (no SQS — runs directly in-process)
 ├── config.yaml                  # Operational defaults (models, pipeline, runner)
 ├── requirements.txt
 ├── pyproject.toml               # ruff / mypy / pytest config
 ├── data/
-│   ├── fictional_product_logistics_report.pdf   # sample input doc
-│   └── sample_policy_assessment.json            # checklist questions for "Security"
+│   └── fictional_product_logistics_report.pdf   # sample input doc
 ├── files/                       # Architecture and contract docs
 ├── src/
-│   ├── agents/                  # SecurityAgent, GovernanceAgent, TaggingAgent + Pydantic schemas
-│   ├── config.py                # All BaseSettings classes
-│   ├── db/                      # Assessment loader + (future) Postgres reads
-│   ├── handlers/                # Per-stage Lambda handlers (parse / tag / extract_sections / agent)
-│   └── utils/                   # Document parser, EventBridge publisher, payload offload, helpers
+│   ├── agents/                  # SecurityAgent, TechnicalAgent, TaggingAgent + Pydantic schemas
+│   │   ├── schemas.py           # QuestionItem, RawAssessmentRow, AgentLLMOutput, AssessmentRow, AgentResult, Summary
+│   │   ├── security_agent.py    # SecurityAgent.assess() → AgentLLMOutput
+│   │   ├── technical_agent.py   # TechnicalAgent.assess() → AgentLLMOutput
+│   │   ├── tagging_agent.py     # TaggingAgent.tag() → list[TaggedChunk]
+│   │   └── prompts/             # System + user prompt markdown files per agent
+│   ├── config.py                # All BaseSettings classes (SecurityAgentConfig, TechnicalAgentConfig, PipelineConfig, …)
+│   ├── db/
+│   │   └── questions_repo.py    # fetch_policy_doc_by_category(), fetch_questions_by_policy_doc_id()
+│   ├── handlers/
+│   │   └── agent.py             # AGENT_REGISTRY, CONFIG_REGISTRY, SpecialistAgent + SpecialistAgentConfig protocols
+│   └── utils/                   # Document parser, helpers, exceptions
 └── tests/                       # Mirrors src/
 ```
 
@@ -68,12 +74,20 @@ pip install -r requirements.txt
 
 ### 2. Configure credentials
 
-The local runner authenticates via **AWS Bedrock**. Add the following to a `.env` file in this directory (`app/agents/evaluation/.env`):
+The pipeline calls the LLM via the **Anthropic API** (direct) or **AWS Bedrock** (local runner default). Add the following to a `.env` file in this directory (`app/agents/evaluation/.env`):
 
 ```
-SECURITY_MODEL=...
-GOVERNANCE_MODEL=...
-TAGGING_MODEL=...
+# Anthropic direct API (used by Relay Service and local runner)
+ANTHROPIC_API_KEY=...
+
+# Database — required for question/policy-doc lookups
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=...
+DB_USER=...
+DB_PASSWORD=...
+
+# Optional — only if routing through Bedrock
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_DEFAULT_REGION=eu-west-2
@@ -84,11 +98,8 @@ AWS_SESSION_TOKEN=...        # if using temporary creds
 
 ## Running locally
 
-> **Note — both ends of the SQS pipeline are mocked.**
-> - **SQS Tasks (input)** — the runner does **not** read from a real queue; it constructs the SQS Tasks message body in Python (`{"docId": "...", "s3Key": "..."}`, validated through `SqsRecordBody`) and feeds it straight into the parse stage.
-> - **SQS Status (output)** — the runner does **not** publish to a real queue either; the agent's terminal `AgentStatusMessage` is written as JSON to `data/pipeline_output_<docId>.json` instead. The output filename and folder are configurable via `local_runner.output_filename_template` / `local_runner.data_dir` in [`config.yaml`](./config.yaml).
->
-> This lets you exercise the pipeline end-to-end without provisioning SQS or LocalStack. See [Local vs production](#local-vs-production) for the full list of mocked / bypassed AWS services.
+> **Note — SQS is not involved in the local runner.**
+> [`main.py`](./main.py) reads a document from disk, drives parse → tag → extract sections → agent in-process, and writes the combined assessment output as JSON to `data/pipeline_output_<docId>.json`. No queues, no EventBridge, no S3 are touched.
 
 From the repo root:
 
@@ -98,27 +109,22 @@ python app/agents/evaluation/main.py
 
 This:
 
-- Builds a **mock** SQS Tasks body `{"docId": "UUID-...", "s3Key": "data/fictional_product_logistics_report.pdf"}` — no real SQS interaction.
-- Reads the document from local disk.
-- Drives parse → tag → extract sections → agent end-to-end.
+- Reads `data/fictional_product_logistics_report.pdf` (or the path you supply).
+- Looks up checklist questions from PostgreSQL for each configured agent type.
+- Drives all pipeline stages in-process.
 - Writes the combined output to `data/pipeline_output_<docId>.json`.
 
 ### Local vs production
 
-The handler code in `src/handlers/` is real Lambda code (each module exposes a `lambda_handler(event, context)` and uses boto3 + EventBridge in the live path). The local runner deliberately **does not** go through any of that — it imports the underlying functions and runs them in-process so you can iterate without an AWS account or LocalStack.
-
-| Concern                  | Production (deployed Lambdas)                                   | Local (`main.py`)                                       |
-|--------------------------|-----------------------------------------------------------------|---------------------------------------------------------|
-| Pipeline trigger         | SQS Tasks queue (real message)                                  | Mock body built as a Python `SqsRecordBody`             |
-| Document storage         | S3 bucket                                                       | Local disk (`s3Key` resolved relative to this folder)   |
-| Parse stage              | Lambda triggered by SQS                                         | `_parse_bytes()` called in-process                      |
-| Tag → Extract Sections   | Lambdas chained by EventBridge events                           | Direct function calls; no events published              |
-| Cross-stage payloads     | Inline ≤240 KB, else offloaded to S3 via `payload_offload`      | All passed in memory; offload code path not exercised   |
-| Agent → terminal output  | One `AgentStatusMessage` per `(docId, agentType)` to SQS Status | One JSON file at `data/pipeline_output_<docId>.json`    |
-| Metrics                  | CloudWatch (`Defra/Pipeline` namespace)                         | Not emitted                                             |
-| LLM calls                | AWS Bedrock                                                     | AWS Bedrock (only AWS service the local runner touches) |
-
-**The infrastructure that wires the Lambdas, EventBridge rules, and SQS queues together is provisioned separately by ops — it does not live in this repo.** Use the local runner for application-logic iteration; use a deployed environment for any infrastructure-level testing.
+| Concern | Production (Relay Service) | Local (`main.py`) |
+|---------|---------------------------|-------------------|
+| Pipeline trigger | `TaskMessage` on SQS Tasks queue | Document path + doc ID via CLI args |
+| Document source | Inline content in `TaskMessage` or S3 download | Local disk |
+| Questions source | PostgreSQL (same) | PostgreSQL (same) |
+| Parse → Tag → Extract | In-process inside Relay Service worker | In-process inside `main.py` |
+| LLM calls | Anthropic API (via `make_llm_client()`) | Anthropic API or Bedrock |
+| Result output | `StatusMessage` published to SQS Status queue | JSON file at `data/pipeline_output_<docId>.json` |
+| Metrics | CloudWatch (Orchestrator side) | Not emitted |
 
 ### CLI args
 
@@ -126,40 +132,37 @@ The handler code in `src/handlers/` is real Lambda code (each module exposes a `
 python app/agents/evaluation/main.py [<s3Key>] [<docId>] [<output_path>]
 ```
 
-| Arg          | Default                                       | Description                                                  |
-|--------------|-----------------------------------------------|--------------------------------------------------------------|
-| `s3Key`      | `data/fictional_product_logistics_report.pdf` | Path-like key (resolved locally relative to this dir).       |
-| `docId`      | `UUID-<random>`                               | Document identifier echoed into the output.                  |
-| `output_path`| `data/pipeline_output_<docId>.json`           | Where to write the result JSON.                              |
-
-Examples:
-
-```bash
-# Defaults
-python app/agents/evaluation/main.py
-
-# Custom doc and id, output at a custom path
-python app/agents/evaluation/main.py data/my_doc.pdf UUID-1234 data/result.json
-```
+| Arg | Default | Description |
+|-----|---------|-------------|
+| `s3Key` | `data/fictional_product_logistics_report.pdf` | Path-like key (resolved locally relative to this dir). |
+| `docId` | `UUID-<random>` | Document identifier echoed into the output. |
+| `output_path` | `data/pipeline_output_<docId>.json` | Where to write the result JSON. |
 
 ### Output shape
 
-Matches [`files/system_input_output_SQS.md`](./files/system_input_output_SQS.md):
-
 ```json
 {
-  "docId": "UUID-...",
+  "document_id": "UUID-...",
   "Security": {
     "Assessments": [
-      { "Question": "...", "Rating": "Green|Amber|Red", "Comments": "...", "Reference": { "text": "...", "url": "..." } }
+      {
+        "question_id": "3fa85f64-...",
+        "Question": "Is a data protection policy in place?",
+        "Rating": "Green",
+        "Comments": "The document clearly defines ...",
+        "Reference": "Section 3.2 — Data Protection Policy"
+      }
     ],
-    "Final_Summary": { "Interpretation": "...", "Overall_Comments": "..." }
+    "Summary": {
+      "Interpretation": "Strong alignment with security requirements.",
+      "Overall_Comments": "The document covers all key areas ..."
+    }
   },
-  "Governance": { "Assessments": [...], "Final_Summary": {...} }
+  "Technical": { "Assessments": [...], "Summary": {...} }
 }
 ```
 
-A `Governance` section appears only if a matching assessment file is present in `data/` (see Configuration below).
+`question_id` is the UUID from the `policy_questions` table. `Reference` is a plain string (section / clause from the policy document). `Summary` replaces the old `Final_Summary` key.
 
 ---
 
@@ -169,23 +172,26 @@ A `Governance` section appears only if a matching assessment file is present in 
 
 Operational defaults — committed to git.
 
-| Section        | Purpose                                                                              |
-|----------------|--------------------------------------------------------------------------------------|
-| `agents.*`     | Per-agent model, max_tokens, temperature, batch size.                                |
-| `eventbridge`  | EventBridge bus / source (Lambda only — unused locally).                             |
-| `cloudwatch`   | Metrics namespace (Lambda only — unused locally).                                    |
-| `pipeline`     | Configured `agent_types`, SQS inline-payload limit, agent → tag routing map.         |
-| `parser`       | PDF text-layer threshold and chunk size.                                             |
-| `database`     | Non-secret Postgres defaults (port).                                                 |
-| `local_runner` | Defaults driving `main.py` — data dir, assessment filename, output template, display keys. |
+| Section | Purpose |
+|---------|---------|
+| `agents.*` | Per-agent model, max_tokens, temperature. |
+| `eventbridge` | EventBridge bus / source (Lambda-mode only — unused locally). |
+| `cloudwatch` | Metrics namespace (Lambda-mode only — unused locally). |
+| `pipeline` | Configured `agent_types`, agent → tag routing map, `section_labels` (display headings in report). |
+| `parser` | PDF text-layer threshold and chunk size. |
+| `database` | Non-secret Postgres defaults (port). |
+| `local_runner` | Defaults driving `main.py` — data dir, output template, display keys. |
 
 Every field has a corresponding env-var alias (e.g. `SECURITY_MODEL`, `LOCAL_RUNNER_DATA_DIR`). **Precedence: env > .env > yaml > code defaults.**
 
-### Adding another assessment category
+`pipeline.section_labels` maps agent type → display heading used in the Markdown report:
 
-1. Drop a JSON file into `data/` matching the shape of [`data/sample_policy_assessment.json`](./data/sample_policy_assessment.json) (`uuid`, `url`, `category`, `details: [{question, reference, ...}]`).
-2. Set `local_runner.assessment_filename` to that file (only one assessment file is read per run).
-3. Make sure the agent type is listed in `pipeline.agent_types` and has a `display_keys` entry mapping the lowercase agent type to the `category` value used in the file.
+```yaml
+pipeline:
+  section_labels:
+    security: "Security Policy"
+    technical: "Technology Policy"
+```
 
 ---
 
@@ -208,9 +214,11 @@ All four must pass before committing.
 
 ```bash
 python -c "from app.agents.evaluation.src.agents.security_agent import SecurityAgent"
-python -c "from app.agents.evaluation.src.agents.schemas import AgentResult"
-python -c "from app.agents.evaluation.src.config import SecurityAgentConfig, LocalRunnerConfig"
-python -c "from app.agents.evaluation.src.db.assessment_loader import load_assessment_from_file"
+python -c "from app.agents.evaluation.src.agents.technical_agent import TechnicalAgent"
+python -c "from app.agents.evaluation.src.agents.schemas import AgentResult, AgentLLMOutput, RawAssessmentRow"
+python -c "from app.agents.evaluation.src.config import SecurityAgentConfig, TechnicalAgentConfig, LocalRunnerConfig"
+python -c "from app.agents.evaluation.src.db.questions_repo import fetch_policy_doc_by_category, fetch_questions_by_policy_doc_id"
+python -c "from app.agents.evaluation.src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY"
 ```
 
 ---

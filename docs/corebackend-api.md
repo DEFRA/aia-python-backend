@@ -66,10 +66,11 @@ All error responses follow FastAPI's standard format:
 | Value | Terminal | What to show |
 |-------|----------|--------------|
 | `PROCESSING` | No | "Processing..." spinner |
-| `COMPLETE` | **Yes** | "View Result" button — assessment is ready |
-| `ERROR` | **Yes** | Error message from `errorMessage` field |
+| `COMPLETE` | **Yes** | "View Result" button — full assessment ready in `resultMd` |
+| `PARTIAL_COMPLETE` | **Yes** | "View Partial Result" — assessment ready in `resultMd`; `errorMessage` lists agents that did not respond in time |
+| `ERROR` | **Yes** | Error message from `errorMessage` field; `resultMd` is `null` |
 
-**Rule:** Keep showing "Processing..." for any non-terminal status. Only update the UI when `COMPLETE` or `ERROR` arrives.
+**Rule:** Keep showing "Processing..." for any non-terminal status. Update the UI when `COMPLETE`, `PARTIAL_COMPLETE`, or `ERROR` arrives.
 
 ---
 
@@ -105,9 +106,9 @@ Saves document metadata to the database, uploads the binary file to S3 in the ba
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `file` | File (binary) | Yes | PDF or DOCX file |
+| `file` | File (binary) | Yes | DOCX file |
 | `templateType` | string | Yes | Assessment template identifier — e.g. `SDA` |
-| `fileName` | string | Yes | Original filename including extension — e.g. `architecture-v2.pdf` |
+| `fileName` | string | Yes | Original filename including extension — e.g. `architecture-v2.docx` |
 
 **Response `202`:**
 ```json
@@ -117,7 +118,9 @@ Saves document metadata to the database, uploads the binary file to S3 in the ba
 }
 ```
 
-Capture `documentId` — it is the key used by all subsequent calls.
+**`status` field:** String value (`"PROCESSING"` | `"COMPLETE"` | `"PARTIAL_COMPLETE"` | `"ERROR"`). Capture `documentId` — it is the key used by all subsequent calls.
+
+**Timestamps:** All `createdAt` and `completedAt` fields in responses are serialized as ISO 8601 UTC strings (e.g. `"2026-04-27T10:00:00Z"`).
 
 **Error responses:**
 
@@ -163,14 +166,14 @@ Authorization: Bearer <jwt>
 x-user-id: <userId>
 ```
 
-Returns a paginated list of all documents uploaded by the authenticated user, ordered by upload time descending.
+Returns a paginated list of **all** documents uploaded by the authenticated user, ordered by upload time descending. No status filter is applied — records in every status (`PROCESSING`, `COMPLETE`, `PARTIAL_COMPLETE`, `ERROR`) are included.
 
 **Query parameters:**
 
 | Param | Type | Default | Maximum | Description |
 |-------|------|---------|---------|-------------|
 | `page` | integer | `1` | — | Page number (1-based) |
-| `limit` | integer | `20` | `100` | Records per page |
+| `limit` | integer | `20` | `100` | Records per page. If exceeded, silently capped at 100. |
 
 **Response `200`:**
 ```json
@@ -183,6 +186,22 @@ Returns a paginated list of all documents uploaded by the authenticated user, or
       "status": "COMPLETE",
       "createdAt": "2026-04-27T10:00:00Z",
       "completedAt": "2026-04-27T10:01:45Z"
+    },
+    {
+      "documentId": "9b1e2c3d-4a5f-6789-bcde-0f1a2b3c4d5e",
+      "originalFilename": "risk-review.docx",
+      "templateType": "SDA",
+      "status": "PARTIAL_COMPLETE",
+      "createdAt": "2026-04-27T11:00:00Z",
+      "completedAt": "2026-04-27T11:08:12Z"
+    },
+    {
+      "documentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "originalFilename": "draft.docx",
+      "templateType": "SDA",
+      "status": "PROCESSING",
+      "createdAt": "2026-04-27T11:30:00Z",
+      "completedAt": null
     }
   ],
   "total": 42,
@@ -191,7 +210,7 @@ Returns a paginated list of all documents uploaded by the authenticated user, or
 }
 ```
 
-`completedAt` is `null` for documents still in `PROCESSING`.
+`completedAt` is `null` only before the orchestrator begins processing the document (a brief window after upload). It is set for all terminal statuses (`COMPLETE`, `PARTIAL_COMPLETE`, `ERROR`) and is also set once the orchestrator starts, so it may be non-null even for documents still in `PROCESSING`.
 
 ---
 
@@ -203,7 +222,7 @@ Authorization: Bearer <jwt>
 x-user-id: <userId>
 ```
 
-Returns the full document record including the AI assessment result. Call this after the status endpoint returns `COMPLETE`.
+Returns the full document record including the AI assessment result. Call this after the document disappears from `processingDocumentIds` (i.e., status has reached a terminal state: `COMPLETE`, `PARTIAL_COMPLETE`, or `ERROR`).
 
 **Path parameter:**
 
@@ -227,7 +246,12 @@ Returns the full document record including the AI assessment result. Call this a
 
 **`resultMd` notes:**
 - Value is a **markdown string**. Render with any standard markdown library (e.g. `react-markdown`, `marked`).
+- Non-null when `status` is `COMPLETE` or `PARTIAL_COMPLETE` — render the assessment in both cases.
 - `null` when `status` is `PROCESSING` or `ERROR`.
+
+**`errorMessage` notes:**
+- Non-null when `status` is `ERROR` (unrecoverable failure) or `PARTIAL_COMPLETE` (lists the agent types that did not respond within the timeout).
+- `null` when `status` is `PROCESSING` or `COMPLETE`.
 
 **Error responses:**
 
@@ -278,7 +302,7 @@ Returns the authenticated user's profile.
 Copy these into your frontend project to get full type coverage.
 
 ```typescript
-export type DocumentStatus = 'PROCESSING' | 'COMPLETE' | 'ERROR'
+export type DocumentStatus = 'PROCESSING' | 'COMPLETE' | 'PARTIAL_COMPLETE' | 'ERROR'
 
 export interface UploadResponse {
   documentId: string
@@ -294,8 +318,8 @@ export interface HistoryRecord {
   originalFilename: string
   templateType: string
   status: DocumentStatus
-  createdAt: string       // ISO 8601 UTC
-  completedAt: string | null
+  createdAt: string       // ISO 8601 UTC, e.g. "2026-04-27T10:00:00Z"
+  completedAt: string | null  // null only before orchestrator starts; ISO 8601 for all terminal statuses; do not use as a completion indicator — use `status` instead
 }
 
 export interface HistoryResponse {
@@ -310,10 +334,10 @@ export interface ResultRecord {
   originalFilename: string
   templateType: string
   status: DocumentStatus
-  resultMd: string | null   // markdown string — render with react-markdown or similar
-  errorMessage: string | null
-  createdAt: string
-  completedAt: string | null
+  resultMd: string | null   // non-null for COMPLETE and PARTIAL_COMPLETE; null for PROCESSING and ERROR
+  errorMessage: string | null  // non-null for ERROR and PARTIAL_COMPLETE; null for PROCESSING and COMPLETE
+  createdAt: string  // ISO 8601 UTC
+  completedAt: string | null  // null only before orchestrator starts; ISO 8601 for all terminal statuses; do not use as a completion indicator — use `status` instead
 }
 
 export interface UserRecord {
@@ -358,7 +382,7 @@ async function waitForCompletion(documentId: string): Promise<void> {
       headers: { Authorization: `Bearer ${jwt}`, 'x-user-id': userId },
     })
     const { processingDocumentIds } = await res.json() as ProcessingStatusResponse
-    if (!processingDocumentIds.includes(documentId)) return   // done (COMPLETE or ERROR)
+    if (!processingDocumentIds.includes(documentId)) return   // done (COMPLETE, PARTIAL_COMPLETE, or ERROR)
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
   }
   throw new Error('Assessment timed out — the user can check history later.')
@@ -371,8 +395,9 @@ const detailRes = await fetch(`${BASE_URL}/api/v1/documents/${documentId}`, {
   headers: { Authorization: `Bearer ${jwt}`, 'x-user-id': userId },
 })
 const record = await detailRes.json() as ResultRecord
-// record.status is 'COMPLETE' or 'ERROR'
-// record.resultMd is the markdown assessment string (null if ERROR)
+// record.status is 'COMPLETE', 'PARTIAL_COMPLETE', or 'ERROR'
+// record.resultMd is non-null for COMPLETE and PARTIAL_COMPLETE; null for ERROR
+// record.errorMessage is non-null for PARTIAL_COMPLETE (lists missing agents) and ERROR
 ```
 
 ### Polling behaviour
@@ -386,7 +411,7 @@ const record = await detailRes.json() as ResultRecord
 **Flow in words:**
 1. Upload → receive `documentId`.
 2. Poll `GET /documents/status` every 30 s; check whether your `documentId` is still in `processingDocumentIds`.
-3. When it disappears, call `GET /documents/{documentId}` (or `GET /documents` for the full list) to read the final `status` and `errorMessage`.
+3. When it disappears, call `GET /documents/{documentId}` (or `GET /documents` for the full list) to read the final `status`. For `COMPLETE` and `PARTIAL_COMPLETE`, render `resultMd`. For `PARTIAL_COMPLETE` and `ERROR`, also show `errorMessage`.
 
 When 10 minutes elapse and the document is still processing, stop polling and show:
 

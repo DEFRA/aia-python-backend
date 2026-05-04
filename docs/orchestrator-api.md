@@ -13,7 +13,7 @@ The Orchestrator is a FastAPI service that runs alongside CoreBackend inside the
 
 1. Receive a fire-and-forget trigger from CoreBackend
 2. Download and extract text from the DOCX file in S3
-3. Publish a `TaskMessage` to the **aia-tasks** SQS queue (consumed by the Agent Service)
+3. Publish a `TaskMessage` to the **aia-tasks** SQS queue (consumed by the Relay Service)
 4. Track agent responses via an in-memory session store
 5. Compile per-agent results into a Markdown report
 6. Write the final status and `result_md` to PostgreSQL
@@ -47,7 +47,7 @@ Content-Type: application/json
 |-------|------|-------------|
 | `document_id` | UUID string | Document identifier (matches `doc_id` in `document_uploads`) |
 | `s3_key` | string | S3 object key — format `{documentId}_{fileName}` |
-| `template_type` | string | Assessment template — passed to the Agent Service |
+| `template_type` | string | Assessment template — passed to the Relay Service |
 
 **Response `202`:**
 
@@ -133,7 +133,7 @@ Serialised as camelCase JSON.
 
 ### StatusMessage — received from `aia-status`
 
-Published by the Agent Service after processing. Parsed as camelCase JSON.
+Published by the Relay Service after processing. Parsed as camelCase JSON.
 
 ```json
 {

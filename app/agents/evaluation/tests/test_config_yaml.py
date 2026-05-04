@@ -4,34 +4,33 @@ from __future__ import annotations
 
 import pytest
 
-from src.config import GovernanceAgentConfig, PipelineConfig
+from src.config import PipelineConfig, TechnicalAgentConfig
 
 
-def test_yaml_loads_governance_agent_block(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``GovernanceAgentConfig`` instantiated with no overrides should pick up
-    the defaults defined under ``agents.governance`` in ``config.yaml``.
+def test_yaml_loads_technical_agent_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``TechnicalAgentConfig`` instantiated with no overrides should pick up
+    the defaults defined under ``agents.technical`` in ``config.yaml``.
     """
-    # Strip env overrides so the YAML source wins.
-    for key in ("GOVERNANCE_MODEL", "GOVERNANCE_MAX_TOKENS", "GOVERNANCE_TEMPERATURE"):
+    for key in ("TECHNICAL_MODEL", "TECHNICAL_MAX_TOKENS", "TECHNICAL_TEMPERATURE"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    config: GovernanceAgentConfig = GovernanceAgentConfig()
+    config: TechnicalAgentConfig = TechnicalAgentConfig()
 
     assert config.model
     assert config.max_tokens > 0
     assert 0.0 <= config.temperature <= 1.0
 
 
-def test_yaml_pipeline_agent_tag_map_lists_governance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``pipeline.agent_tag_map`` in ``config.yaml`` must list ``governance``
+def test_yaml_pipeline_agent_tag_map_lists_technical(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``pipeline.agent_tag_map`` in ``config.yaml`` must list ``technical``
     with the eleven UK information-governance tags.
     """
     monkeypatch.delenv("PIPELINE_AGENT_TAG_MAP", raising=False)
 
     config: PipelineConfig = PipelineConfig()
 
-    assert "governance" in config.agent_tag_map
+    assert "technical" in config.agent_tag_map
     expected: set[str] = {
         "data_protection",
         "records_of_processing",
@@ -45,7 +44,7 @@ def test_yaml_pipeline_agent_tag_map_lists_governance(monkeypatch: pytest.Monkey
         "audit_trail",
         "information_classification",
     }
-    assert set(config.agent_tag_map["governance"]) == expected
+    assert set(config.agent_tag_map["technical"]) == expected
 
 
 def test_yaml_pipeline_agent_types_lists_two_agents(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,7 +53,7 @@ def test_yaml_pipeline_agent_types_lists_two_agents(monkeypatch: pytest.MonkeyPa
 
     config: PipelineConfig = PipelineConfig()
 
-    assert config.agent_types == ["security", "governance"]
+    assert config.agent_types == ["security", "technical"]
 
 
 def test_yaml_pipeline_agent_tag_map_drops_legacy_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,5 +62,5 @@ def test_yaml_pipeline_agent_tag_map_drops_legacy_keys(monkeypatch: pytest.Monke
 
     config: PipelineConfig = PipelineConfig()
 
-    for legacy in ("data", "risk", "ea", "solution"):
+    for legacy in ("data", "risk", "ea", "solution", "governance"):
         assert legacy not in config.agent_tag_map

@@ -1,39 +1,20 @@
-"""Stage 6 -- Specialist Agent Lambda handler (SQS-triggered dispatcher).
+"""Specialist agent registries and structural protocols.
 
-Triggered by SQS Tasks queue (batch size = 1). Resolves the agent type from
-the message body, runs the specialist agent, and publishes the result to the
-SQS Status queue -- the terminal output of the pipeline. Catches agent
-exceptions and publishes a failure status message rather than letting them
-propagate, so external consumers see one Status message per ``(docId, agentType)``
-regardless of outcome.
+Used by the Relay Service worker to resolve agent class and config by agent type.
 """
 
 from __future__ import annotations
 
-import asyncio
-import logging
-import os
-import time
 from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Protocol
 
-import anthropic
-import boto3
-from pydantic import BaseModel
-
-from src.agents.governance_agent import GovernanceAgent
-from src.agents.schemas import AgentResult, AgentStatusMessage, QuestionItem
+from src.agents.schemas import AgentLLMOutput, QuestionItem
 from src.agents.security_agent import SecurityAgent
+from src.agents.technical_agent import TechnicalAgent
 from src.config import (
-    CloudWatchConfig,
-    GovernanceAgentConfig,
     SecurityAgentConfig,
+    TechnicalAgentConfig,
 )
-
-logger: logging.Logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 
 # ---------------------------------------------------------------------------
 # Typed agent / config protocols
@@ -43,7 +24,7 @@ logger.setLevel(logging.INFO)
 class SpecialistAgentConfig(Protocol):
     """Structural type for any specialist agent's Pydantic config.
 
-    Every specialist agent config (``SecurityAgentConfig``, ``GovernanceAgentConfig``)
+    Every specialist agent config (``SecurityAgentConfig``, ``TechnicalAgentConfig``)
     exposes ``api_key``, ``model``, ``max_tokens`` and ``temperature``; declaring
     them here removes the need for ``Any`` annotations at the dispatch site.
     """
@@ -61,8 +42,7 @@ class SpecialistAgent(Protocol):
         self,
         document: str,
         questions: list[QuestionItem],
-        category_url: str,
-    ) -> AgentResult: ...
+    ) -> AgentLLMOutput: ...
 
 
 # Typed factories for the dispatch registries. ``Callable[..., T]`` accepts
@@ -79,296 +59,10 @@ SpecialistConfigFactory = Callable[..., SpecialistAgentConfig]
 
 AGENT_REGISTRY: dict[str, SpecialistAgentFactory] = {
     "security": SecurityAgent,
-    "governance": GovernanceAgent,
+    "technical": TechnicalAgent,
 }
 
 CONFIG_REGISTRY: dict[str, SpecialistConfigFactory] = {
     "security": SecurityAgentConfig,
-    "governance": GovernanceAgentConfig,
+    "technical": TechnicalAgentConfig,
 }
-
-# ---------------------------------------------------------------------------
-# SQS event Pydantic models
-# ---------------------------------------------------------------------------
-
-
-class AgentTaskBody(BaseModel):
-    """JSON body inside the SQS Tasks queue message.
-
-    ``questions`` is a list of typed ``QuestionItem`` instances (each pairing a
-    checklist question with its authoritative reference identifier).
-    ``categoryUrl`` carries the per-category SharePoint reference URL echoed
-    into every assessment row's ``Reference.url`` field.
-    """
-
-    docId: str
-    agentType: str
-    document: str | None = None
-    s3PayloadKey: str | None = None
-    questions: list[QuestionItem]
-    categoryUrl: str
-    enqueuedAt: str
-
-
-class AgentSqsRecord(BaseModel):
-    """A single SQS record from the Lambda event."""
-
-    body: str
-
-
-class AgentSqsEvent(BaseModel):
-    """Top-level SQS event envelope for the agent handler."""
-
-    Records: list[AgentSqsRecord]
-
-
-# ---------------------------------------------------------------------------
-# Module-level singletons (cold-start reuse)
-# ---------------------------------------------------------------------------
-
-_sqs: Any = None
-_s3: Any = None
-_cw: Any = None
-_cw_config: CloudWatchConfig | None = None
-
-
-def _get_cw_config() -> CloudWatchConfig:
-    """Return the module-level CloudWatchConfig singleton, creating on first call."""
-    global _cw_config  # noqa: PLW0603
-    if _cw_config is None:
-        _cw_config = CloudWatchConfig()
-    return _cw_config
-
-
-def _get_sqs() -> Any:
-    """Return the module-level SQS client singleton, creating on first call."""
-    global _sqs  # noqa: PLW0603
-    if _sqs is None:
-        _sqs = boto3.client("sqs")
-    return _sqs
-
-
-def _get_s3() -> Any:
-    """Return the module-level S3 client singleton, creating on first call."""
-    global _s3  # noqa: PLW0603
-    if _s3 is None:
-        _s3 = boto3.client("s3")
-    return _s3
-
-
-def _get_cw() -> Any:
-    """Return the module-level CloudWatch client singleton, creating on first call."""
-    global _cw  # noqa: PLW0603
-    if _cw is None:
-        _cw = boto3.client("cloudwatch")
-    return _cw
-
-
-# ---------------------------------------------------------------------------
-# Async helpers
-# ---------------------------------------------------------------------------
-
-
-async def _download_s3_payload(s3_client: Any, bucket: str, key: str) -> str:
-    """Download a text payload from S3 via ``run_in_executor``.
-
-    Args:
-        s3_client: A boto3 S3 client.
-        bucket: S3 bucket name.
-        key: S3 object key.
-
-    Returns:
-        The decoded UTF-8 text content of the S3 object.
-    """
-    loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-    response: dict[str, Any] = await loop.run_in_executor(
-        None,
-        lambda: s3_client.get_object(Bucket=bucket, Key=key),
-    )
-    body_bytes: bytes = await loop.run_in_executor(None, response["Body"].read)
-    return body_bytes.decode("utf-8")
-
-
-async def _send_status_message(
-    sqs_client: Any,
-    queue_url: str,
-    message: AgentStatusMessage,
-) -> None:
-    """Send a typed status message to the SQS Status queue via ``run_in_executor``.
-
-    Args:
-        sqs_client: A boto3 SQS client.
-        queue_url: URL of the SQS Status queue.
-        message: Validated ``AgentStatusMessage`` (serialised at this boundary).
-    """
-    body_json: str = message.model_dump_json()
-    loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None,
-        lambda: sqs_client.send_message(
-            QueueUrl=queue_url,
-            MessageBody=body_json,
-        ),
-    )
-
-
-async def _emit_metric(
-    name: str,
-    value: float,
-    unit: str = "Milliseconds",
-    agent_type: str = "",
-) -> None:
-    """Emit a CloudWatch metric with agentType dimension via ``run_in_executor``.
-
-    Args:
-        name: Metric name (e.g. ``"AgentDuration"``).
-        value: Metric value.
-        unit: CloudWatch unit string.
-        agent_type: Agent type for the dimension.
-    """
-    dimensions: list[dict[str, str]] = []
-    if agent_type:
-        dimensions.append({"Name": "agentType", "Value": agent_type})
-
-    loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None,
-        lambda: _get_cw().put_metric_data(
-            Namespace=_get_cw_config().namespace,
-            MetricData=[
-                {
-                    "MetricName": name,
-                    "Value": value,
-                    "Unit": unit,
-                    "Dimensions": dimensions,
-                }
-            ],
-        ),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Lambda entry point
-# ---------------------------------------------------------------------------
-
-
-def lambda_handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    """Lambda entry point -- delegates to async core."""
-    return asyncio.run(_handler(event, context))
-
-
-async def _handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    """Async core of the Stage 6 Agent handler.
-
-    Flow:
-        1. Validate SQS event via Pydantic.
-        2. Resolve document text (inline or from S3).
-        3. Look up agent class and config from registries.
-        4. Run agent assessment.
-        5. On success: publish completed status to SQS Status queue.
-        6. On failure: catch exception, publish failed status to SQS Status queue.
-        7. Emit CloudWatch metrics.
-
-    Args:
-        event: Raw SQS Lambda event dict.
-        context: Lambda context object (unused).
-
-    Returns:
-        Dict with ``statusCode`` 200 on success.
-    """
-    start: float = time.monotonic()
-
-    # 1. Validate SQS event
-    sqs_event: AgentSqsEvent = AgentSqsEvent.model_validate(event)
-    record: AgentSqsRecord = sqs_event.Records[0]
-    body: AgentTaskBody = AgentTaskBody.model_validate_json(record.body)
-    doc_id: str = body.docId
-    agent_type: str = body.agentType
-
-    logger.info("Stage 6 Agent: doc_id=%s agent_type=%s", doc_id, agent_type)
-
-    # 2. Resolve document text
-    document: str
-    if body.s3PayloadKey is not None:
-        bucket: str = os.environ["S3_BUCKET"]
-        document = await _download_s3_payload(_get_s3(), bucket, body.s3PayloadKey)
-    elif body.document is not None:
-        document = body.document
-    else:
-        raise ValueError(f"Neither document nor s3PayloadKey provided: doc_id={doc_id}")
-
-    # 3. Look up agent class and config
-    if agent_type not in AGENT_REGISTRY:
-        raise ValueError(f"Unknown agent type: {agent_type}")
-
-    agent_cls: SpecialistAgentFactory = AGENT_REGISTRY[agent_type]
-    config_cls: SpecialistConfigFactory = CONFIG_REGISTRY[agent_type]
-    agent_config: SpecialistAgentConfig = config_cls()
-
-    client: anthropic.AsyncAnthropic = anthropic.AsyncAnthropic(
-        api_key=agent_config.api_key,
-    )
-    agent: SpecialistAgent = agent_cls(client=client, agent_config=agent_config)
-
-    # 4. Run assessment and publish result
-    status_queue_url: str = os.environ["SQS_STATUS_QUEUE_URL"]
-    duration_ms: float
-
-    try:
-        result: AgentResult = await agent.assess(
-            document=document,
-            questions=body.questions,
-            category_url=body.categoryUrl,
-        )
-        duration_ms = (time.monotonic() - start) * 1000
-        completed_at: str = datetime.now(tz=UTC).isoformat()
-
-        # 5. Publish success to SQS Status queue
-        status_message: AgentStatusMessage = AgentStatusMessage(
-            docId=doc_id,
-            agentType=agent_type,
-            status="completed",
-            result=result,
-            durationMs=round(duration_ms, 1),
-            completedAt=completed_at,
-        )
-        await _send_status_message(_get_sqs(), status_queue_url, status_message)
-
-        # 7. Emit success metrics
-        await _emit_metric("AgentDuration", duration_ms, "Milliseconds", agent_type)
-        await _emit_metric("AgentSuccess", 1.0, "Count", agent_type)
-
-        logger.info(
-            "Stage 6 complete: doc_id=%s agent_type=%s duration_ms=%.1f",
-            doc_id,
-            agent_type,
-            duration_ms,
-        )
-
-    except Exception as exc:  # noqa: BLE001 — Plan 11: any agent failure is funnelled to the SQS Status queue (terminal sink); we never want to crash the Lambda and trigger SQS retry on a deterministic LLM/parse error.
-        duration_ms = (time.monotonic() - start) * 1000
-        completed_at = datetime.now(tz=UTC).isoformat()
-
-        # 6. Publish failure to SQS Status queue
-        logger.error(
-            "Agent assessment failed: doc_id=%s agent_type=%s error=%s",
-            doc_id,
-            agent_type,
-            exc,
-        )
-        failure_message: AgentStatusMessage = AgentStatusMessage(
-            docId=doc_id,
-            agentType=agent_type,
-            status="failed",
-            result=None,
-            durationMs=round(duration_ms, 1),
-            completedAt=completed_at,
-            errorMessage=str(exc),
-        )
-        await _send_status_message(_get_sqs(), status_queue_url, failure_message)
-
-        # 7. Emit failure metrics
-        await _emit_metric("AgentDuration", duration_ms, "Milliseconds", agent_type)
-        await _emit_metric("AgentFailure", 1.0, "Count", agent_type)
-
-    return {"statusCode": 200}

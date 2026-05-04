@@ -121,7 +121,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `doc_id` | UUID | No | Document identifier — primary key. Auto-generated via `gen_random_uuid()`. Returned to the frontend as `documentId`. |
-| `template_type` | TEXT | No | Assessment template identifier (e.g. `SDA`). Passed to the Agent Service to select the correct evaluation criteria. |
+| `template_type` | TEXT | No | Assessment template identifier (e.g. `SDA`). Passed to the Relay Service to select the correct evaluation criteria. |
 | `user_id` | TEXT | No | Foreign key to `users.user_id`. Ensures documents are scoped to their owner. |
 | `file_name` | TEXT | No | Original filename supplied by the user. Combined with `user_id` as a unique key to prevent duplicate uploads. |
 | `status` | TEXT | No | Current document lifecycle status. See [Status Values](#status-values) below. |

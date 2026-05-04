@@ -7,15 +7,19 @@ from pydantic import ValidationError
 
 from src.agents.schemas import (
     AgentCompleteDetail,
+    AgentLLMOutput,
     AgentResult,
     AssessmentRow,
     DocumentParsedDetail,
     DocumentTaggedDetail,
-    FinalSummary,
     InlinePayload,
     LLMResponseMeta,
+    PolicyDocResult,
+    QuestionItem,
+    RawAssessmentRow,
     S3KeyPayload,
     SectionsReadyDetail,
+    Summary,
 )
 
 # ---------------------------------------------------------------------------
@@ -26,9 +30,142 @@ from src.agents.schemas import (
 def test_existing_models_still_importable() -> None:
     """Existing models must not be broken by adding new ones."""
     assert AssessmentRow is not None
-    assert FinalSummary is not None
+    assert Summary is not None
     assert LLMResponseMeta is not None
     assert AgentResult is not None
+
+
+# ---------------------------------------------------------------------------
+# QuestionItem gains id field
+# ---------------------------------------------------------------------------
+
+
+def test_question_item_requires_id() -> None:
+    """QuestionItem must require an id field."""
+    q = QuestionItem(
+        id="aaaaaaaa-0000-0000-0000-000000000001",
+        question="Is MFA enabled?",
+        reference="C1.a",
+    )
+    assert q.id == "aaaaaaaa-0000-0000-0000-000000000001"
+    assert q.question == "Is MFA enabled?"
+    assert q.reference == "C1.a"
+
+
+# ---------------------------------------------------------------------------
+# AssessmentRow.Reference is now a plain string
+# ---------------------------------------------------------------------------
+
+
+def test_assessment_row_reference_is_string() -> None:
+    """AssessmentRow.Reference must be a plain string, not a nested object."""
+    row = AssessmentRow(
+        Question="Is MFA enabled?",
+        Rating="Green",
+        Comments="MFA is enforced.",
+        Reference="C1.a",
+    )
+    assert isinstance(row.Reference, str)
+    assert row.Reference == "C1.a"
+
+
+# ---------------------------------------------------------------------------
+# Summary (renamed from FinalSummary)
+# ---------------------------------------------------------------------------
+
+
+def test_summary_validates() -> None:
+    """Summary must expose Interpretation and Overall_Comments."""
+    s = Summary(
+        Interpretation="Strong alignment",
+        Overall_Comments="All requirements addressed.",
+    )
+    assert s.Interpretation == "Strong alignment"
+    assert s.Overall_Comments == "All requirements addressed."
+
+
+# ---------------------------------------------------------------------------
+# RawAssessmentRow
+# ---------------------------------------------------------------------------
+
+
+def test_raw_assessment_row_validates() -> None:
+    """RawAssessmentRow must expose question_id, Rating, and Comments."""
+    row = RawAssessmentRow(
+        question_id="aaaaaaaa-0000-0000-0000-000000000001",
+        Rating="Amber",
+        Comments="Partial coverage.",
+    )
+    assert row.question_id == "aaaaaaaa-0000-0000-0000-000000000001"
+    assert row.Rating == "Amber"
+
+
+def test_raw_assessment_row_rejects_invalid_rating() -> None:
+    """RawAssessmentRow must reject ratings outside Green/Amber/Red."""
+    with pytest.raises(ValidationError):
+        RawAssessmentRow(
+            question_id="some-id",
+            Rating="Yellow",  # type: ignore[arg-type]
+            Comments="Invalid.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AgentLLMOutput
+# ---------------------------------------------------------------------------
+
+
+def test_agent_llm_output_validates() -> None:
+    """AgentLLMOutput must expose rows and summary."""
+    output = AgentLLMOutput(
+        rows=[
+            RawAssessmentRow(
+                question_id="aaaaaaaa-0000-0000-0000-000000000001",
+                Rating="Green",
+                Comments="Fully addressed.",
+            )
+        ],
+        summary=Summary(
+            Interpretation="Strong alignment",
+            Overall_Comments="No gaps found.",
+        ),
+    )
+    assert len(output.rows) == 1
+    assert output.summary.Interpretation == "Strong alignment"
+
+
+# ---------------------------------------------------------------------------
+# AgentResult new fields
+# ---------------------------------------------------------------------------
+
+
+def test_agent_result_new_fields() -> None:
+    """PolicyDocResult holds per-doc fields; AgentResult wraps agent_type + docs list."""
+    doc = PolicyDocResult(
+        policy_doc_filename="security_policy.pdf",
+        policy_doc_url="https://example.com/security_policy.pdf",
+        assessments=[
+            AssessmentRow(
+                Question="Is MFA enabled?",
+                Rating="Green",
+                Comments="MFA is enforced.",
+                Reference="C1.a",
+            )
+        ],
+        summary=Summary(
+            Interpretation="Strong alignment",
+            Overall_Comments="All requirements addressed.",
+        ),
+    )
+    assert doc.policy_doc_filename == "security_policy.pdf"
+    assert doc.policy_doc_url == "https://example.com/security_policy.pdf"
+    assert len(doc.assessments) == 1
+    assert doc.summary.Interpretation == "Strong alignment"
+
+    result = AgentResult(agent_type="security", docs=[doc])
+    assert result.agent_type == "security"
+    assert len(result.docs) == 1
+    assert result.docs[0].policy_doc_filename == "security_policy.pdf"
 
 
 # ---------------------------------------------------------------------------
@@ -56,10 +193,10 @@ def test_s3key_payload_validates() -> None:
 def test_document_parsed_detail_accepts_inline_payload() -> None:
     """DocumentParsedDetail accepts an inline payload envelope."""
     detail = DocumentParsedDetail(
-        docId="doc-1",
+        document_id="doc-1",
         payload={"inline": '[{"chunk_index": 0}]'},
     )
-    assert detail.docId == "doc-1"
+    assert detail.document_id == "doc-1"
     assert isinstance(detail.payload, InlinePayload)
     assert detail.payload.inline == '[{"chunk_index": 0}]'
 
@@ -67,7 +204,7 @@ def test_document_parsed_detail_accepts_inline_payload() -> None:
 def test_document_parsed_detail_accepts_s3_payload() -> None:
     """DocumentParsedDetail accepts an S3 key payload envelope."""
     detail = DocumentParsedDetail(
-        docId="doc-1",
+        document_id="doc-1",
         payload={"s3Key": "state/doc-1/chunks.json"},
     )
     assert isinstance(detail.payload, S3KeyPayload)
@@ -77,12 +214,12 @@ def test_document_parsed_detail_accepts_s3_payload() -> None:
 def test_document_parsed_detail_rejects_envelope_with_neither() -> None:
     """An envelope containing neither inline nor s3Key fails validation."""
     with pytest.raises(ValidationError):
-        DocumentParsedDetail(docId="doc-1", payload={})
+        DocumentParsedDetail(document_id="doc-1", payload={})
 
 
 def test_document_parsed_detail_no_legacy_fields() -> None:
     """DocumentParsedDetail must not require the removed chunksCacheKey / contentHash."""
-    detail = DocumentParsedDetail(docId="doc-1", payload={"inline": "[]"})
+    detail = DocumentParsedDetail(document_id="doc-1", payload={"inline": "[]"})
     assert not hasattr(detail, "chunksCacheKey")
     assert not hasattr(detail, "contentHash")
 
@@ -95,17 +232,17 @@ def test_document_parsed_detail_no_legacy_fields() -> None:
 def test_document_tagged_detail_accepts_inline_payload() -> None:
     """DocumentTaggedDetail accepts an inline payload envelope."""
     detail = DocumentTaggedDetail(
-        docId="doc-1",
+        document_id="doc-1",
         payload={"inline": "[]"},
     )
-    assert detail.docId == "doc-1"
+    assert detail.document_id == "doc-1"
     assert isinstance(detail.payload, InlinePayload)
 
 
 def test_document_tagged_detail_accepts_s3_payload() -> None:
     """DocumentTaggedDetail accepts an S3 key payload envelope."""
     detail = DocumentTaggedDetail(
-        docId="doc-1",
+        document_id="doc-1",
         payload={"s3Key": "state/doc-1/tagged.json"},
     )
     assert isinstance(detail.payload, S3KeyPayload)
@@ -113,7 +250,7 @@ def test_document_tagged_detail_accepts_s3_payload() -> None:
 
 def test_document_tagged_detail_no_legacy_fields() -> None:
     """DocumentTaggedDetail must not require the removed taggedCacheKey / contentHash."""
-    detail = DocumentTaggedDetail(docId="doc-1", payload={"inline": "[]"})
+    detail = DocumentTaggedDetail(document_id="doc-1", payload={"inline": "[]"})
     assert not hasattr(detail, "taggedCacheKey")
     assert not hasattr(detail, "contentHash")
 
@@ -125,8 +262,8 @@ def test_document_tagged_detail_no_legacy_fields() -> None:
 
 def test_sections_ready_detail_only_accepts_two_agent_types() -> None:
     """SectionsReadyDetail must accept only the two surviving agents."""
-    for agent in ("security", "governance"):
-        detail = SectionsReadyDetail(docId="doc-1", agentType=agent)
+    for agent in ("security", "technical"):
+        detail = SectionsReadyDetail(document_id="doc-1", agentType=agent)
         assert detail.agentType == agent
 
 
@@ -134,13 +271,13 @@ def test_sections_ready_detail_rejects_legacy_agent_types() -> None:
     """SectionsReadyDetail must reject the four removed specialist agent types."""
     for legacy in ("data", "risk", "ea", "solution"):
         with pytest.raises(ValidationError):
-            SectionsReadyDetail(docId="doc-1", agentType=legacy)
+            SectionsReadyDetail(document_id="doc-1", agentType=legacy)
 
 
 def test_sections_ready_detail_invalid_agent_type() -> None:
     """SectionsReadyDetail should reject agent types not in the allowed literal."""
     with pytest.raises(ValidationError):
-        SectionsReadyDetail(docId="doc-1", agentType="unknown")
+        SectionsReadyDetail(document_id="doc-1", agentType="unknown")
 
 
 # ---------------------------------------------------------------------------
@@ -149,8 +286,8 @@ def test_sections_ready_detail_invalid_agent_type() -> None:
 
 
 def test_agent_complete_detail() -> None:
-    """AgentCompleteDetail should accept and expose docId and agentType."""
-    detail = AgentCompleteDetail(docId="doc-1", agentType="security")
+    """AgentCompleteDetail should accept and expose document_id and agentType."""
+    detail = AgentCompleteDetail(document_id="doc-1", agentType="security")
     assert detail.agentType == "security"
 
 
@@ -172,5 +309,7 @@ def test_removed_models_are_no_longer_importable() -> None:
         "PipelineCompleteDetail",
         "CompiledContentBlock",
         "CompiledResult",
+        "FinalSummary",
+        "Reference",
     ):
         assert not hasattr(schemas, removed), f"{removed} should be removed"

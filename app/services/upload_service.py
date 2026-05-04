@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 
+from app.core.config import config
 from app.core.enums import DocumentStatus
 from app.models.history_record import HistoryRecord
 from app.models.result_record import ResultRecord
@@ -26,7 +27,9 @@ class UploadService:
         self.context = context
         self.orchestrator_service = orchestrator_service
 
-    async def process_upload_request(self, request: UploadRequest, user_id: str) -> Optional[str]:
+    async def process_upload_request(
+        self, request: UploadRequest, user_id: str
+    ) -> Optional[str]:
         is_duplicate = await self.repo.check_duplicate(user_id, request.fileName)
         if is_duplicate:
             return None
@@ -35,7 +38,9 @@ class UploadService:
         return doc_id
 
     def get_s3_key(self, doc_id: str, file_name: str) -> str:
-        return f"{doc_id}_{file_name}"
+        base = f"{doc_id}_{file_name}"
+        prefix = config.s3.upload_prefix
+        return f"{prefix}/{base}" if prefix else base
 
     async def get_processing_document_ids(self, user_id: str) -> list[str]:
         return await self.repo.get_processing_document_ids(user_id)

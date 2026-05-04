@@ -25,10 +25,14 @@ async def verify_auth(request: Request) -> dict:
 
     claimed_user_id = request.headers.get(config.auth.user_id_header)
     if not claimed_user_id:
-        logger.warning("Authentication failed: Missing %s header", config.auth.user_id_header)
+        logger.warning(
+            "Authentication failed: Missing %s header", config.auth.user_id_header
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=messages.MISSING_USER_ID_HEADER.format(header=config.auth.user_id_header),
+            detail=messages.MISSING_USER_ID_HEADER.format(
+                header=config.auth.user_id_header
+            ),
         )
 
     token = AuthService.authorise_user(sso_token)

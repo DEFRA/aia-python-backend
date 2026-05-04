@@ -2,39 +2,31 @@
 
 import json
 import logging
+from pathlib import Path
 from typing import cast
 
 import anthropic
 from anthropic import APIError
 from anthropic.types import Message, TextBlock
 
-from src.agents.prompts.security import (
-    SECURITY_ASSESSMENT_SYSTEM_PROMPT,
-    SECURITY_ASSESSMENT_USER_TEMPLATE,
-)
 from src.agents.schemas import (
-    AgentResult,
-    AssessmentRow,
-    FinalSummary,
+    AgentLLMOutput,
     LLMResponseMeta,
     QuestionItem,
+    RawAssessmentRow,
+    Summary,
 )
 from src.config import SecurityAgentConfig
 from src.utils.helpers import strip_code_fences
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+_PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
+_SYSTEM_PROMPT: str = (_PROMPTS_DIR / "security_system.md").read_text(encoding="utf-8")
+_USER_TEMPLATE: str = (_PROMPTS_DIR / "security_user.md").read_text(encoding="utf-8")
+
 
 def _extract_response_meta(response: Message, model: str) -> LLMResponseMeta:
-    """Build an LLMResponseMeta from a raw Anthropic API response.
-
-    Args:
-        response: The raw Message returned by the Anthropic API.
-        model: The model identifier string used for the request.
-
-    Returns:
-        An LLMResponseMeta instance populated with token counts and stop reason.
-    """
     return LLMResponseMeta(
         model=model,
         input_tokens=response.usage.input_tokens,
@@ -44,42 +36,20 @@ def _extract_response_meta(response: Message, model: str) -> LLMResponseMeta:
 
 
 def _format_questions_block(questions: list[QuestionItem]) -> str:
-    """Format checklist items into a numbered XML block.
-
-    Each item is rendered as ``<question reference="...">...</question>`` so the
-    LLM sees the per-question reference identifier alongside the question text
-    and can echo it back into the output ``Reference`` field.
-
-    Args:
-        questions: Ordered list of ``QuestionItem`` objects.
-
-    Returns:
-        A single string with each question on its own numbered line.
-    """
-    return "\n".join(
-        f'{i}. <question reference="{item.reference}">{item.question}</question>'
-        for i, item in enumerate(questions, start=1)
+    return json.dumps(
+        [{"id": q.id, "question": q.question} for q in questions],
+        indent=2,
     )
 
 
 class SecurityAgent:
-    """Async LLM agent that assesses a document against a security checklist.
-
-    Sends a document and a set of checklist questions to the LLM and parses
-    the structured JSON response into typed Pydantic models.
-    """
+    """Async LLM agent that assesses a document against a security checklist."""
 
     def __init__(
         self,
         client: anthropic.AsyncAnthropic,
         agent_config: SecurityAgentConfig,
     ) -> None:
-        """Initialise the agent with an Anthropic client and configuration.
-
-        Args:
-            client: An authenticated AsyncAnthropic client instance.
-            agent_config: Configuration controlling model, token limit, and temperature.
-        """
         self.client: anthropic.AsyncAnthropic = client
         self.agent_config: SecurityAgentConfig = agent_config
 
@@ -87,29 +57,10 @@ class SecurityAgent:
         self,
         document: str,
         questions: list[QuestionItem],
-        category_url: str,
-    ) -> AgentResult:
-        """Run a security assessment of a document against a checklist.
-
-        Args:
-            document: Full text of the document to assess.
-            questions: Ordered list of ``QuestionItem`` objects pairing each
-                checklist question with its authoritative reference identifier.
-            category_url: Category-level reference URL echoed into every
-                assessment row's ``Reference.url`` field.
-
-        Returns:
-            An AgentResult containing per-question assessments, a final summary,
-            and API response metadata.
-
-        Raises:
-            APIError: If the LLM API call fails.
-            ValueError: If the LLM response cannot be parsed into the expected schema.
-        """
-        user_content: str = SECURITY_ASSESSMENT_USER_TEMPLATE.format(
+    ) -> AgentLLMOutput:
+        user_content: str = _USER_TEMPLATE.format(
             document=document,
             questions=_format_questions_block(questions),
-            category_url=category_url,
         )
 
         try:
@@ -117,7 +68,7 @@ class SecurityAgent:
                 model=self.agent_config.model,
                 max_tokens=self.agent_config.max_tokens,
                 temperature=self.agent_config.temperature,
-                system=SECURITY_ASSESSMENT_SYSTEM_PROMPT,
+                system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APIError as exc:
@@ -131,15 +82,11 @@ class SecurityAgent:
             cleaned: str = strip_code_fences(raw_text)
             payload: dict[str, object] = json.loads(cleaned)
             security_block: dict[str, object] = payload["Security"]  # type: ignore[assignment]
-            assessments: list[AssessmentRow] = [
-                AssessmentRow.model_validate(row)
+            raw_rows: list[RawAssessmentRow] = [
+                RawAssessmentRow.model_validate(row)
                 for row in cast(list[object], security_block["Assessments"])
             ]
-            final_summary: FinalSummary | None = (
-                FinalSummary.model_validate(security_block["Final_Summary"])
-                if "Final_Summary" in security_block
-                else None
-            )
+            summary_obj: Summary = Summary.model_validate(security_block["Summary"])
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.error(
                 "Failed to parse LLM response. raw_text=%.200s error=%s",
@@ -150,9 +97,9 @@ class SecurityAgent:
 
         logger.info(
             "Assessment complete: %d questions, %d input / %d output tokens",
-            len(assessments),
+            len(raw_rows),
             meta.input_tokens,
             meta.output_tokens,
         )
 
-        return AgentResult(assessments=assessments, metadata=meta, final_summary=final_summary)
+        return AgentLLMOutput(rows=raw_rows, summary=summary_obj)
