@@ -88,7 +88,10 @@ async def test_get_document_downloads_from_s3_when_no_inline() -> None:
     task = _make_task(file_content=None)
     s3 = AsyncMock()
     s3.download_file.return_value = b"S3 document text"
-    doc = await _get_document(task, s3)
+
+    with patch("app.relay_service.worker._extract_text", return_value="S3 document text"):
+        doc = await _get_document(task, s3)
+
     assert doc == "S3 document text"
     s3.download_file.assert_called_once_with(task.s3_key, bucket=task.s3_bucket)
 
@@ -141,8 +144,8 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
     with (
         patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_policy_doc_by_category",
-            new=AsyncMock(return_value=("policy-doc-id-001", "https://example.com", "policy.pdf")),
+            "app.relay_service.worker.fetch_all_policy_docs_by_category",
+            new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
         ),
         patch(
             "app.relay_service.worker.fetch_questions_by_policy_doc_id",
@@ -165,11 +168,12 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
     assert status.document_id == task.document_id
     assert status.agent_type == "security"
     assert status.error is None
-    assert "assessments" in status.result
+    assert "agent_type" in status.result
+    assert "docs" in status.result
 
 
 # ---------------------------------------------------------------------------
-# dispatch — agent failure propagated as StatusMessage.error
+# dispatch — agent failure: all docs fail → error StatusMessage
 # ---------------------------------------------------------------------------
 
 
@@ -186,8 +190,8 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
     with (
         patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_policy_doc_by_category",
-            new=AsyncMock(return_value=("policy-doc-id-001", "https://example.com", "policy.pdf")),
+            "app.relay_service.worker.fetch_all_policy_docs_by_category",
+            new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
         ),
         patch(
             "app.relay_service.worker.fetch_questions_by_policy_doc_id",
@@ -206,19 +210,19 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
         mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
         status = await dispatch(task, s3)
 
-    assert status.error == "LLM parse error"
+    assert status.error is not None
     assert status.result == {}
 
 
 # ---------------------------------------------------------------------------
-# dispatch — LLM timeout surfaced as StatusMessage.error (not a retry)
+# dispatch — LLM timeout: all docs fail → error StatusMessage
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_dispatch_returns_error_on_agent_timeout() -> None:
-    """asyncio.TimeoutError from wait_for must produce an error StatusMessage,
-    not propagate — the message must still be deleted, not retried."""
+    """asyncio.TimeoutError from wait_for skips the doc; if all docs fail the
+    StatusMessage carries an error — the message is still deleted, not retried."""
     from app.relay_service.worker import dispatch
 
     task = _make_task()
@@ -234,8 +238,8 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
     with (
         patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_policy_doc_by_category",
-            new=AsyncMock(return_value=("policy-doc-id-001", "https://example.com", "policy.pdf")),
+            "app.relay_service.worker.fetch_all_policy_docs_by_category",
+            new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
         ),
         patch(
             "app.relay_service.worker.fetch_questions_by_policy_doc_id",
@@ -256,8 +260,6 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
         status = await dispatch(task, s3)
 
     assert status.error is not None
-    assert "timed out" in status.error.lower()
-    assert "1s" in status.error
     assert status.result == {}
 
 

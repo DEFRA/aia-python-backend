@@ -6,7 +6,7 @@ _EVAL_ROOT = Path(__file__).resolve().parent.parent / "app" / "agents" / "evalua
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
-from src.agents.schemas import AgentResult, AssessmentRow, Summary  # noqa: E402
+from src.agents.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary  # noqa: E402
 
 from app.orchestrator.summary import MarkdownReportGenerator, SummaryGenerator  # noqa: E402
 
@@ -33,13 +33,18 @@ def _make_result(
         for i, r in enumerate(ratings, 1)
     ]
     return AgentResult(
-        policy_doc_filename=filename,
-        policy_doc_url=url,
-        assessments=assessments,
-        summary=Summary(
-            Interpretation="Satisfactory",
-            Overall_Comments="No critical gaps.",
-        ),
+        agent_type="security",
+        docs=[
+            PolicyDocResult(
+                policy_doc_filename=filename,
+                policy_doc_url=url,
+                assessments=assessments,
+                summary=Summary(
+                    Interpretation="Satisfactory",
+                    Overall_Comments="No critical gaps.",
+                ),
+            )
+        ],
     )
 
 
@@ -72,7 +77,7 @@ def test_generate_empty_results_produces_output():
 def test_generate_none_results_are_skipped():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": None},
+        results={"security": [None]},
         document_title="Test Document",
         section_labels=SECTION_LABELS,
         agent_type_order=AGENT_ORDER,
@@ -88,7 +93,7 @@ def test_generate_none_results_are_skipped():
 def test_generate_includes_document_title():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="My Policy Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -99,7 +104,7 @@ def test_generate_includes_document_title():
 def test_generate_single_agent_creates_section_heading():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -110,7 +115,7 @@ def test_generate_single_agent_creates_section_heading():
 def test_generate_uses_section_labels_for_heading():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"data": _make_result()},
+        results={"data": [_make_result()]},
         document_title="Doc",
         section_labels={"data": "Data Governance"},
         agent_type_order=["data"],
@@ -121,7 +126,7 @@ def test_generate_uses_section_labels_for_heading():
 def test_generate_falls_back_to_title_case_when_no_label():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"risk": _make_result()},
+        results={"risk": [_make_result()]},
         document_title="Doc",
         section_labels={},
         agent_type_order=["risk"],
@@ -132,7 +137,7 @@ def test_generate_falls_back_to_title_case_when_no_label():
 def test_generate_includes_policy_doc_filename():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result(filename="security_policy.pdf")},
+        results={"security": [_make_result(filename="security_policy.pdf")]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -143,7 +148,7 @@ def test_generate_includes_policy_doc_filename():
 def test_generate_includes_policy_doc_url():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result(url="https://example.com/sec.pdf")},
+        results={"security": [_make_result(url="https://example.com/sec.pdf")]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -159,7 +164,7 @@ def test_generate_includes_policy_doc_url():
 def test_generate_includes_assessment_table_headers():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -173,7 +178,7 @@ def test_generate_includes_assessment_table_headers():
 def test_generate_includes_rating_emoji_green():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result(ratings=["Green"])},
+        results={"security": [_make_result(ratings=["Green"])]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -184,7 +189,7 @@ def test_generate_includes_rating_emoji_green():
 def test_generate_includes_rating_emoji_red():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result(ratings=["Red"])},
+        results={"security": [_make_result(ratings=["Red"])]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -195,7 +200,7 @@ def test_generate_includes_rating_emoji_red():
 def test_generate_includes_rating_emoji_amber():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result(ratings=["Amber"])},
+        results={"security": [_make_result(ratings=["Amber"])]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -206,7 +211,7 @@ def test_generate_includes_rating_emoji_amber():
 def test_generate_includes_summary_interpretation():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -222,9 +227,9 @@ def test_generate_includes_summary_interpretation():
 def test_generate_multiple_agents_all_have_sections():
     gen = MarkdownReportGenerator()
     results = {
-        "security": _make_result(),
-        "data": _make_result(),
-        "risk": _make_result(),
+        "security": [_make_result()],
+        "data": [_make_result()],
+        "risk": [_make_result()],
     }
     output = gen.generate(
         results=results,
@@ -240,8 +245,8 @@ def test_generate_multiple_agents_all_have_sections():
 def test_generate_respects_agent_type_order():
     gen = MarkdownReportGenerator()
     results = {
-        "security": _make_result(),
-        "data": _make_result(),
+        "security": [_make_result()],
+        "data": [_make_result()],
     }
     output = gen.generate(
         results=results,
@@ -262,7 +267,7 @@ def test_generate_respects_agent_type_order():
 def test_generate_includes_final_evaluation_summary():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -273,7 +278,7 @@ def test_generate_includes_final_evaluation_summary():
 def test_generate_includes_scorecard():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -284,7 +289,7 @@ def test_generate_includes_scorecard():
 def test_generate_includes_priority_actions():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result(ratings=["Red"])},
+        results={"security": [_make_result(ratings=["Red"])]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -295,7 +300,7 @@ def test_generate_includes_priority_actions():
 def test_generate_includes_overall_conclusion():
     gen = MarkdownReportGenerator()
     output = gen.generate(
-        results={"security": _make_result()},
+        results={"security": [_make_result()]},
         document_title="Doc",
         section_labels=SECTION_LABELS,
         agent_type_order=["security"],
@@ -321,12 +326,12 @@ def test_classify_risk_low_when_no_issues():
 def test_top_finding_returns_first_red():
     gen = MarkdownReportGenerator()
     result = _make_result(ratings=["Green", "Red", "Amber"])
-    top = gen._top_finding({"security": result}, ["security"])
+    top = gen._top_finding({"security": [result]}, ["security"])
     assert top == "Question 2"
 
 
 def test_top_finding_returns_no_findings_when_all_green():
     gen = MarkdownReportGenerator()
     result = _make_result(ratings=["Green", "Green"])
-    top = gen._top_finding({"security": result}, ["security"])
+    top = gen._top_finding({"security": [result]}, ["security"])
     assert top == "No findings"

@@ -49,11 +49,11 @@ async def test_update_status_with_result():
     repo = DocumentRepository(pool, context)
 
     # Execute
-    await repo.update_status("doc-1", "Queued", result={"text": "hi"})
+    await repo.update_status("doc-1", "Queued", result_md="# Report\nAll good.")
 
     # Verify
     conn.execute.assert_called_once()
     args = conn.execute.call_args[0]
-    assert "result = $3::jsonb" in args[0]
+    assert "result_md" in args[0]
     assert args[1] == "Queued"
-    assert "hi" in args[3] # JSON string
+    assert args[3] == "# Report\nAll good."
