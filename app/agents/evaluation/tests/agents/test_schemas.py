@@ -14,6 +14,7 @@ from src.agents.schemas import (
     DocumentTaggedDetail,
     InlinePayload,
     LLMResponseMeta,
+    PolicyDocResult,
     QuestionItem,
     RawAssessmentRow,
     S3KeyPayload,
@@ -139,8 +140,8 @@ def test_agent_llm_output_validates() -> None:
 
 
 def test_agent_result_new_fields() -> None:
-    """AgentResult must expose policy_doc_filename, policy_doc_url, assessments, summary."""
-    result = AgentResult(
+    """PolicyDocResult holds per-doc fields; AgentResult wraps agent_type + docs list."""
+    doc = PolicyDocResult(
         policy_doc_filename="security_policy.pdf",
         policy_doc_url="https://example.com/security_policy.pdf",
         assessments=[
@@ -156,10 +157,15 @@ def test_agent_result_new_fields() -> None:
             Overall_Comments="All requirements addressed.",
         ),
     )
-    assert result.policy_doc_filename == "security_policy.pdf"
-    assert result.policy_doc_url == "https://example.com/security_policy.pdf"
-    assert len(result.assessments) == 1
-    assert result.summary.Interpretation == "Strong alignment"
+    assert doc.policy_doc_filename == "security_policy.pdf"
+    assert doc.policy_doc_url == "https://example.com/security_policy.pdf"
+    assert len(doc.assessments) == 1
+    assert doc.summary.Interpretation == "Strong alignment"
+
+    result = AgentResult(agent_type="security", docs=[doc])
+    assert result.agent_type == "security"
+    assert len(result.docs) == 1
+    assert result.docs[0].policy_doc_filename == "security_policy.pdf"
 
 
 # ---------------------------------------------------------------------------
