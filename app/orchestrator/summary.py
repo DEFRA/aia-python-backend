@@ -55,8 +55,7 @@ class MarkdownReportGenerator:
     ) -> list[str]:
         lines: list[str] = [f"## {label}", ""]
         for result in results:
-            lines.append(f"### {result.policy_doc_filename}")
-            lines.append(f"[View document]({result.policy_doc_url})")
+            lines.append(f"### [{result.policy_doc_filename}]({result.policy_doc_url})")
             lines.append("")
             lines.append("| Question | Rating | Comments | Reference |")
             lines.append("|---|---|---|---|")
