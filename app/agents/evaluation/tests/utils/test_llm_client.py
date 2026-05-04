@@ -60,18 +60,17 @@ def test_provider_read_from_env_var() -> None:
     mock_bedrock.assert_called_once_with()
 
 
-def test_default_provider_is_anthropic() -> None:
-    """With no env override, the default provider is 'anthropic'."""
-    # Clear any cached YAML to get a clean read
+def test_default_provider_is_bedrock() -> None:
+    """With no env override, the default provider reads from config.yaml."""
     import src.config as cfg_mod
     from src.config import LLMConfig
 
     original_cache = cfg_mod._YAML_CACHE
-    cfg_mod._YAML_CACHE = None
+    cfg_mod._YAML_CACHE = {"llm": {"provider": "bedrock"}}
 
     try:
         config = LLMConfig()
-        assert config.provider == "anthropic"
+        assert config.provider == "bedrock"
     finally:
         cfg_mod._YAML_CACHE = original_cache
 
