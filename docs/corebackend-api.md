@@ -126,7 +126,7 @@ Saves document metadata to the database, uploads the binary file to S3 in the ba
 
 | Scenario | Code | `detail` value |
 |----------|------|----------------|
-| Same `fileName` already uploaded by this user | `400` | `"A file named 'x.pdf' has already been uploaded by user '...'"` |
+| Same `fileName` already uploaded by this user | `400` | `"A file named 'x.pdf' has already been uploaded. Please rename the file and try again"` |
 | Database error | `500` | `"Failed to record document metadata."` |
 
 ---
