@@ -14,7 +14,7 @@ class TaskMessage(BaseModel):
     agent_type: str
     template_type: str
     policy_doc_id: Optional[str] = (
-        None  # when set, relay skips the category LIMIT 1 lookup
+        None  # when set, agent service skips the category LIMIT 1 lookup
     )
     file_content: Optional[str] = None  # null when content exceeds SQS 256 KB limit
     s3_bucket: Optional[str] = None

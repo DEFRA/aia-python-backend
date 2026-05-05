@@ -85,7 +85,7 @@ if ($Mode -eq "--logs") {
     $logFiles = @(
         (Join-Path $LogDir "core-backend.log"),
         (Join-Path $LogDir "orchestrator.log"),
-        (Join-Path $LogDir "relay-service.log")
+        (Join-Path $LogDir "agent-service.log")
     )
     Write-Host "Tailing logs — press Ctrl-C to stop" -ForegroundColor Yellow
     Write-Host ""
@@ -344,7 +344,7 @@ if (-not (Test-Path $LogDir)) {
 }
 
 # Kill any stale processes from a previous run
-@("app.api.main:app", "app.orchestrator.main:app", "app.relay_service.main:app") | ForEach-Object {
+@("app.api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
     Get-WmiObject Win32_Process -Filter "CommandLine LIKE '%$_%'" -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
@@ -379,7 +379,7 @@ function Start-Service {
 
 Start-Service "core-backend"  "app.api.main:app"           8086 (Join-Path $LogDir "core-backend.log")
 Start-Service "orchestrator"  "app.orchestrator.main:app"  8001 (Join-Path $LogDir "orchestrator.log")
-Start-Service "relay-service" "app.relay_service.main:app" 8002 (Join-Path $LogDir "relay-service.log")
+Start-Service "agent-service" "app.agent_service.main:app" 8002 (Join-Path $LogDir "agent-service.log")
 
 # ── Wait then verify all three survived startup ────────────────────────────────
 Start-Sleep -Seconds 2
@@ -407,7 +407,7 @@ if ($allUp) {
     Write-Host ""
     Write-Host "  Core Backend   ->  http://127.0.0.1:8086/health"
     Write-Host "  Orchestrator   ->  http://127.0.0.1:8001"
-    Write-Host "  Relay Service  ->  http://127.0.0.1:8002/health"
+    Write-Host "  Agent Service  ->  http://127.0.0.1:8002/health"
     Write-Host ""
     Write-Host "  Follow logs:   .\scripts\start-aia.ps1 --logs"
     Write-Host "  Stop all:      .\scripts\start-aia.ps1 --stop"

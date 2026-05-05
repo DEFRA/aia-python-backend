@@ -600,7 +600,7 @@ bash scripts/start-localstack.sh
 # 2. Start application services (three terminals)
 uvicorn app.api.main:app --host 127.0.0.1 --port 8086 --reload
 uvicorn app.orchestrator.main:app --host 127.0.0.1 --port 8001 --reload
-uvicorn app.relay_service.main:app --host 127.0.0.1 --port 8002
+uvicorn app.agent_service.main:app --host 127.0.0.1 --port 8002
 
 # 3. Test via mock harness
 python scripts/mock_orchestrator.py --agent-types security technical
@@ -734,8 +734,8 @@ bash scripts/start-localstack.sh
 # Terminal 3 — PostgreSQL (must be running for questions_repo)
 /opt/podman/bin/podman start aiadocuments
 
-# Terminal 4 — Relay Service (calls real LLM via Anthropic API)
-uvicorn app.relay_service.main:app --host 127.0.0.1 --port 8002
+# Terminal 4 — Agent Service (calls real LLM via Anthropic API)
+uvicorn app.agent_service.main:app --host 127.0.0.1 --port 8002
 
 # Terminal 5 — push a task and watch the result
 python scripts/mock_orchestrator.py \

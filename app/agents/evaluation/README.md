@@ -18,19 +18,19 @@ Given a document (PDF or DOCX), the pipeline:
 
 Two specialist agents are wired up: **Security** and **Technical**.
 
-In production the Relay Service consumes `TaskMessage`s from the SQS Tasks queue, runs the full parse → tag → extract → assess pipeline in-process, and publishes `StatusMessage`s back to the SQS Status queue for the Orchestrator to pick up. Locally [`main.py`](./main.py) **bypasses all queue infrastructure** and runs the same business logic in-process — no AWS services are invoked except optionally Bedrock or the Anthropic API for model calls. See [Local vs production](#local-vs-production) below.
+In production the Agent Service consumes `TaskMessage`s from the SQS Tasks queue, runs the full parse → tag → extract → assess pipeline in-process, and publishes `StatusMessage`s back to the SQS Status queue for the Orchestrator to pick up. Locally [`main.py`](./main.py) **bypasses all queue infrastructure** and runs the same business logic in-process — no AWS services are invoked except optionally Bedrock or the Anthropic API for model calls. See [Local vs production](#local-vs-production) below.
 
 ---
 
 ## Pipeline
 
 ```
-Orchestrator ──▶ SQS Tasks ──▶ Relay Service ─┬─▶ Security Agent ─┐
+Orchestrator ──▶ SQS Tasks ──▶ Agent Service ─┬─▶ Security Agent ─┐
                                                └─▶ Technical Agent ─┴─▶ SQS Status ──▶ Orchestrator
 ```
 
 - Entry point: `TaskMessage` on the SQS Tasks queue (`docId`, `agentType`, `fileContent` or S3 reference, `questions`, `policyDocUrl`).
-- The Relay Service runs parse → tag → extract sections → specialist agent in-process for each task.
+- The Agent Service runs parse → tag → extract sections → specialist agent in-process for each task.
 - Terminal output: one `StatusMessage` per `(docId, agentType)` on the SQS Status queue. The Orchestrator polls this queue and writes the final `resultMd` to PostgreSQL.
 
 ---
@@ -77,7 +77,7 @@ pip install -r requirements.txt
 The pipeline calls the LLM via the **Anthropic API** (direct) or **AWS Bedrock** (local runner default). Add the following to a `.env` file in this directory (`app/agents/evaluation/.env`):
 
 ```
-# Anthropic direct API (used by Relay Service and local runner)
+# Anthropic direct API (used by Agent Service and local runner)
 ANTHROPIC_API_KEY=...
 
 # Database — required for question/policy-doc lookups
@@ -116,12 +116,12 @@ This:
 
 ### Local vs production
 
-| Concern | Production (Relay Service) | Local (`main.py`) |
+| Concern | Production (Agent Service) | Local (`main.py`) |
 |---------|---------------------------|-------------------|
 | Pipeline trigger | `TaskMessage` on SQS Tasks queue | Document path + doc ID via CLI args |
 | Document source | Inline content in `TaskMessage` or S3 download | Local disk |
 | Questions source | PostgreSQL (same) | PostgreSQL (same) |
-| Parse → Tag → Extract | In-process inside Relay Service worker | In-process inside `main.py` |
+| Parse → Tag → Extract | In-process inside Agent Service worker | In-process inside `main.py` |
 | LLM calls | Anthropic API (via `make_llm_client()`) | Anthropic API or Bedrock |
 | Result output | `StatusMessage` published to SQS Status queue | JSON file at `data/pipeline_output_<docId>.json` |
 | Metrics | CloudWatch (Orchestrator side) | Not emitted |

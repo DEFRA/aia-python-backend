@@ -47,7 +47,7 @@ CoreBackend container (localhost:8000)
     SQS: aia-tasks  (1 queue)
             │
             ▼
-    Relay Service — ECS Fargate (single container, all agent logic)
+    Agent Service — ECS Fargate (single container, all agent logic)
             ├── polls aia-tasks
             ├── reads agentType → dispatches to internal handler
             │       security  → SecurityHandler  → Bedrock
@@ -111,12 +111,12 @@ UPLOADING → UPLOADED → PENDING → PROCESSING → COMPLETE
 
 | Queue | Purpose | Consumer |
 |-------|---------|----------|
-| `aia-tasks` | All agent task messages | Relay Service (single ECS service) |
+| `aia-tasks` | All agent task messages | Agent Service (single ECS service) |
 | `aia-tasks-dlq` | Unprocessable task messages | Ops / alerting |
 | `aia-status` | Agent result messages | Orchestrator |
 | `aia-status-dlq` | Unprocessable status messages | Ops / alerting |
 
-**Relay Service internal dispatch:**
+**Agent Service internal dispatch:**
 ```python
 handlers: dict[str, AgentHandler] = {
     "security": SecurityHandler(),
@@ -446,8 +446,8 @@ No UUID lookup table, no counter — set comparison is sufficient.
 
 | Queue | Direction | DLQ |
 |-------|-----------|-----|
-| `aia-tasks` | Orchestrator → Relay Service | `aia-tasks-dlq` |
-| `aia-status` | Relay Service → Orchestrator | `aia-status-dlq` |
+| `aia-tasks` | Orchestrator → Agent Service | `aia-tasks-dlq` |
+| `aia-status` | Agent Service → Orchestrator | `aia-status-dlq` |
 
 > Queue names subject to change. Values noted here are for POC baseline.
 
@@ -582,7 +582,7 @@ Single container. Consumer service — no inbound traffic, only SQS polling and 
 | Network mode | `awsvpc` |
 | Task role | `aia-agent-task-role` |
 
-**Container: relay-service**
+**Container: agent-service**
 
 | Parameter | Value |
 |-----------|-------|
@@ -590,7 +590,7 @@ Single container. Consumer service — no inbound traffic, only SQS polling and 
 | Memory | 2048 MB |
 | Port | 8080 (health endpoint only — no public traffic) |
 | Health check | `GET http://localhost:8080/health` — interval 30s, timeout 5s, retries 3 |
-| Image | ECR: `aia-relay-service:latest` |
+| Image | ECR: `aia-agent-service:latest` |
 
 Environment variables:
 ```
@@ -605,7 +605,7 @@ BEDROCK_SOLUTION_MODEL_ID
 DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 ```
 
-**Health check implementation note:** Relay Service has no HTTP server by nature (it is a queue consumer). Add a minimal health endpoint that verifies the polling loop is running — a lightweight FastAPI or http.server instance on port 8080 returning `{"status": "ok"}`. ECS uses this to detect crashed containers.
+**Health check implementation note:** Agent Service has no HTTP server by nature (it is a queue consumer). Add a minimal health endpoint that verifies the polling loop is running — a lightweight FastAPI or http.server instance on port 8080 returning `{"status": "ok"}`. ECS uses this to detect crashed containers.
 
 ---
 
@@ -757,11 +757,11 @@ For production, add a Bedrock VPC interface endpoint to keep traffic within the 
 | Subnets | Private subnets where Agent POD tasks run |
 | Security group | Allow HTTPS (443) from Agent POD security group |
 
-Once the endpoint is in place, Bedrock SDK calls from the Relay Service route through it automatically — no code change needed.
+Once the endpoint is in place, Bedrock SDK calls from the Agent Service route through it automatically — no code change needed.
 
 ---
 
-### Relay Service config mapping (model IDs from environment)
+### Agent Service config mapping (model IDs from environment)
 
 Each agent type uses its own model — configurable independently:
 
@@ -1617,7 +1617,7 @@ CREATE INDEX idx_audit_logs_created_at  ON audit_logs(created_at DESC);
 | `DOCUMENT_PROCESSING_PARTIAL` | `orchestrator` | Status set to PARTIAL_COMPLETE (details: missing agents) |
 | `DOCUMENT_PROCESSING_FAILED` | `orchestrator` | Status set to ERROR (details: error message) |
 
-**Relay Service — task-level events:**
+**Agent Service — task-level events:**
 
 | event_type | actor | Logged when |
 |------------|-------|-------------|
@@ -1800,7 +1800,7 @@ Lambda: Data Pipeline
 
 ### Query JSON Structure (per agent per templateType)
 
-The queries JSON is the contract between the Data Pipeline and the Relay Service. It is generated once by the Data Pipeline and consumed many times by agents.
+The queries JSON is the contract between the Data Pipeline and the Agent Service. It is generated once by the Data Pipeline and consumed many times by agents.
 
 ```json
 {
@@ -2098,7 +2098,7 @@ CREATE INDEX idx_source_fetch_log_source ON source_fetch_log(source_id, fetched_
 
 ---
 
-## Relay Service — SQS Consumer Design
+## Agent Service — SQS Consumer Design
 
 ### What it is
 
@@ -2109,7 +2109,7 @@ A **plain asyncio worker process** running inside the Agent POD ECS container. N
 ### Module Structure
 
 ```
-relay-service/
+agent-service/
 ├── main.py           ← entry point: starts poll loop + health server concurrently
 ├── worker.py         ← SQS polling loop, concurrency control, message lifecycle
 ├── dispatcher.py     ← lazy handler registry (agentType → handler instance)
@@ -2244,7 +2244,7 @@ expected_task_ids = {f"{document_id}_{a}" for a in active_agent_types}
 |-|-------------------------------------|----------------------------------|
 | Messages on queue | Only applicable tasks published | Always 5 tasks regardless of template |
 | Fan-in set | Dynamic — built from query_sets at dispatch | Static 5, minus SKIPPED responses |
-| Relay Service | No change needed | Needs SKIPPED status + extra RDS check per task |
+| Agent Service | No change needed | Needs SKIPPED status + extra RDS check per task |
 | New status needed | No | Yes — SKIPPED propagates everywhere |
 | Orchestrator RDS access | One query at dispatch time (agent list only, not query content) | None |
 
