@@ -270,7 +270,11 @@ def run() -> dict[str, int]:
 
 def main() -> None:
     try:
-        run()
+        summary = run()
+        # Non-zero failed count should fail the process so callers can detect partial errors.
+        if summary.get("failed", 0) > 0:
+            logger.error("Pipeline completed with %d failed source(s)", summary["failed"])
+            sys.exit(1)
     except Exception as exc:
         logger.critical("Pipeline failed: %s", exc, exc_info=True)
         sys.exit(1)

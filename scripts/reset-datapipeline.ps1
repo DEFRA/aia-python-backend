@@ -12,29 +12,32 @@
 #   * psql.exe on PATH  OR  python psycopg2 available in .venv
 #
 # After the script completes:
-#   * data_pipeline.policy_document_sync  — 0 rows
-#   * data_pipeline.questions             — 0 rows
-#   * data_pipeline.policy_documents      — 0 rows
-#   * data_pipeline.source_policy_docs    — unchanged (seed data)
-#   * policy_documents + questions        — re-populated by the pipeline run
+#   * data_pipeline.policy_document_sync  - 0 rows
+#   * data_pipeline.questions             - 0 rows
+#   * data_pipeline.policy_documents      - 0 rows
+#   * data_pipeline.source_policy_docs    - unchanged (seed data)
+#   * policy_documents + questions        - re-populated by the pipeline run
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
-# ── Resolve repo root ──────────────────────────────────────────────────────────
+# -- Resolve repo root ----------------------------------------------------------
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot   = Split-Path -Parent $ScriptDir
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 
-# ── Colour helpers ─────────────────────────────────────────────────────────────
+# -- Color helpers --------------------------------------------------------------
 function ok($label, $detail = '') {
     Write-Host "  " -NoNewline
-    Write-Host ([char]0x2713) -ForegroundColor Green -NoNewline
+    Write-Host "[OK]" -ForegroundColor Green -NoNewline
     Write-Host ("  {0,-38} {1}" -f $label, $detail)
 }
 function fail($label, $detail = '') {
     Write-Host "  " -NoNewline
-    Write-Host ([char]0x2717) -ForegroundColor Red -NoNewline
+    Write-Host "[X]" -ForegroundColor Red -NoNewline
     Write-Host ("  {0,-38} {1}" -f $label, $detail)
 }
 function warn($label, $detail = '') {
@@ -48,14 +51,14 @@ function banner($text) {
     Write-Host ("-" * 58)
 }
 
-# ── Require .venv ──────────────────────────────────────────────────────────────
+# -- Require .venv --------------------------------------------------------------
 if (-not (Test-Path $VenvPython)) {
     Write-Host "ERROR: .venv not found at $VenvPython" -ForegroundColor Red
     Write-Host "  Build it:  python -m venv .venv && .venv\Scripts\pip install -r requirements.txt"
     exit 1
 }
 
-# ── Load .env via python-dotenv ────────────────────────────────────────────────
+# -- Load .env via python-dotenv ------------------------------------------------
 # Python handles special characters in passwords (e.g. Admin123$@) safely.
 $EnvFile = Join-Path $RepoRoot ".env"
 if (-not (Test-Path $EnvFile)) {
@@ -71,7 +74,7 @@ print(json.dumps(vals))
 "@ 2>$null
 
 if ($LASTEXITCODE -ne 0 -or -not $EnvVars) {
-    Write-Host "ERROR: failed to load .env — is python-dotenv installed in .venv?" -ForegroundColor Red
+    Write-Host "ERROR: failed to load .env - is python-dotenv installed in .venv?" -ForegroundColor Red
     exit 1
 }
 
@@ -80,14 +83,50 @@ foreach ($prop in $Parsed.PSObject.Properties) {
     Set-Item -Path "Env:\$($prop.Name)" -Value $prop.Value
 }
 
-# ── Resolve DB variables (with safe defaults) ──────────────────────────────────
+# -- Resolve DB variables (with safe defaults) ----------------------------------
 $DbHost = if ($env:DB_HOST)     { $env:DB_HOST }     else { "localhost" }
 $DbPort = if ($env:DB_PORT)     { $env:DB_PORT }     else { "5432" }
 $DbName = if ($env:DB_NAME)     { $env:DB_NAME }     else { "aiadocuments" }
 $DbUser = if ($env:DB_USER)     { $env:DB_USER }     else { "aiauser" }
-$DbPass = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { "" }
 
-# ── DB helper: run SQL via Python psycopg2 ─────────────────────────────────────
+# Python SQL runner is written to a temp file to avoid multiline -c quoting issues.
+$SqlRunnerPath = Join-Path $env:TEMP "aia_sql_runner.py"
+$SqlRunnerCode = @'
+import os
+import sys
+import psycopg2
+
+sql = sys.stdin.read()
+scalar = os.environ.get("AIA_SQL_SCALAR", "0") == "1"
+
+try:
+    conn = psycopg2.connect(
+        host=os.environ.get("DB_HOST", "localhost"),
+        port=int(os.environ.get("DB_PORT", "5432")),
+        dbname=os.environ.get("DB_NAME", "aiadocuments"),
+        user=os.environ.get("DB_USER", "aiauser"),
+        password=os.environ.get("DB_PASSWORD", ""),
+    )
+    if not scalar:
+        conn.autocommit = True
+
+    cur = conn.cursor()
+    cur.execute(sql)
+
+    if scalar:
+        row = cur.fetchone()
+        print(0 if row is None else row[0])
+    else:
+        print("OK")
+
+    conn.close()
+except Exception as e:
+    print(f"ERROR: {e}", file=sys.stderr)
+    sys.exit(1)
+'@
+Set-Content -Path $SqlRunnerPath -Value $SqlRunnerCode -Encoding UTF8
+
+# -- DB helper: run SQL via Python psycopg2 -------------------------------------
 # Using Python avoids psql.exe dependency and handles special chars in passwords.
 function Invoke-Sql {
     param(
@@ -95,26 +134,14 @@ function Invoke-Sql {
         [switch]$ScalarInt   # return a single integer result
     )
     if ($ScalarInt) {
-        $result = & $VenvPython -c @"
-import psycopg2, sys
-conn = psycopg2.connect(host='$DbHost', port=$DbPort, dbname='$DbName', user='$DbUser', password=r'$DbPass')
-cur = conn.cursor()
-cur.execute("""$Sql""")
-print(cur.fetchone()[0])
-conn.close()
-"@ 2>&1
+        $env:AIA_SQL_SCALAR = "1"
+        $result = $Sql | & $VenvPython $SqlRunnerPath 2>&1
+        Remove-Item Env:\AIA_SQL_SCALAR -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -ne 0) { return -1 }
-        return [int]($result -as [string]).Trim()
+        return [int](($result -join "`n").Trim())
     } else {
-        $output = & $VenvPython -c @"
-import psycopg2, sys
-conn = psycopg2.connect(host='$DbHost', port=$DbPort, dbname='$DbName', user='$DbUser', password=r'$DbPass')
-conn.autocommit = True
-cur = conn.cursor()
-cur.execute("""$Sql""")
-conn.close()
-print('OK')
-"@ 2>&1
+        Remove-Item Env:\AIA_SQL_SCALAR -ErrorAction SilentlyContinue
+        $output = $Sql | & $VenvPython $SqlRunnerPath 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host $output -ForegroundColor Red
             return $false
@@ -130,28 +157,17 @@ function Get-RowCount($Table) {
 Set-Location $RepoRoot
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 1 — verify PostgreSQL connection"
+banner "Step 1 - verify PostgreSQL connection"
 
-$connTest = & $VenvPython -c @"
-import psycopg2, sys
-try:
-    conn = psycopg2.connect(host='$DbHost', port=$DbPort, dbname='$DbName', user='$DbUser', password=r'$DbPass')
-    conn.close()
-    print('OK')
-except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
-    sys.exit(1)
-"@ 2>&1
-
-if ($LASTEXITCODE -ne 0) {
-    fail "PostgreSQL" "cannot connect — check DB_* vars in .env"
-    Write-Host $connTest -ForegroundColor Red
+$connTest = Invoke-Sql -Sql "SELECT 1;" -ScalarInt
+if ($connTest -ne 1) {
+    fail "PostgreSQL" "cannot connect - check DB_* vars in .env"
     exit 1
 }
 ok "PostgreSQL" "${DbUser}@${DbHost}:${DbPort}/${DbName}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 2 — truncate mutable tables (CASCADE)"
+banner "Step 2 - truncate mutable tables (CASCADE)"
 
 $TruncateSql = @"
 TRUNCATE TABLE
@@ -169,7 +185,7 @@ if (-not $truncOk) {
 ok "Truncated" "policy_document_sync, questions, policy_documents"
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 3 — confirm row counts"
+banner "Step 3 - confirm row counts"
 
 $failCount = 0
 
@@ -191,7 +207,7 @@ $seedCount = Get-RowCount "data_pipeline.source_policy_docs"
 if ($seedCount -gt 0) {
     ok "data_pipeline.source_policy_docs" "$seedCount rows (seed intact)"
 } else {
-    warn "data_pipeline.source_policy_docs" "0 rows — seed table is empty; pipeline will produce no output"
+    warn "data_pipeline.source_policy_docs" "0 rows - seed table is empty; pipeline will produce no output"
 }
 
 if ($failCount -gt 0) {
@@ -201,7 +217,7 @@ if ($failCount -gt 0) {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 4 — run data pipeline"
+banner "Step 4 - run data pipeline"
 
 Write-Host ""
 Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.main"
@@ -218,7 +234,7 @@ if ($pipelineExit -eq 0) {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 5 — final row counts"
+banner "Step 5 - final row counts"
 
 $pdCount   = Get-RowCount "data_pipeline.policy_documents"
 $qCount    = Get-RowCount "data_pipeline.questions"
@@ -227,13 +243,13 @@ $syncCount = Get-RowCount "data_pipeline.policy_document_sync"
 if ($pdCount -gt 0) {
     ok "policy_documents" "$pdCount rows"
 } else {
-    warn "policy_documents" "0 rows — pipeline may not have produced output"
+    warn "policy_documents" "0 rows - pipeline may not have produced output"
 }
 
 if ($qCount -gt 0) {
     ok "questions" "$qCount rows"
 } else {
-    warn "questions" "0 rows — pipeline may not have produced output"
+    warn "questions" "0 rows - pipeline may not have produced output"
 }
 
 ok "policy_document_sync" "$syncCount rows"
