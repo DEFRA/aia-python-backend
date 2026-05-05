@@ -10,7 +10,7 @@
 # Requirements:
 #   • .env in the repo root with DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 #   • .venv built from requirements.txt (needs python-dotenv)
-#   • psql on PATH (comes with PostgreSQL client tools)
+#   • Podman at /opt/podman/bin/podman with container "aiadocuments" running
 #
 # After the script completes:
 #   • data_pipeline.policy_document_sync  — 0 rows
@@ -65,9 +65,9 @@ DB_NAME="${DB_NAME:-aiadocuments}"
 DB_USER="${DB_USER:-aiauser}"
 DB_PASSWORD="${DB_PASSWORD:-}"
 
-# Convenience wrapper — avoids repeating the connection flags everywhere.
+# Convenience wrapper — runs psql inside the Podman container.
 pg() {
-    PGPASSWORD="$DB_PASSWORD" psql \
+    "$PODMAN" exec -e "PGPASSWORD=$DB_PASSWORD" "$PG_CONTAINER" psql \
         -h "$DB_HOST" -p "$DB_PORT" \
         -U "$DB_USER" -d "$DB_NAME" \
         -v ON_ERROR_STOP=1 \
@@ -79,12 +79,15 @@ row_count() {
     pg -t -A -c "SELECT COUNT(*) FROM $1;" 2>/dev/null | tr -d '[:space:]'
 }
 
+PODMAN="/opt/podman/bin/podman"
+PG_CONTAINER="${PG_CONTAINER:-aiadocuments}"
+
 cd "$REPO_ROOT"
 
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 1 — verify PostgreSQL connection"
 
-if PGPASSWORD="$DB_PASSWORD" psql \
+if "$PODMAN" exec -e "PGPASSWORD=$DB_PASSWORD" "$PG_CONTAINER" psql \
         -h "$DB_HOST" -p "$DB_PORT" \
         -U "$DB_USER" -d "$DB_NAME" \
         -c "SELECT 1;" > /dev/null 2>&1; then
@@ -135,12 +138,42 @@ check_empty "data_pipeline.policy_document_sync"
 check_empty "data_pipeline.questions"
 check_empty "data_pipeline.policy_documents"
 
-# source_policy_docs must still have rows (it is the seed table — never truncated).
+# source_policy_docs must have rows (seed table — never truncated by this script).
 SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
 if [[ "$SEED_COUNT" -gt 0 ]]; then
     ok "data_pipeline.source_policy_docs" "$SEED_COUNT rows (seed intact)"
 else
-    warn "data_pipeline.source_policy_docs" "0 rows — seed table is empty; pipeline will produce no output"
+    warn "source_policy_docs" "empty — seeding from app/datapipeline/data/policy_sources.json"
+    SEED_FILE="$REPO_ROOT/app/datapipeline/data/policy_sources.json"
+    if [[ ! -f "$SEED_FILE" ]]; then
+        fail "seed file not found" "$SEED_FILE"
+        FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+    else
+        SEED_SQL="$("$VENV_PYTHON" -c "
+import json, sys
+with open('$SEED_FILE') as f:
+    rows = json.load(f)
+vals = []
+for r in rows:
+    def esc(s): return str(s).replace(\"'\", \"''\")
+    isactive = 'true' if r['isactive'] else 'false'
+    vals.append(\"(\" + str(r['url_id']) + \", '\" + esc(r['url']) + \"', '\" + esc(r['filename']) + \"', '\" + esc(r['category']) + \"', '\" + esc(r['type']) + \"', \" + isactive + \")\")
+print('INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, type, isactive) VALUES')
+print(',\n'.join(vals))
+print(\"ON CONFLICT DO NOTHING;\")
+print(\"SELECT setval('data_pipeline.source_path_policydoc_url_id_seq', (SELECT MAX(url_id) FROM data_pipeline.source_policy_docs));\")
+")"
+        if echo "$SEED_SQL" | "$PODMAN" exec -i -e "PGPASSWORD=$DB_PASSWORD" "$PG_CONTAINER" psql \
+                -h "$DB_HOST" -p "$DB_PORT" \
+                -U "$DB_USER" -d "$DB_NAME" \
+                -v ON_ERROR_STOP=1 > /dev/null 2>&1; then
+            SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
+            ok "data_pipeline.source_policy_docs" "$SEED_COUNT rows (seeded from JSON)"
+        else
+            fail "data_pipeline.source_policy_docs" "seeding failed — check $SEED_FILE"
+            FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+        fi
+    fi
 fi
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
