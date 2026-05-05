@@ -4,6 +4,7 @@ asyncpg>=0.30.0
 boto3>=1.43.0
 fastapi>=0.128.0
 httpx>=0.28.0
+msal>=1.28.0
 psycopg2-binary>=2.9.0
 pydantic-settings>=2.9.0
 PyMuPDF>=1.24.0
