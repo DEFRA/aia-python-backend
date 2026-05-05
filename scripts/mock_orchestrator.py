@@ -52,7 +52,7 @@ if str(_EVAL_ROOT) not in sys.path:
 from app.core.config import config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
-from src.handlers.parse import _parse_bytes  # noqa: E402
+from src.utils.document_parser import _parse_bytes  # noqa: E402
 
 # --------------------------------------------------------------------------
 
@@ -75,6 +75,8 @@ async def _sqs_client():
         "aws_access_key_id": config.aws.access_key_id,
         "aws_secret_access_key": config.aws.secret_access_key,
     }
+    if config.aws.session_token:
+        kwargs["aws_session_token"] = config.aws.session_token
     if config.aws.endpoint_url:
         kwargs["endpoint_url"] = config.aws.endpoint_url
     async with session.create_client(**kwargs) as client:
@@ -100,10 +102,14 @@ async def _push_tasks(
             s3_bucket=config.s3.bucket_name,
             s3_key=f"uploads/{doc_id}.pdf",
         )
-        await client.send_message(
-            QueueUrl=config.sqs.task_queue_url,
-            MessageBody=task.model_dump_json(by_alias=True),
-        )
+        send_kwargs: dict[str, Any] = {
+            "QueueUrl": config.sqs.task_queue_url,
+            "MessageBody": task.model_dump_json(by_alias=True),
+        }
+        if config.sqs.task_queue_url.endswith(".fifo"):
+            send_kwargs["MessageGroupId"] = doc_id
+            send_kwargs["MessageDeduplicationId"] = task_id
+        await client.send_message(**send_kwargs)
         task_ids.append(task_id)
         print(f"  → pushed  task_id={task_id}  agent_type={agent_type}")
     return task_ids
@@ -197,12 +203,16 @@ async def run(
     file_content: str,
     timeout: float,
 ) -> None:
+    n_tasks = len(agent_types)
     print(
         f"mock_orchestrator: doc_id={doc_id}  "
         f"agent_types={agent_types}  timeout={timeout}s"
     )
     print(f"  task queue  : {config.sqs.task_queue_url}")
     print(f"  status queue: {config.sqs.status_queue_url}")
+    print()
+    print(f"  Pair with mock_agent (run in a separate terminal):")
+    print(f"    python scripts/mock_agent.py --doc-id {doc_id} --count {n_tasks}")
 
     async with _sqs_client() as client:
         print("\nPushing tasks…")

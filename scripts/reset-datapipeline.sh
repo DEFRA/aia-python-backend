@@ -4,13 +4,19 @@
 # Truncate the three mutable data-pipeline tables, confirm they are empty,
 # then run the data-pipeline to re-populate them from source_policy_docs.
 #
-# Usage (run from repo root or anywhere):
-#   ./scripts/reset-datapipeline.sh
+# Usage:
+#   ./scripts/reset-datapipeline.sh                  # local Podman container (default)
+#   ./scripts/reset-datapipeline.sh --target local   # explicit local mode
+#   ./scripts/reset-datapipeline.sh --target rds     # AWS RDS — psql must be on PATH
 #
-# Requirements:
+# Requirements (both modes):
 #   • .env in the repo root with DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 #   • .venv built from requirements.txt (needs python-dotenv)
-#   • psql on PATH (comes with PostgreSQL client tools)
+#
+# Additional requirements per mode:
+#   local  — Podman at /opt/podman/bin/podman; container "aiadocuments" running
+#   rds    — psql client on PATH; DB_HOST points to the RDS endpoint;
+#            DB_SSL_MODE defaults to "require" (override via env if needed)
 #
 # After the script completes:
 #   • data_pipeline.policy_document_sync  — 0 rows
@@ -35,6 +41,21 @@ ok()     { printf "${GREEN}  ✓${NC}  %-36s %s\n" "$1" "${2:-}"; }
 fail()   { printf "${RED}  ✗${NC}  %-36s %s\n" "$1" "${2:-}"; }
 warn()   { printf "${YELLOW}  !${NC}  %-36s %s\n" "$1" "${2:-}"; }
 banner() { echo -e "\n${BOLD}$1${NC}"; printf '─%.0s' {1..58}; echo; }
+
+# ── Parse arguments ────────────────────────────────────────────────────────────
+TARGET="local"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target)   TARGET="$2"; shift 2 ;;
+        --target=*) TARGET="${1#--target=}"; shift ;;
+        *) echo -e "${RED}ERROR:${NC} Unknown argument: $1"; exit 1 ;;
+    esac
+done
+
+if [[ "$TARGET" != "local" && "$TARGET" != "rds" ]]; then
+    echo -e "${RED}ERROR:${NC} --target must be 'local' or 'rds'"
+    exit 1
+fi
 
 # ── Require .venv (needed to load .env via python-dotenv) ──────────────────────
 if [[ ! -x "$VENV_PYTHON" ]]; then
@@ -65,14 +86,54 @@ DB_NAME="${DB_NAME:-aiadocuments}"
 DB_USER="${DB_USER:-aiauser}"
 DB_PASSWORD="${DB_PASSWORD:-}"
 
-# Convenience wrapper — avoids repeating the connection flags everywhere.
-pg() {
-    PGPASSWORD="$DB_PASSWORD" psql \
-        -h "$DB_HOST" -p "$DB_PORT" \
-        -U "$DB_USER" -d "$DB_NAME" \
-        -v ON_ERROR_STOP=1 \
-        "$@"
-}
+# ── Configure psql backend based on --target ───────────────────────────────────
+if [[ "$TARGET" == "rds" ]]; then
+    PSQL_BIN="$(command -v psql 2>/dev/null || true)"
+    if [[ -z "$PSQL_BIN" ]]; then
+        echo -e "${RED}ERROR:${NC} psql not found on PATH — install PostgreSQL client tools for --target rds"
+        exit 1
+    fi
+    DB_SSL_MODE="${DB_SSL_MODE:-require}"
+
+    # pg() — run a psql command directly against RDS
+    pg() {
+        PGPASSWORD="$DB_PASSWORD" PGSSLMODE="$DB_SSL_MODE" "$PSQL_BIN" \
+            -h "$DB_HOST" -p "$DB_PORT" \
+            -U "$DB_USER" -d "$DB_NAME" \
+            -v ON_ERROR_STOP=1 \
+            "$@"
+    }
+
+    # pg_pipe() — pipe SQL into psql (stdin passthrough; same as pg() for RDS)
+    pg_pipe() { pg "$@"; }
+
+else
+    PODMAN="/opt/podman/bin/podman"
+    PG_CONTAINER="${PG_CONTAINER:-aiadocuments}"
+
+    if [[ ! -x "$PODMAN" ]]; then
+        echo -e "${RED}ERROR:${NC} Podman not found at $PODMAN"
+        exit 1
+    fi
+
+    # pg() — run a psql command inside the Podman container
+    pg() {
+        "$PODMAN" exec -e "PGPASSWORD=$DB_PASSWORD" "$PG_CONTAINER" psql \
+            -h "$DB_HOST" -p "$DB_PORT" \
+            -U "$DB_USER" -d "$DB_NAME" \
+            -v ON_ERROR_STOP=1 \
+            "$@"
+    }
+
+    # pg_pipe() — pipe SQL via stdin into the container (-i enables stdin on exec)
+    pg_pipe() {
+        "$PODMAN" exec -i -e "PGPASSWORD=$DB_PASSWORD" "$PG_CONTAINER" psql \
+            -h "$DB_HOST" -p "$DB_PORT" \
+            -U "$DB_USER" -d "$DB_NAME" \
+            -v ON_ERROR_STOP=1 \
+            "$@"
+    }
+fi
 
 # row_count <schema.table>  →  prints the integer row count
 row_count() {
@@ -81,13 +142,12 @@ row_count() {
 
 cd "$REPO_ROOT"
 
+echo -e "\n${BOLD}target: ${TARGET}${NC}  ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 1 — verify PostgreSQL connection"
 
-if PGPASSWORD="$DB_PASSWORD" psql \
-        -h "$DB_HOST" -p "$DB_PORT" \
-        -U "$DB_USER" -d "$DB_NAME" \
-        -c "SELECT 1;" > /dev/null 2>&1; then
+if pg -c "SELECT 1;" > /dev/null 2>&1; then
     ok "PostgreSQL" "$DB_USER@$DB_HOST:$DB_PORT/$DB_NAME"
 else
     fail "PostgreSQL" "cannot connect — check DB_* vars in .env"
@@ -135,12 +195,39 @@ check_empty "data_pipeline.policy_document_sync"
 check_empty "data_pipeline.questions"
 check_empty "data_pipeline.policy_documents"
 
-# source_policy_docs must still have rows (it is the seed table — never truncated).
+# source_policy_docs must have rows (seed table — never truncated by this script).
 SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
 if [[ "$SEED_COUNT" -gt 0 ]]; then
     ok "data_pipeline.source_policy_docs" "$SEED_COUNT rows (seed intact)"
 else
-    warn "data_pipeline.source_policy_docs" "0 rows — seed table is empty; pipeline will produce no output"
+    warn "source_policy_docs" "empty — seeding from app/datapipeline/data/policy_sources.json"
+    SEED_FILE="$REPO_ROOT/app/datapipeline/data/policy_sources.json"
+    if [[ ! -f "$SEED_FILE" ]]; then
+        fail "seed file not found" "$SEED_FILE"
+        FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+    else
+        SEED_SQL="$("$VENV_PYTHON" -c "
+import json, sys
+with open('$SEED_FILE') as f:
+    rows = json.load(f)
+vals = []
+for r in rows:
+    def esc(s): return str(s).replace(\"'\", \"''\")
+    isactive = 'true' if r['isactive'] else 'false'
+    vals.append(\"(\" + str(r['url_id']) + \", '\" + esc(r['url']) + \"', '\" + esc(r['filename']) + \"', '\" + esc(r['category']) + \"', '\" + esc(r['type']) + \"', \" + isactive + \")\")
+print('INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, type, isactive) VALUES')
+print(',\n'.join(vals))
+print(\"ON CONFLICT DO NOTHING;\")
+print(\"SELECT setval('data_pipeline.source_path_policydoc_url_id_seq', (SELECT MAX(url_id) FROM data_pipeline.source_policy_docs));\")
+")"
+        if echo "$SEED_SQL" | pg_pipe > /dev/null 2>&1; then
+            SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
+            ok "data_pipeline.source_policy_docs" "$SEED_COUNT rows (seeded from JSON)"
+        else
+            fail "data_pipeline.source_policy_docs" "seeding failed — check $SEED_FILE"
+            FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+        fi
+    fi
 fi
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then

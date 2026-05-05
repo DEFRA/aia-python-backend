@@ -6,20 +6,20 @@ and pushes the result to aia-status.  Useful for testing CoreBackend +
 Orchestrator in isolation without running the real Agent Service.
 
 Usage:
-    python scripts/mock_agent.py                     # run indefinitely, random ratings
-    python scripts/mock_agent.py --count 3           # stop after 3 tasks
-    python scripts/mock_agent.py --rating Amber      # always return Amber
-    python scripts/mock_agent.py --delay 2           # wait 2 s before responding
+    python scripts/mock_agent.py                          # run indefinitely, random ratings
+    python scripts/mock_agent.py --count 3                # stop after 3 tasks
+    python scripts/mock_agent.py --rating Amber           # always return Amber
+    python scripts/mock_agent.py --delay 2                # wait 2 s before responding
+    python scripts/mock_agent.py --doc-id <id>            # only handle tasks for that doc
+    python scripts/mock_agent.py --doc-id <id> --count 2  # paired run with mock_orchestrator
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import random
 import sys
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,8 @@ async def _sqs_client():
         "aws_access_key_id": config.aws.access_key_id,
         "aws_secret_access_key": config.aws.secret_access_key,
     }
+    if config.aws.session_token:
+        kwargs["aws_session_token"] = config.aws.session_token
     if config.aws.endpoint_url:
         kwargs["endpoint_url"] = config.aws.endpoint_url
     async with session.create_client(**kwargs) as client:
@@ -93,13 +95,14 @@ async def _receive_one(client: Any) -> list[dict[str, str]]:
     ]
 
 
-async def run(count: int | None, rating: str | None, delay: float) -> None:
+async def run(count: int | None, rating: str | None, delay: float, doc_id: str | None) -> None:
     processed = 0
+    filter_desc = f"doc_id={doc_id}" if doc_id else "all docs"
     print(
         f"mock_agent: polling {config.sqs.task_queue_url}  "
         f"(count={'∞' if count is None else count}, "
         f"rating={'random' if rating is None else rating}, "
-        f"delay={delay}s)"
+        f"delay={delay}s, filter={filter_desc})"
     )
 
     while count is None or processed < count:
@@ -110,11 +113,26 @@ async def run(count: int | None, rating: str | None, delay: float) -> None:
                 continue
 
             msg = msgs[0]
-            task = TaskMessage.model_validate_json(msg["body"])
+            try:
+                task = TaskMessage.model_validate_json(msg["body"])
+            except Exception as exc:
+                print(f"  [skip] unrecognised message body — {exc}")
+                # Leave the message in the queue; it will reappear after visibility timeout.
+                continue
+
+            # Skip tasks that belong to a different run without deleting them.
+            # They will become visible again after the queue's visibility timeout.
+            if doc_id and task.document_id != doc_id:
+                print(
+                    f"  [skip] task_id={task.task_id}  doc_id={task.document_id}  "
+                    f"(waiting for doc_id={doc_id})"
+                )
+                continue
+
             chosen_rating = rating or random.choice(_RATINGS)
 
             print(
-                f"  → received task_id={task.task_id}  "
+                f"  → received  task_id={task.task_id}  "
                 f"agent_type={task.agent_type}  "
                 f"doc_id={task.document_id}"
             )
@@ -123,11 +141,19 @@ async def run(count: int | None, rating: str | None, delay: float) -> None:
                 print(f"  [delay] sleeping {delay}s…")
                 await asyncio.sleep(delay)
 
+            # Echo the same task_id and document_id back in the StatusMessage
+            # so the orchestrator can match the response to its original request.
             status = StatusMessage(
                 task_id=task.task_id,
                 document_id=task.document_id,
                 agent_type=task.agent_type,
                 result=_mock_result(task.agent_type, chosen_rating),
+            )
+
+            print(
+                f"  ← echoing   task_id={status.task_id}  "
+                f"doc_id={status.document_id}  "
+                f"rating={chosen_rating}"
             )
 
             await client.send_message(
@@ -141,7 +167,7 @@ async def run(count: int | None, rating: str | None, delay: float) -> None:
 
             processed += 1
             print(
-                f"  ✓ published status  rating={chosen_rating}  "
+                f"  ✓ published status  "
                 f"({processed}{'/' + str(count) if count else ''})"
             )
 
@@ -153,12 +179,17 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--count", type=int, default=None, help="Stop after N tasks (default: run forever)")
     p.add_argument("--rating", choices=_RATINGS, default=None, help="Force a specific rating (default: random)")
     p.add_argument("--delay", type=float, default=0.0, help="Seconds to wait before responding (default: 0)")
+    p.add_argument(
+        "--doc-id",
+        default=None,
+        help="Only process tasks whose document_id matches this value; skip others (default: process all)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
     try:
-        asyncio.run(run(count=args.count, rating=args.rating, delay=args.delay))
+        asyncio.run(run(count=args.count, rating=args.rating, delay=args.delay, doc_id=args.doc_id))
     except KeyboardInterrupt:
         print("\nmock_agent: interrupted.")
