@@ -3,7 +3,7 @@ Mock Orchestrator — right-hand test harness.
 
 Generates TaskMessages with mock fileContent, pushes them to aia-tasks,
 then polls aia-status until all responses arrive (or the timeout expires).
-Useful for testing the Relay Service in isolation without running the real
+Useful for testing the Agent Service in isolation without running the real
 CoreBackend + Orchestrator.
 
 Usage:
@@ -44,7 +44,7 @@ load_dotenv(_ROOT / ".env")
 
 sys.path.insert(0, str(_ROOT))
 
-# Inject evaluation module root so src.* imports resolve (same as relay_service/worker.py)
+# Inject evaluation module root so src.* imports resolve (same as agent_service/worker.py)
 _EVAL_ROOT = _ROOT / "app" / "agents" / "evaluation"
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))

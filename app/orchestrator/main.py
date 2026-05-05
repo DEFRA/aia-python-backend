@@ -102,7 +102,7 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
             else None
         )
 
-        # Fan-out: one task per agent_type — Relay Service owns the per-doc fan-out.
+        # Fan-out: one task per agent_type — Agent Service owns the per-doc fan-out.
         tasks: list[TaskMessage] = []
         for agent_type in agent_types:
             tasks.append(

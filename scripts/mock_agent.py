@@ -3,7 +3,7 @@ Mock Agent — left-hand test harness.
 
 Polls aia-tasks, fabricates a StatusMessage for each received task,
 and pushes the result to aia-status.  Useful for testing CoreBackend +
-Orchestrator in isolation without running the real Relay Service.
+Orchestrator in isolation without running the real Agent Service.
 
 Usage:
     python scripts/mock_agent.py                     # run indefinitely, random ratings

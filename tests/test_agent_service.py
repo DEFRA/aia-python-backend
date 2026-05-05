@@ -1,4 +1,4 @@
-"""Tests for app.relay_service.worker — dispatch and polling loop."""
+"""Tests for app.agent_service.worker — dispatch and polling loop."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def _make_questions() -> list[QuestionItem]:
 
 @pytest.mark.asyncio
 async def test_get_document_returns_inline_content() -> None:
-    from app.relay_service.worker import _get_document
+    from app.agent_service.worker import _get_document
 
     task = _make_task(file_content="Inline text")
     s3 = AsyncMock()
@@ -83,13 +83,13 @@ async def test_get_document_returns_inline_content() -> None:
 
 @pytest.mark.asyncio
 async def test_get_document_downloads_from_s3_when_no_inline() -> None:
-    from app.relay_service.worker import _get_document
+    from app.agent_service.worker import _get_document
 
     task = _make_task(file_content=None)
     s3 = AsyncMock()
     s3.download_file.return_value = b"S3 document text"
 
-    with patch("app.relay_service.worker._extract_text", return_value="S3 document text"):
+    with patch("app.agent_service.worker._extract_text", return_value="S3 document text"):
         doc = await _get_document(task, s3)
 
     assert doc == "S3 document text"
@@ -98,7 +98,7 @@ async def test_get_document_downloads_from_s3_when_no_inline() -> None:
 
 @pytest.mark.asyncio
 async def test_get_document_raises_when_no_content_and_no_s3_fields() -> None:
-    from app.relay_service.worker import _get_document
+    from app.agent_service.worker import _get_document
 
     task = _make_task(file_content=None, s3_key=None, s3_bucket=None)
     s3 = AsyncMock()
@@ -113,7 +113,7 @@ async def test_get_document_raises_when_no_content_and_no_s3_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_returns_error_for_unknown_agent_type() -> None:
-    from app.relay_service.worker import dispatch
+    from app.agent_service.worker import dispatch
 
     task = _make_task(agent_type="does_not_exist")
     s3 = AsyncMock()
@@ -132,7 +132,7 @@ async def test_dispatch_returns_error_for_unknown_agent_type() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_returns_populated_status_on_success() -> None:
-    from app.relay_service.worker import dispatch
+    from app.agent_service.worker import dispatch
 
     task = _make_task()
     s3 = AsyncMock()
@@ -142,22 +142,22 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
     mock_agent.assess.return_value = llm_output
 
     with (
-        patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
+        patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_all_policy_docs_by_category",
+            "app.agent_service.worker.fetch_all_policy_docs_by_category",
             new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
         ),
         patch(
-            "app.relay_service.worker.fetch_questions_by_policy_doc_id",
+            "app.agent_service.worker.fetch_questions_by_policy_doc_id",
             new=AsyncMock(return_value=questions),
         ),
-        patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
+        patch("app.agent_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
-            "app.relay_service.worker.AGENT_REGISTRY",
+            "app.agent_service.worker.AGENT_REGISTRY",
             {"security": lambda **_: mock_agent},
         ),
         patch(
-            "app.relay_service.worker.CONFIG_REGISTRY",
+            "app.agent_service.worker.CONFIG_REGISTRY",
             {"security": MagicMock(return_value=MagicMock())},
         ),
     ):
@@ -179,7 +179,7 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_captures_agent_exception_as_error() -> None:
-    from app.relay_service.worker import dispatch
+    from app.agent_service.worker import dispatch
 
     task = _make_task()
     s3 = AsyncMock()
@@ -188,22 +188,22 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
     mock_agent.assess.side_effect = ValueError("LLM parse error")
 
     with (
-        patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
+        patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_all_policy_docs_by_category",
+            "app.agent_service.worker.fetch_all_policy_docs_by_category",
             new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
         ),
         patch(
-            "app.relay_service.worker.fetch_questions_by_policy_doc_id",
+            "app.agent_service.worker.fetch_questions_by_policy_doc_id",
             new=AsyncMock(return_value=questions),
         ),
-        patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
+        patch("app.agent_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
-            "app.relay_service.worker.AGENT_REGISTRY",
+            "app.agent_service.worker.AGENT_REGISTRY",
             {"security": lambda **_: mock_agent},
         ),
         patch(
-            "app.relay_service.worker.CONFIG_REGISTRY",
+            "app.agent_service.worker.CONFIG_REGISTRY",
             {"security": MagicMock(return_value=MagicMock())},
         ),
     ):
@@ -223,7 +223,7 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
 async def test_dispatch_returns_error_on_agent_timeout() -> None:
     """asyncio.TimeoutError from wait_for skips the doc; if all docs fail the
     StatusMessage carries an error — the message is still deleted, not retried."""
-    from app.relay_service.worker import dispatch
+    from app.agent_service.worker import dispatch
 
     task = _make_task()
     s3 = AsyncMock()
@@ -236,25 +236,25 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
     mock_agent.assess.side_effect = _slow_assess
 
     with (
-        patch("app.relay_service.worker._get_db_config") as mock_db_cfg,
+        patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
-            "app.relay_service.worker.fetch_all_policy_docs_by_category",
+            "app.agent_service.worker.fetch_all_policy_docs_by_category",
             new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
         ),
         patch(
-            "app.relay_service.worker.fetch_questions_by_policy_doc_id",
+            "app.agent_service.worker.fetch_questions_by_policy_doc_id",
             new=AsyncMock(return_value=questions),
         ),
-        patch("app.relay_service.worker.make_llm_client", return_value=MagicMock()),
+        patch("app.agent_service.worker.make_llm_client", return_value=MagicMock()),
         patch(
-            "app.relay_service.worker.AGENT_REGISTRY",
+            "app.agent_service.worker.AGENT_REGISTRY",
             {"security": lambda **_: mock_agent},
         ),
         patch(
-            "app.relay_service.worker.CONFIG_REGISTRY",
+            "app.agent_service.worker.CONFIG_REGISTRY",
             {"security": MagicMock(return_value=MagicMock())},
         ),
-        patch("app.relay_service.worker._AGENT_TIMEOUT_SECONDS", 1),
+        patch("app.agent_service.worker._AGENT_TIMEOUT_SECONDS", 1),
     ):
         mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
         status = await dispatch(task, s3)
@@ -271,7 +271,7 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
 @pytest.mark.asyncio
 async def test_process_message_publishes_and_deletes_on_success() -> None:
     """_process_message publishes StatusMessage and deletes the SQS message on success."""
-    from app.relay_service.worker import _process_message
+    from app.agent_service.worker import _process_message
 
     task = _make_task()
     raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-abc"}
@@ -288,7 +288,7 @@ async def test_process_message_publishes_and_deletes_on_success() -> None:
     )
 
     with patch(
-        "app.relay_service.worker.dispatch",
+        "app.agent_service.worker.dispatch",
         new=AsyncMock(return_value=mock_status),
     ):
         await _process_message(
@@ -304,7 +304,7 @@ async def test_process_message_publishes_and_deletes_on_success() -> None:
 @pytest.mark.asyncio
 async def test_process_message_does_not_delete_on_exception() -> None:
     """_process_message leaves message in-flight when an unexpected exception occurs."""
-    from app.relay_service.worker import _process_message
+    from app.agent_service.worker import _process_message
 
     task = _make_task()
     raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-xyz"}
@@ -314,7 +314,7 @@ async def test_process_message_does_not_delete_on_exception() -> None:
     semaphore = asyncio.Semaphore(10)
 
     with patch(
-        "app.relay_service.worker.dispatch",
+        "app.agent_service.worker.dispatch",
         new=AsyncMock(side_effect=RuntimeError("infra failure")),
     ):
         await _process_message(
@@ -327,7 +327,7 @@ async def test_process_message_does_not_delete_on_exception() -> None:
 @pytest.mark.asyncio
 async def test_process_message_retries_delete_on_transient_failure() -> None:
     """delete_message is retried up to 3 times; success on second attempt deletes the message."""
-    from app.relay_service.worker import _process_message
+    from app.agent_service.worker import _process_message
 
     task = _make_task()
     raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-retry"}
@@ -346,8 +346,8 @@ async def test_process_message_retries_delete_on_transient_failure() -> None:
     mock_sqs.delete_message = AsyncMock(side_effect=[Exception("transient"), None])
 
     with (
-        patch("app.relay_service.worker.dispatch", new=AsyncMock(return_value=mock_status)),
-        patch("app.relay_service.worker.asyncio.sleep", new=AsyncMock()),
+        patch("app.agent_service.worker.dispatch", new=AsyncMock(return_value=mock_status)),
+        patch("app.agent_service.worker.asyncio.sleep", new=AsyncMock()),
     ):
         await _process_message(raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore)
 

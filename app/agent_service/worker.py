@@ -1,4 +1,4 @@
-"""Relay Service — SQS polling loop for the ECS Fargate Relay Service.
+"""Agent Service — SQS polling loop for the ECS Fargate Agent Service.
 
 Polls aia-tasks, dispatches each TaskMessage to the correct specialist agent,
 fetches checklist questions from PostgreSQL, and publishes a StatusMessage to
@@ -53,7 +53,7 @@ from app.services.s3_service import S3Service  # noqa: E402
 from app.services.sqs_service import SQSService  # noqa: E402
 from app.utils.logger import get_logger  # noqa: E402
 
-logger = get_logger("app.relay_service")
+logger = get_logger("app.agent_service")
 
 
 def _on_task_done(task: asyncio.Task) -> None:  # type: ignore[type-arg]
@@ -127,7 +127,7 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
 async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
     """Run one agent task across ALL policy docs for the agent_type and return a StatusMessage.
 
-    The Relay Service owns the per-policy-doc fan-out: it fetches every policy document
+    The Agent Service owns the per-policy-doc fan-out: it fetches every policy document
     for the given agent_type, runs assessments concurrently, and aggregates results into a
     single AgentResult.  Individual doc failures are logged and skipped rather than
     propagated, so a partial result is still publishable.  Infrastructure errors (DB down,
@@ -239,7 +239,7 @@ async def run_worker() -> None:
     status_url = app_config.sqs.status_queue_url
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-    logger.info("Relay service started — polling %s", task_url)
+    logger.info("Agent service started — polling %s", task_url)
 
     while True:
         try:
@@ -255,7 +255,7 @@ async def run_worker() -> None:
                 )
                 t.add_done_callback(_on_task_done)
         except asyncio.CancelledError:
-            logger.info("Relay service stopped")
+            logger.info("Agent service stopped")
             return
         except Exception as exc:
             logger.exception("Worker poll error: %s", exc)

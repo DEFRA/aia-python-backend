@@ -1,6 +1,6 @@
 """Specialist agent registries and structural protocols.
 
-Used by the Relay Service worker to resolve agent class and config by agent type.
+Used by the Agent Service worker to resolve agent class and config by agent type.
 """
 
 from __future__ import annotations

@@ -49,8 +49,8 @@ graph TD
     ORC -->|Publish TaskMessage| TaskQueue[SQS: aia-tasks]
     ORC -->|UPDATE status=PROCESSING| DB
 
-    TaskQueue -->|Consume| RelayService[Relay Service]
-    RelayService -->|Publish StatusMessage| StatusQueue[SQS: aia-status]
+    TaskQueue -->|Consume| AgentService[Agent Service]
+    AgentService -->|Publish StatusMessage| StatusQueue[SQS: aia-status]
 
     StatusQueue -->|Poll| ORC
     ORC -->|UPDATE status=COMPLETE / PARTIAL_COMPLETE / ERROR + resultMd| DB
@@ -98,7 +98,7 @@ app/
 │   ├── main.py     # FastAPI service :8001 — POST /orchestrate + status queue poller
 │   ├── session.py  # In-memory per-document agent dispatch state
 │   └── summary.py  # SummaryGenerator protocol + MarkdownReportGenerator
-├── relay_service/
+├── agent_service/
 │   ├── __init__.py
 │   ├── main.py     # FastAPI app :8002 — lifespan starts SQS polling loop + /health
 │   └── worker.py   # run_worker() concurrent polling loop — asyncio.create_task per message, Semaphore-bounded
@@ -110,7 +110,7 @@ app/
 scripts/
 ├── start-aia.sh              # Connectivity checks + start all three services
 ├── start-datapipeline-dev.sh # Start Podman PostgreSQL container
-├── mock_agent.py             # Test harness — simulates Relay Service (right side)
+├── mock_agent.py             # Test harness — simulates Agent Service (right side)
 ├── mock_orchestrator.py      # Test harness — simulates CoreBackend + Orchestrator (left side)
 ├── start-localstack.sh
 └── start_dev_server.sh
@@ -165,7 +165,7 @@ Key environment variables:
 | `JWT_SECRET` | HS256 signing secret | — |
 | `POSTGRES_URI` | PostgreSQL connection string | — |
 | `S3_BUCKET_NAME` | S3 bucket for document storage | `docsupload` |
-| `TASK_QUEUE_URL` | SQS queue consumed by Relay Service | `…/aia-tasks` |
+| `TASK_QUEUE_URL` | SQS queue consumed by Agent Service | `…/aia-tasks` |
 | `STATUS_QUEUE_URL` | SQS queue polled by Orchestrator | `…/aia-status` |
 | `ORCHESTRATOR_URL` | Orchestrator base URL (called by CoreBackend) | `http://localhost:8001` |
 | `ORCHESTRATOR_PORT` | Port the Orchestrator listens on | `8001` |
@@ -197,13 +197,13 @@ This starts a Podman-managed PostgreSQL container named `aiadocuments` on port 5
 
 The script:
 1. Verifies connectivity to PostgreSQL, S3, SQS (both queues), and Bedrock before starting anything.
-2. Starts CoreBackend (`:8086`), Orchestrator (`:8001`), and Relay Service (`:8002`) as background processes with individual log files under `logs/`.
+2. Starts CoreBackend (`:8086`), Orchestrator (`:8001`), and Agent Service (`:8002`) as background processes with individual log files under `logs/`.
 3. Confirms each service is still alive 2 seconds after launch and prints the health check URLs.
 
 ```
   Core Backend   →  http://127.0.0.1:8086/health
   Orchestrator   →  http://127.0.0.1:8001
-  Relay Service  →  http://127.0.0.1:8002/health
+  Agent Service  →  http://127.0.0.1:8002/health
 ```
 
 Other modes:
@@ -260,9 +260,9 @@ PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
 | `test_document_repository.py` | `DocumentRepository` DB queries | No (mocked) |
 | `test_ingestor_service.py` | DOCX text extraction | No |
 | `test_sqs_service.py` | SQS send/receive/delete | No (mocked) |
-| `test_relay_service.py` | Relay Service `_process_message()`, `_get_document()`, concurrent `run_worker()` loop | No (mocked) |
+| `test_agent_service.py` | Agent Service `_process_message()`, `_get_document()`, concurrent `run_worker()` loop | No (mocked) |
 
-> Orchestrator and Relay Service tests use `pytest-asyncio`. This is included in `requirements-dev.txt`.
+> Orchestrator and Agent Service tests use `pytest-asyncio`. This is included in `requirements-dev.txt`.
 
 ## Pipeline Component Testing
 
@@ -270,10 +270,10 @@ Two standalone scripts in `scripts/` let you test either half of the pipeline in
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  CoreBackend + Orchestrator  ───→ aia-tasks  ───→  Relay Service     │
+│  CoreBackend + Orchestrator  ───→ aia-tasks  ───→  Agent Service     │
 │                              ←─── aia-status ←───                    │
 │                                                                      │
-│  mock_orchestrator.py        ───→ aia-tasks  ───→  Relay Service     │
+│  mock_orchestrator.py        ───→ aia-tasks  ───→  Agent Service     │
 │  (replaces left side)        ←─── aia-status ←───                    │
 │                                                                      │
 │  CoreBackend + Orchestrator  ───→ aia-tasks ───→  mock_agent.py      │
@@ -281,9 +281,9 @@ Two standalone scripts in `scripts/` let you test either half of the pipeline in
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### `scripts/mock_agent.py` — simulate the Relay Service
+### `scripts/mock_agent.py` — simulate the Agent Service
 
-**Purpose:** Tests **CoreBackend + Orchestrator** in isolation. Run this instead of the real Relay Service when you want to verify that the upload flow, SQS publishing, result persistence, and status transitions all work correctly without invoking Claude.
+**Purpose:** Tests **CoreBackend + Orchestrator** in isolation. Run this instead of the real Agent Service when you want to verify that the upload flow, SQS publishing, result persistence, and status transitions all work correctly without invoking Claude.
 
 The script polls `aia-tasks`, generates a fabricated `StatusMessage` for every `TaskMessage` it receives, and immediately pushes the response to `aia-status`.
 
@@ -313,7 +313,7 @@ The fabricated result matches the `AgentResult` shape expected by the Orchestrat
 
 ### `scripts/mock_orchestrator.py` — simulate CoreBackend + Orchestrator
 
-**Purpose:** Tests the **Relay Service** in isolation. Run this instead of the full backend when you want to verify that the Relay Service correctly picks up tasks, calls the evaluation pipeline (or its dependencies), and returns well-formed `StatusMessage`s.
+**Purpose:** Tests the **Agent Service** in isolation. Run this instead of the full backend when you want to verify that the Agent Service correctly picks up tasks, calls the evaluation pipeline (or its dependencies), and returns well-formed `StatusMessage`s.
 
 The script pushes one `TaskMessage` per agent type to `aia-tasks`, then polls `aia-status` until all responses arrive or the timeout expires, and prints a formatted result summary.
 
@@ -404,7 +404,7 @@ aws sqs get-queue-attributes \
 ### Follow service logs
 ```bash
 ./scripts/start-aia.sh --logs      # tail all three at once
-tail -f logs/relay-service.log     # single service
+tail -f logs/agent-service.log     # single service
 ```
 
 ### Reset local state between test runs
