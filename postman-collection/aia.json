@@ -1,0 +1,123 @@
+{
+  "info": {
+    "name": "AIA",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Fetch History",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-User-Id", "value": "TestUser123" },
+          { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY" }
+        ],
+        "url": {
+          "raw": "http://localhost:8086/api/v1/documents?page=1&limit=20",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8086",
+          "path": ["api", "v1", "documents"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Upload Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY" },
+          { "key": "X-User-Id", "value": "TestUser123" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "templateType", "value": "SDA", "type": "text" },
+            { "key": "fileName", "value": "Hello World.docx", "type": "text" },
+            { "key": "file", "src": "/Users/nagarajansubbiah/Downloads/Hello World.docx", "type": "file" }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8086/api/v1/documents/upload",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8086",
+          "path": ["api", "v1", "documents", "upload"]
+        }
+      }
+    },
+    {
+      "name": "Fetch User",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-User-Id", "value": "TestUser123" },
+          { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY" }
+        ],
+        "url": {
+          "raw": "http://localhost:8086/api/v1/users/me",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8086",
+          "path": ["api", "v1", "users", "me"]
+        }
+      }
+    },
+    {
+      "name": "Ping Document Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-User-Id", "value": "TestUser123" },
+          { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY" }
+        ],
+        "url": {
+          "raw": "http://localhost:8086/api/v1/documents/4d939dc6-6f7f-4687-be02-081cd6bab63a/status",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8086",
+          "path": ["api", "v1", "documents", "4d939dc6-6f7f-4687-be02-081cd6bab63a", "status"]
+        }
+      }
+    },
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-User-Id", "value": "TestUser123" },
+          { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY" }
+        ],
+        "url": {
+          "raw": "http://localhost:8086/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8086",
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Fetch resultMd",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-User-Id", "value": "TestUser123" },
+          { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJUZXN0VXNlcjEyMyIsIm5hbWUiOiJUZXN0IFVzZXIiLCJhZG1pbiI6dHJ1ZSwiaWF0IjoxNTE2MjM5MDIyfQ.HYXNTt18OwYxp2VEunf2P29dcANIR862rhfP53Oy-UY" }
+        ],
+        "url": {
+          "raw": "http://localhost:8086/api/v1/documents/4d939dc6-6f7f-4687-be02-081cd6bab63a",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8086",
+          "path": ["api", "v1", "documents", "4d939dc6-6f7f-4687-be02-081cd6bab63a"]
+        }
+      }
+    }
+  ]
+}

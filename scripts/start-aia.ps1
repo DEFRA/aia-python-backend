@@ -1,4 +1,4 @@
-# scripts/start-aia.ps1
+﻿# scripts/start-aia.ps1
 #
 # Verify S3 / SQS / Bedrock / PostgreSQL connectivity, then start all three
 # AIA backend services as background jobs with per-service log files.
@@ -53,6 +53,21 @@ function banner($text) {
     Write-Host ("-" * 58)
 }
 
+# ── Python check helper ────────────────────────────────────────────────────────
+# PS 5.1 mangles double-quotes when passing strings to native commands via -c,
+# and converts native stderr to ErrorRecords when $ErrorActionPreference=Stop.
+# Write to a temp file to avoid both issues.
+function Invoke-PythonCheck([string]$Script) {
+    $tmp = [System.IO.Path]::GetTempFileName() + ".py"
+    Set-Content $tmp $Script -Encoding UTF8
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = & $VenvPython $tmp 2>&1
+    $ErrorActionPreference = $prev
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+    return $out
+}
+
 # ── Check .venv ────────────────────────────────────────────────────────────────
 if (-not (Test-Path $VenvPython)) {
     Write-Host "ERROR: .venv not found at $VenvPython" -ForegroundColor Red
@@ -84,8 +99,11 @@ $Mode = if ($args.Count -gt 0) { $args[0] } else { "--start" }
 if ($Mode -eq "--logs") {
     $logFiles = @(
         (Join-Path $LogDir "core-backend.log"),
+        (Join-Path $LogDir "core-backend.err"),
         (Join-Path $LogDir "orchestrator.log"),
-        (Join-Path $LogDir "relay-service.log")
+        (Join-Path $LogDir "orchestrator.err"),
+        (Join-Path $LogDir "relay-service.log"),
+        (Join-Path $LogDir "relay-service.err")
     )
     Write-Host "Tailing logs — press Ctrl-C to stop" -ForegroundColor Yellow
     Write-Host ""
@@ -117,16 +135,16 @@ if ($Mode -eq "--stop") {
         warn "No PID file found" "nothing to stop"
         exit 0
     }
-    Get-Content $PidFile | ForEach-Object {
-        $parts = $_ -split ":"
+    Get-Content $PidFile | Where-Object { $_ -match ":" } | ForEach-Object {
+        $parts   = $_ -split ":"
         $svcName = $parts[0]
-        $pid     = [int]$parts[1]
-        $proc    = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $svcPid  = [int]$parts[1]
+        $proc    = Get-Process -Id $svcPid -ErrorAction SilentlyContinue
         if ($proc) {
-            Stop-Process -Id $pid -Force
-            ok $svcName "PID $pid stopped"
+            Stop-Process -Id $svcPid -Force
+            ok $svcName "PID $svcPid stopped"
         } else {
-            warn $svcName "PID $pid already gone"
+            warn $svcName "PID $svcPid already gone"
         }
     }
     Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
@@ -169,7 +187,7 @@ async def main():
 
 asyncio.run(main())
 '@
-$pgOut = & $VenvPython -c $pgScript 2>&1
+$pgOut = Invoke-PythonCheck $pgScript
 if ($pgOut -match "^connected") {
     ok "PostgreSQL" ($pgOut -join " ")
 } else {
@@ -200,7 +218,7 @@ except ClientError as exc:
     print(f"FAIL ({code}): {exc}", file=sys.stderr)
     sys.exit(1)
 '@
-$s3Out = & $VenvPython -c $s3Script 2>&1
+$s3Out = Invoke-PythonCheck $s3Script
 if ($s3Out -match "^accessible") {
     ok "S3" ($s3Out -join " ")
 } else {
@@ -238,7 +256,7 @@ except ClientError as exc:
     print(f"FAIL: {exc}", file=sys.stderr)
     sys.exit(1)
 '@
-$sqsTasksOut = & $VenvPython -c $sqsTasksScript 2>&1
+$sqsTasksOut = Invoke-PythonCheck $sqsTasksScript
 if ($sqsTasksOut -match "^reachable") {
     ok "SQS tasks queue" ($sqsTasksOut -join " ")
 } else {
@@ -276,7 +294,7 @@ except ClientError as exc:
     print(f"FAIL: {exc}", file=sys.stderr)
     sys.exit(1)
 '@
-$sqsStatusOut = & $VenvPython -c $sqsStatusScript 2>&1
+$sqsStatusOut = Invoke-PythonCheck $sqsStatusScript
 if ($sqsStatusOut -match "^reachable") {
     ok "SQS status queue" ($sqsStatusOut -join " ")
 } else {
@@ -309,7 +327,7 @@ async def main():
 
 asyncio.run(main())
 '@
-$bedrockOut = & $VenvPython -c $bedrockScript 2>&1
+$bedrockOut = Invoke-PythonCheck $bedrockScript
 if ($bedrockOut -match "^OK") {
     ok "Bedrock" ($bedrockOut -join " ")
 } else {
@@ -360,15 +378,16 @@ function Start-Service {
         [int]   $Port,
         [string]$LogFile
     )
-    # Truncate log for fresh run
+    $ErrFile = $LogFile -replace '\.log$', '.err'
     Set-Content $LogFile ""
+    Set-Content $ErrFile ""
 
     $proc = Start-Process `
         -FilePath $VenvUvicorn `
         -ArgumentList $Module, "--host", "127.0.0.1", "--port", $Port `
         -WorkingDirectory $RepoRoot `
         -RedirectStandardOutput $LogFile `
-        -RedirectStandardError  $LogFile `
+        -RedirectStandardError  $ErrFile `
         -NoNewWindow `
         -PassThru
 
@@ -389,12 +408,12 @@ $allUp = $true
 Get-Content $PidFile | Where-Object { $_ -match ":" } | ForEach-Object {
     $parts   = $_ -split ":"
     $svcName = $parts[0]
-    $pid     = [int]$parts[1]
-    $proc    = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    $svcPid  = [int]$parts[1]
+    $proc    = Get-Process -Id $svcPid -ErrorAction SilentlyContinue
     if ($proc) {
-        ok $svcName "PID $pid — running"
+        ok $svcName "PID $svcPid — running"
     } else {
-        fail $svcName "PID $pid — exited at startup"
+        fail $svcName "PID $svcPid — exited at startup"
         info "" "Check logs\$svcName.log for the error"
         $script:allUp = $false
     }
