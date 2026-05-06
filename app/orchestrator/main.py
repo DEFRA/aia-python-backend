@@ -265,11 +265,22 @@ async def _status_queue_poller() -> None:
                         agent_result,
                     )
                     await sqs.delete_message(queue_url, receipt)
-                    logger.info(
-                        "Result recorded task_id=%s all_received=%s",
-                        status_msg.task_id,
-                        all_received,
-                    )
+                    if all_received is False:
+                        # Session already completed/timed-out, or task_id not
+                        # expected (e.g. stale retry after orchestrator restart).
+                        # Message is deleted to prevent queue build-up.
+                        logger.warning(
+                            "Discarded status message for unknown/expired session "
+                            "task_id=%s doc_id=%s",
+                            status_msg.task_id,
+                            status_msg.document_id,
+                        )
+                    else:
+                        logger.info(
+                            "Result recorded task_id=%s all_received=%s",
+                            status_msg.task_id,
+                            all_received,
+                        )
                 except Exception as exc:
                     logger.exception(
                         "Failed to process status message: %s — body=%s",
