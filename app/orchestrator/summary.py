@@ -172,7 +172,7 @@ class MarkdownReportGenerator:
         # ── Overall Conclusion ────────────────────────────────────────────────
         lines.append("### Overall Conclusion")
         lines.append("")
-        risk = self._classify_risk(total_r, total_a)
+        risk = self._classify_risk(overall_score)
         weakest = self._weakest_category(results, section_labels, agent_type_order)
         top = self._top_finding(results, agent_type_order)
         n_categories = sum(
@@ -190,12 +190,12 @@ class MarkdownReportGenerator:
         lines.append("")
         return lines
 
-    def _classify_risk(self, red: int, amber: int) -> str:
-        if red > 0:
-            return "High Risk"
-        if amber >= 2:
+    def _classify_risk(self, overall_score: int) -> str:
+        if overall_score >= 80:
+            return "Low Risk"
+        if overall_score >= 60:
             return "Medium Risk"
-        return "Low Risk"
+        return "High Risk"
 
     def _weakest_category(
         self,

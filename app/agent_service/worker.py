@@ -224,6 +224,8 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
         )
 
     result = AgentResult(agent_type=agent_type, docs=docs)
+    # TO DO: Handle scenario where result is too large for SQS message body limit (1 MiB)
+    # potentially by uploading to S3 and including a link in the StatusMessage instead.
     return StatusMessage(
         task_id=task.task_id,
         document_id=task.document_id,
