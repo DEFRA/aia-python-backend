@@ -17,7 +17,7 @@ def get_sync_record(
     """Return the sync record for source_url, or None if not yet synced."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            "SELECT * FROM data_pipeline.policy_document_sync WHERE url_hash = %s",
+            "SELECT * FROM policy_document_sync WHERE url_hash = %s",
             (url_to_hash(source_url),),
         )
         return cur.fetchone()
@@ -68,7 +68,7 @@ def upsert_sync_record(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO data_pipeline.policy_document_sync
+            INSERT INTO policy_document_sync
                 (url_hash, source_url, last_modified, content_size, last_synced_at, policy_doc_id)
             VALUES (%s, %s, %s, %s, NOW(), %s)
             ON CONFLICT (url_hash) DO UPDATE

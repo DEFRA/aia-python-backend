@@ -1,7 +1,7 @@
 -- Data Pipeline schema and tables
 -- Applied automatically when the Podman postgres container first starts.
 
-CREATE SCHEMA IF NOT EXISTS data_pipeline;
+CREATE SCHEMA IF NOT EXISTS aia_app;
 
 -- ---------------------------------------------------------------------------
 -- Migration: rename legacy table if it exists under the old name
@@ -9,9 +9,9 @@ CREATE SCHEMA IF NOT EXISTS data_pipeline;
 DO $$ BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'data_pipeline' AND table_name = 'source_path_policydoc'
+        WHERE table_schema = 'aia_app' AND table_name = 'source_path_policydoc'
     ) THEN
-        ALTER TABLE data_pipeline.source_path_policydoc RENAME TO source_policy_docs;
+        ALTER TABLE aia_app.source_path_policydoc RENAME TO source_policy_docs;
     END IF;
 END $$;
 
@@ -21,20 +21,20 @@ END $$;
 DO $$ BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
+        WHERE table_schema = 'aia_app'
           AND table_name   = 'source_policy_docs'
           AND column_name  = 'desp'
     ) THEN
-        ALTER TABLE data_pipeline.source_policy_docs RENAME COLUMN desp TO filename;
+        ALTER TABLE aia_app.source_policy_docs RENAME COLUMN desp TO filename;
     END IF;
 
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
+        WHERE table_schema = 'aia_app'
           AND table_name   = 'source_policy_docs'
           AND column_name  = 'datasize'
     ) THEN
-        ALTER TABLE data_pipeline.source_policy_docs DROP COLUMN datasize;
+        ALTER TABLE aia_app.source_policy_docs DROP COLUMN datasize;
     END IF;
 END $$;
 
@@ -44,20 +44,20 @@ END $$;
 DO $$ BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
+        WHERE table_schema = 'aia_app'
           AND table_name   = 'policy_document_sync'
           AND column_name  = 'file_name'
     ) THEN
-        ALTER TABLE data_pipeline.policy_document_sync DROP COLUMN file_name;
+        ALTER TABLE aia_app.policy_document_sync DROP COLUMN file_name;
     END IF;
 
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
+        WHERE table_schema = 'aia_app'
           AND table_name   = 'policy_document_sync'
           AND column_name  = 'content_size'
     ) THEN
-        ALTER TABLE data_pipeline.policy_document_sync ADD COLUMN content_size INTEGER;
+        ALTER TABLE aia_app.policy_document_sync ADD COLUMN content_size INTEGER;
     END IF;
 END $$;
 
@@ -68,32 +68,32 @@ DO $$ BEGIN
     -- Add category column to policy_documents if not already present
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
+        WHERE table_schema = 'aia_app'
           AND table_name   = 'policy_documents'
           AND column_name  = 'category'
     ) THEN
-        ALTER TABLE data_pipeline.policy_documents ADD COLUMN category TEXT;
+        ALTER TABLE aia_app.policy_documents ADD COLUMN category TEXT;
         -- Back-fill from question_categories via the most common category per document
-        UPDATE data_pipeline.policy_documents pd
+        UPDATE aia_app.policy_documents pd
         SET    category = (
             SELECT qc.category
-            FROM   data_pipeline.question_categories qc
-            JOIN   data_pipeline.questions q ON q.question_id = qc.question_id
+            FROM   aia_app.question_categories qc
+            JOIN   aia_app.questions q ON q.question_id = qc.question_id
             WHERE  q.policy_doc_id = pd.policy_doc_id
             GROUP  BY qc.category
             ORDER  BY COUNT(*) DESC
             LIMIT  1
         );
-        ALTER TABLE data_pipeline.policy_documents ALTER COLUMN category SET NOT NULL;
+        ALTER TABLE aia_app.policy_documents ALTER COLUMN category SET NOT NULL;
     END IF;
     -- Drop the junction table once data is migrated
-    DROP TABLE IF EXISTS data_pipeline.question_categories;
+    DROP TABLE IF EXISTS aia_app.question_categories;
 END $$;
 
 -- ---------------------------------------------------------------------------
 -- Source: active policy URLs to process
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
+CREATE TABLE IF NOT EXISTS aia_app.source_policy_docs (
     url_id   SERIAL PRIMARY KEY,
     url      TEXT    NOT NULL UNIQUE,
     filename TEXT    NOT NULL,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
 -- ---------------------------------------------------------------------------
 -- Output: one row per unique policy URL processed
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_pipeline.policy_documents (
+CREATE TABLE IF NOT EXISTS aia_app.policy_documents (
     policy_doc_id UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     source_url    TEXT        NOT NULL UNIQUE,
     filename      TEXT        NOT NULL,
@@ -116,13 +116,13 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policy_documents (
 -- ---------------------------------------------------------------------------
 -- Output: extracted evaluation questions
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_pipeline.questions (
+CREATE TABLE IF NOT EXISTS aia_app.questions (
     id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     question_text  TEXT        NOT NULL,
     reference      TEXT        NOT NULL,
     source_excerpt TEXT        NOT NULL,
     policy_doc_id  UUID        NOT NULL
-        REFERENCES data_pipeline.policy_documents(policy_doc_id) ON DELETE CASCADE,
+        REFERENCES aia_app.policy_documents(policy_doc_id) ON DELETE CASCADE,
     isactive       BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -130,21 +130,21 @@ CREATE TABLE IF NOT EXISTS data_pipeline.questions (
 -- ---------------------------------------------------------------------------
 -- Housekeeping: last-modified timestamp for change detection
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_pipeline.policy_document_sync (
+CREATE TABLE IF NOT EXISTS aia_app.policy_document_sync (
     url_hash       CHAR(64)    PRIMARY KEY,
     source_url     TEXT        NOT NULL,
     last_modified  TIMESTAMPTZ,
     content_size   INTEGER,
     last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     policy_doc_id  UUID
-        REFERENCES data_pipeline.policy_documents(policy_doc_id) ON DELETE SET NULL
+        REFERENCES aia_app.policy_documents(policy_doc_id) ON DELETE SET NULL
 );
 
 -- ---------------------------------------------------------------------------
 -- Seed: known policy source URLs
 -- Remove any row you do not want processed (or set isactive = FALSE).
 -- ---------------------------------------------------------------------------
-INSERT INTO data_pipeline.source_policy_docs (url, filename, category, type, isactive) VALUES
+INSERT INTO aia_app.source_policy_docs (url, filename, category, type, isactive) VALUES
     (
         'https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx',
         'Strategic Architecture Principles',

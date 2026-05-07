@@ -169,11 +169,13 @@ ok "PostgreSQL" "${DbUser}@${DbHost}:${DbPort}/${DbName}"
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 2 - truncate mutable tables (CASCADE)"
 
+$DbSchema = if ($env:DB_SCHEMA) { $env:DB_SCHEMA } else { "aia_app" }
+
 $TruncateSql = @"
 TRUNCATE TABLE
-    data_pipeline.policy_document_sync,
-    data_pipeline.questions,
-    data_pipeline.policy_documents
+    $DbSchema.policy_document_sync,
+    $DbSchema.questions,
+    $DbSchema.policy_documents
 CASCADE;
 "@
 
@@ -199,11 +201,11 @@ function Assert-Empty($Table) {
     }
 }
 
-Assert-Empty "data_pipeline.policy_document_sync"
-Assert-Empty "data_pipeline.questions"
-Assert-Empty "data_pipeline.policy_documents"
+Assert-Empty "$DbSchema.policy_document_sync"
+Assert-Empty "$DbSchema.questions"
+Assert-Empty "$DbSchema.policy_documents"
 
-$seedCount = Get-RowCount "data_pipeline.source_policy_docs"
+$seedCount = Get-RowCount "$DbSchema.source_policy_docs"
 if ($seedCount -gt 0) {
     ok "data_pipeline.source_policy_docs" "$seedCount rows (seed intact)"
 } else {
@@ -236,9 +238,9 @@ if ($pipelineExit -eq 0) {
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 5 - final row counts"
 
-$pdCount   = Get-RowCount "data_pipeline.policy_documents"
-$qCount    = Get-RowCount "data_pipeline.questions"
-$syncCount = Get-RowCount "data_pipeline.policy_document_sync"
+$pdCount   = Get-RowCount "$DbSchema.policy_documents"
+$qCount    = Get-RowCount "$DbSchema.questions"
+$syncCount = Get-RowCount "$DbSchema.policy_document_sync"
 
 if ($pdCount -gt 0) {
     ok "policy_documents" "$pdCount rows"
