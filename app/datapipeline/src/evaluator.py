@@ -4,7 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from anthropic import AnthropicBedrock
+import anthropic
+from anthropic import Anthropic, AnthropicBedrock
 
 from app.datapipeline.src.schemas import ExtractedQuestion
 
@@ -31,25 +32,50 @@ def _strip_fences(text: str) -> str:
 
 
 class QuestionExtractor:
-    """Calls Anthropic via Bedrock to extract structured questions from policy content."""
+    """Calls Anthropic (directly or via Bedrock) to extract structured questions.
+
+    Provider is selected by the LLM_PROVIDER env var:
+      - "bedrock"   (default) — uses AWS Bedrock; requires AWS credentials.
+      - "anthropic"           — uses the direct Anthropic API; requires ANTHROPIC_API_KEY.
+    """
 
     _SYSTEM_PROMPT: str = _load_prompt("policy_evaluation_prompt.md")
 
     def __init__(
         self,
-        aws_access_key: str,
-        aws_secret_key: str,
         aws_region: str,
         model_id: str,
+        provider: str = "bedrock",
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
         aws_session_token: str | None = None,
+        anthropic_api_key: str | None = None,
     ) -> None:
         self._model_id = model_id
-        self._client = AnthropicBedrock(
-            aws_access_key=aws_access_key,
-            aws_secret_key=aws_secret_key,
-            aws_session_token=aws_session_token,
-            aws_region=aws_region,
-        )
+        self._provider = provider
+
+        if provider == "anthropic":
+            if not anthropic_api_key:
+                raise ValueError(
+                    "LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY to be set"
+                )
+            self._client: Anthropic | AnthropicBedrock = Anthropic(
+                api_key=anthropic_api_key
+            )
+            logger.info("LLM provider: Anthropic direct API")
+        else:
+            # Bedrock — only pass explicit credentials when both key + secret are present.
+            # Omitting them lets the SDK fall back to the standard AWS credential chain
+            # (env vars, ~/.aws/credentials, instance profile), which avoids 403s
+            # from expired STS session tokens left in .env.
+            kwargs: dict = {"aws_region": aws_region}
+            if aws_access_key and aws_secret_key:
+                kwargs["aws_access_key"] = aws_access_key
+                kwargs["aws_secret_key"] = aws_secret_key
+                if aws_session_token:
+                    kwargs["aws_session_token"] = aws_session_token
+            self._client = AnthropicBedrock(**kwargs)
+            logger.info("LLM provider: AWS Bedrock region=%s", aws_region)
 
     def extract(
         self,

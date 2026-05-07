@@ -33,7 +33,7 @@ def fetch_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySou
         cur.execute(
             """
             SELECT url_id, url, filename, category, type, isactive
-            FROM data_pipeline.source_policy_docs
+            FROM source_policy_docs
             WHERE isactive = TRUE
             ORDER BY url_id
             """
@@ -51,7 +51,7 @@ def fetch_all_policy_sources(
         cur.execute(
             """
             SELECT url_id, url, filename, category, type, isactive
-            FROM data_pipeline.source_policy_docs
+            FROM source_policy_docs
             ORDER BY url_id
             """
         )
@@ -79,7 +79,7 @@ def delete_policy_document_by_url(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM data_pipeline.policy_documents WHERE source_url = %s",
+            "DELETE FROM policy_documents WHERE source_url = %s",
             (url,),
         )
         count: int = cur.rowcount
@@ -106,7 +106,7 @@ def insert_policy_document(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, filename, category)
+            INSERT INTO policy_documents (policy_doc_id, source_url, filename, category)
             VALUES (%s::uuid, %s, %s, %s)
             ON CONFLICT (source_url) DO UPDATE
                 SET filename  = EXCLUDED.filename,
@@ -137,7 +137,7 @@ def delete_questions_for_doc(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM data_pipeline.questions WHERE policy_doc_id = %s::uuid",
+            "DELETE FROM questions WHERE policy_doc_id = %s::uuid",
             (policy_doc_id,),
         )
         count: int = cur.rowcount
@@ -168,7 +168,7 @@ def insert_questions(
             question_id = new_uuid()
             cur.execute(
                 """
-                INSERT INTO data_pipeline.questions
+                INSERT INTO questions
                     (id, question_text, reference, source_excerpt, policy_doc_id)
                 VALUES (%s::uuid, %s, %s, %s, %s::uuid)
                 """,

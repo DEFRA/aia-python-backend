@@ -124,13 +124,19 @@ def _write_debug_file(
 
 
 def _get_db_connection() -> psycopg2.extensions.connection:
-    return psycopg2.connect(
+    schema = os.environ.get("DB_SCHEMA", "aia_app")
+    conn = psycopg2.connect(
         host=os.environ["DB_HOST"],
         port=int(os.environ.get("DB_PORT", "5432")),
         dbname=os.environ["DB_NAME"],
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
     )
+    with conn.cursor() as cur:
+        cur.execute(f"SET search_path TO {schema}, public")
+    conn.commit()
+    logger.info("DB search_path set to schema: %s", schema)
+    return conn
 
 
 def _build_sharepoint_client() -> SharePointClient:
@@ -142,12 +148,23 @@ def _build_sharepoint_client() -> SharePointClient:
 
 
 def _build_extractor() -> QuestionExtractor:
+    # Pass explicit credentials only when all three are present and non-empty.
+    # When AWS_SESSION_TOKEN is absent or blank the SDK uses its standard
+    # credential chain (env vars, ~/.aws/credentials, instance profile, etc.)
+    # which avoids 403s caused by expired STS tokens left in .env.
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+    session_token = os.environ.get("AWS_SESSION_TOKEN", "").strip() or None
+    provider = os.environ.get("LLM_PROVIDER", "bedrock").strip().lower()
+
     return QuestionExtractor(
-        aws_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
-        aws_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        provider=provider,
+        aws_access_key=access_key or None,
+        aws_secret_key=secret_key or None,
+        aws_session_token=session_token,
         aws_region=os.environ["AWS_DEFAULT_REGION"],
         model_id=os.environ["MODEL_ID"],
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
     )
 
 
