@@ -21,7 +21,7 @@ class DocumentRepository:
     async def check_duplicate(self, user_id: str, file_name: str) -> bool:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT doc_id FROM document_uploads WHERE user_id = $1 AND file_name = $2",
+                "SELECT doc_id FROM backend.document_uploads WHERE user_id = $1 AND file_name = $2",
                 user_id,
                 file_name,
             )
@@ -34,7 +34,7 @@ class DocumentRepository:
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO document_uploads
+                INSERT INTO backend.document_uploads
                     (doc_id, template_type, user_id, file_name, status,
                      uploaded_ts, processed_ts, status_updated_at, result, result_md, error_message)
                 VALUES ($1::uuid, $2, $3, $4, $5, $6, NULL, $6, NULL, NULL, NULL)
@@ -60,7 +60,7 @@ class DocumentRepository:
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
-                UPDATE document_uploads
+                UPDATE backend.document_uploads
                 SET status = $1,
                     processed_ts = $2,
                     status_updated_at = $2,
@@ -81,7 +81,7 @@ class DocumentRepository:
         offset = (page - 1) * limit
         async with self.pool.acquire() as conn:
             total_row = await conn.fetchrow(
-                "SELECT COUNT(*) AS total FROM document_uploads WHERE user_id = $1",
+                "SELECT COUNT(*) AS total FROM backend.document_uploads WHERE user_id = $1",
                 user_id,
             )
             rows = await conn.fetch(
@@ -92,7 +92,7 @@ class DocumentRepository:
                        status,
                        uploaded_ts  AS "createdAt",
                        processed_ts AS "completedAt"
-                FROM document_uploads
+                FROM backend.document_uploads
                 WHERE user_id = $1
                 ORDER BY uploaded_ts DESC
                 LIMIT $2 OFFSET $3
@@ -120,7 +120,7 @@ class DocumentRepository:
             rows = await conn.fetch(
                 """
                 SELECT doc_id::text AS "documentId"
-                FROM document_uploads
+                FROM backend.document_uploads
                 WHERE user_id = $1 AND status = $2
                 ORDER BY uploaded_ts DESC
                 """,
@@ -141,7 +141,7 @@ class DocumentRepository:
                        error_message AS "errorMessage",
                        uploaded_ts   AS "createdAt",
                        processed_ts  AS "completedAt"
-                FROM document_uploads
+                FROM backend.document_uploads
                 WHERE doc_id = $1::uuid AND user_id = $2
                 """,
                 doc_id,
@@ -171,17 +171,17 @@ class DocumentRepository:
                 """
                 WITH claimed AS (
                     SELECT doc_id
-                    FROM document_uploads
+                    FROM backend.document_uploads
                     WHERE status = $1
                     ORDER BY uploaded_ts ASC
                     LIMIT $2
                     FOR UPDATE SKIP LOCKED
                 )
-                UPDATE document_uploads
+                UPDATE backend.document_uploads
                 SET status = 'CLAIMED', status_updated_at = $3
                 FROM claimed
-                WHERE document_uploads.doc_id = claimed.doc_id
-                RETURNING document_uploads.doc_id::text, user_id, template_type,
+                WHERE backend.document_uploads.doc_id = claimed.doc_id
+                RETURNING backend.document_uploads.doc_id::text, user_id, template_type,
                           file_name, status, uploaded_ts
                 """,
                 DocumentStatus.PROCESSING.value,
@@ -208,7 +208,7 @@ class DocumentRepository:
         async with self.pool.acquire() as conn:
             result = await conn.execute(
                 """
-                UPDATE document_uploads
+                UPDATE backend.document_uploads
                 SET status = $1, status_updated_at = $2
                 WHERE status = 'CLAIMED' AND status_updated_at < $3
                 """,

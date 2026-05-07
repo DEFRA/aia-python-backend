@@ -13,7 +13,11 @@ _pool: Optional[asyncpg.Pool] = None
 _CREATE_TABLES_SQL = """
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TABLE IF NOT EXISTS users (
+CREATE SCHEMA IF NOT EXISTS backend;
+GRANT USAGE, CREATE ON SCHEMA backend TO aiauser;
+
+
+CREATE TABLE IF NOT EXISTS backend.users (
     user_id    TEXT        PRIMARY KEY,
     email      TEXT        NOT NULL UNIQUE,
     name       TEXT        NOT NULL,
@@ -21,11 +25,11 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO users (user_id, email, name)
+INSERT INTO backend.users (user_id, email, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'guest@aia.local', 'Guest User')
 ON CONFLICT (user_id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS document_uploads (
+CREATE TABLE IF NOT EXISTS backend.document_uploads (
     doc_id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     template_type     TEXT        NOT NULL,
     user_id           TEXT        NOT NULL,
@@ -40,7 +44,18 @@ CREATE TABLE IF NOT EXISTS document_uploads (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
-    ON document_uploads (user_id, file_name);
+    ON backend.document_uploads (user_id, file_name);
+
+CREATE TABLE backend.cost_usage (
+    doc_id         VARCHAR(40)    NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
+    agent_name     VARCHAR(50)    NOT NULL,
+    input_tokens   INT            NOT NULL,
+    output_tokens  INT            NOT NULL
+);
+
+-- Index is also scoped to the schema automatically
+CREATE INDEX idx_cost_usage_doc_id ON backend.cost_usage(doc_id);
+
 """
 """
 CREATE SCHEMA aia.aia_app;
