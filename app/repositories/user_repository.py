@@ -22,7 +22,7 @@ class UserRepository:
         try:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT user_id, email, name FROM users WHERE user_id = $1",
+                    "SELECT user_id, email, name FROM backend.users WHERE user_id = $1",
                     user_id,
                 )
             if row is None:
