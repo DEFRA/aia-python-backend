@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
+from app.api.cost_usage import router as cost_usage_router
 from app.api.documents import router as documents_router
 from app.api.health import router as health_router
 from app.api.users import router as users_router
@@ -35,6 +36,7 @@ app = FastAPI(title="AIA CoreBackend", version="1.0.0", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(documents_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
+app.include_router(cost_usage_router, prefix=API_PREFIX)
 
 
 def main() -> None:  # pragma: no cover

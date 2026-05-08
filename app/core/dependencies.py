@@ -3,8 +3,10 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.core.config import config
 from app.core.messages import messages
+from app.repositories.cost_usage_repository import CostUsageRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
+from app.services.cost_usage_service import CostUsageService
 from app.services.orchestrator_service import OrchestratorService
 from app.services.s3_service import S3Service
 from app.services.sqs_service import SQSService
@@ -65,6 +67,18 @@ def get_user_repository(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> UserRepository:
     return UserRepository(pool)
+
+
+def get_cost_usage_repository(
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> CostUsageRepository:
+    return CostUsageRepository(pool)
+
+
+def get_cost_usage_service(
+    repo: CostUsageRepository = Depends(get_cost_usage_repository),
+) -> CostUsageService:
+    return CostUsageService(repo)
 
 
 def get_s3_service() -> S3Service:

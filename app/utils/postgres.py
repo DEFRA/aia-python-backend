@@ -50,7 +50,8 @@ CREATE TABLE backend.cost_usage (
     doc_id         VARCHAR(40)    NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
     agent_name     VARCHAR(50)    NOT NULL,
     input_tokens   INT            NOT NULL,
-    output_tokens  INT            NOT NULL
+    output_tokens  INT            NOT NULL,
+    unit_cost      DOUBLE PRECISION NOT NULL
 );
 
 -- Index is also scoped to the schema automatically
