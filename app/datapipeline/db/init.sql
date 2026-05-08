@@ -40,53 +40,67 @@ END $$;
 
 -- ---------------------------------------------------------------------------
 -- Migration: policy_document_sync — drop file_name, add content_size
+-- (Skipped on a fresh DB: the table is created later in this script with the
+-- final shape, so there is nothing to migrate.)
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
     IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
-          AND table_name   = 'policy_document_sync'
-          AND column_name  = 'file_name'
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'data_pipeline' AND table_name = 'policy_document_sync'
     ) THEN
-        ALTER TABLE data_pipeline.policy_document_sync DROP COLUMN file_name;
-    END IF;
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'data_pipeline'
+              AND table_name   = 'policy_document_sync'
+              AND column_name  = 'file_name'
+        ) THEN
+            ALTER TABLE data_pipeline.policy_document_sync DROP COLUMN file_name;
+        END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
-          AND table_name   = 'policy_document_sync'
-          AND column_name  = 'content_size'
-    ) THEN
-        ALTER TABLE data_pipeline.policy_document_sync ADD COLUMN content_size INTEGER;
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'data_pipeline'
+              AND table_name   = 'policy_document_sync'
+              AND column_name  = 'content_size'
+        ) THEN
+            ALTER TABLE data_pipeline.policy_document_sync ADD COLUMN content_size INTEGER;
+        END IF;
     END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------
 -- Migration: move category from question_categories to policy_documents
+-- (Skipped on a fresh DB: policy_documents is created below with category
+-- already declared NOT NULL.)
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
-    -- Add category column to policy_documents if not already present
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'data_pipeline'
-          AND table_name   = 'policy_documents'
-          AND column_name  = 'category'
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'data_pipeline' AND table_name = 'policy_documents'
     ) THEN
-        ALTER TABLE data_pipeline.policy_documents ADD COLUMN category TEXT;
-        -- Back-fill from question_categories via the most common category per document
-        UPDATE data_pipeline.policy_documents pd
-        SET    category = (
-            SELECT qc.category
-            FROM   data_pipeline.question_categories qc
-            JOIN   data_pipeline.questions q ON q.question_id = qc.question_id
-            WHERE  q.policy_doc_id = pd.policy_doc_id
-            GROUP  BY qc.category
-            ORDER  BY COUNT(*) DESC
-            LIMIT  1
-        );
-        ALTER TABLE data_pipeline.policy_documents ALTER COLUMN category SET NOT NULL;
+        -- Add category column to policy_documents if not already present
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'data_pipeline'
+              AND table_name   = 'policy_documents'
+              AND column_name  = 'category'
+        ) THEN
+            ALTER TABLE data_pipeline.policy_documents ADD COLUMN category TEXT;
+            -- Back-fill from question_categories via the most common category per document
+            UPDATE data_pipeline.policy_documents pd
+            SET    category = (
+                SELECT qc.category
+                FROM   data_pipeline.question_categories qc
+                JOIN   data_pipeline.questions q ON q.question_id = qc.question_id
+                WHERE  q.policy_doc_id = pd.policy_doc_id
+                GROUP  BY qc.category
+                ORDER  BY COUNT(*) DESC
+                LIMIT  1
+            );
+            ALTER TABLE data_pipeline.policy_documents ALTER COLUMN category SET NOT NULL;
+        END IF;
     END IF;
-    -- Drop the junction table once data is migrated
+    -- Drop the junction table once data is migrated (no-op on fresh DB)
     DROP TABLE IF EXISTS data_pipeline.question_categories;
 END $$;
 
