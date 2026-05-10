@@ -33,7 +33,7 @@ def fetch_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySou
         cur.execute(
             """
             SELECT url_id, url, filename, category, type, isactive
-            FROM source_policy_docs
+            FROM data_pipeline.source_policy_docs
             WHERE isactive = TRUE
             ORDER BY url_id
             """
@@ -51,7 +51,7 @@ def fetch_all_policy_sources(
         cur.execute(
             """
             SELECT url_id, url, filename, category, type, isactive
-            FROM source_policy_docs
+            FROM data_pipeline.source_policy_docs
             ORDER BY url_id
             """
         )
@@ -182,5 +182,32 @@ def insert_questions(
             )
             count += 1
     conn.commit()
-    logger.info("Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id)
+    logger.info(
+        "Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id
+    )
     return count
+
+
+def insert_cost_usage(
+    conn: psycopg2.extensions.connection,
+    policy_doc_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    amount: float,
+    currency: str = "USD",
+) -> None:
+    """Insert an LLM cost-usage record for a processed policy document."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO policydoc_costusage
+                (policy_doc_id, input_tokens, output_tokens, amount, currency)
+            VALUES (%s::uuid, %s, %s, %s, %s)
+            """,
+            (policy_doc_id, input_tokens, output_tokens, amount, currency),
+        )
+    conn.commit()
+    logger.info(
+        "Cost usage recorded policy_doc_id=%s input=%d output=%d amount=%s %s",
+        policy_doc_id, input_tokens, output_tokens, amount, currency,
+    )

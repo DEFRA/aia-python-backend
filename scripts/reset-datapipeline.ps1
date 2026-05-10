@@ -169,7 +169,7 @@ ok "PostgreSQL" "${DbUser}@${DbHost}:${DbPort}/${DbName}"
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 2 - truncate mutable tables (CASCADE)"
 
-$DbSchema = if ($env:DB_SCHEMA) { $env:DB_SCHEMA } else { "aia_app" }
+$DbSchema = if ($env:DB_SCHEMA) { $env:DB_SCHEMA } else { "data_pipeline" }
 
 $TruncateSql = @"
 TRUNCATE TABLE
@@ -207,9 +207,9 @@ Assert-Empty "$DbSchema.policy_documents"
 
 $seedCount = Get-RowCount "$DbSchema.source_policy_docs"
 if ($seedCount -gt 0) {
-    ok "data_pipeline.source_policy_docs" "$seedCount rows (seed intact)"
+    ok "$DbSchema.source_policy_docs" "$seedCount rows (seed intact)"
 } else {
-    warn "data_pipeline.source_policy_docs" "0 rows - seed table is empty; pipeline will produce no output"
+    warn "$DbSchema.source_policy_docs" "0 rows - seed table is empty; pipeline will produce no output"
 }
 
 if ($failCount -gt 0) {
@@ -225,8 +225,23 @@ Write-Host ""
 Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.main"
 Write-Host ""
 
-& $VenvPython -m app.datapipeline.src.main
+# Temporarily relax error handling — Python logging writes to stderr, which
+# PowerShell treats as errors under $ErrorActionPreference='Stop'.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$pipelineOutput = & $VenvPython -m app.datapipeline.src.main 2>&1
 $pipelineExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+
+# Pass all output through to the console and extract the PIPELINE_USAGE line.
+$pipelineOutput | ForEach-Object { Write-Host $_ }
+$usageLine = $pipelineOutput | Where-Object { $_ -match '^PIPELINE_USAGE: ' } | Select-Object -Last 1
+$pipelineUsage = $null
+if ($usageLine) {
+    try {
+        $pipelineUsage = ($usageLine -replace '^PIPELINE_USAGE: ', '') | ConvertFrom-Json
+    } catch { $pipelineUsage = $null }
+}
 
 Write-Host ""
 if ($pipelineExit -eq 0) {
@@ -256,6 +271,17 @@ if ($qCount -gt 0) {
 
 ok "policy_document_sync" "$syncCount rows"
 ok "source_policy_docs"   "$seedCount rows (unchanged)"
+
+# -- Token usage summary -------------------------------------------------------
+if ($pipelineUsage) {
+    Write-Host ""
+    Write-Host "  Token Usage Summary" -ForegroundColor White
+    Write-Host ("  " + "-" * 44)
+    Write-Host ("  {0,-22} {1,10}" -f "Input tokens",  ("{0:N0}" -f $pipelineUsage.total_input_tokens))
+    Write-Host ("  {0,-22} {1,10}" -f "Output tokens", ("{0:N0}" -f $pipelineUsage.total_output_tokens))
+    Write-Host ("  {0,-22} {1,10}" -f "Total tokens",  ("{0:N0}" -f $pipelineUsage.total_tokens))
+    Write-Host ("  {0,-22} {1,10}" -f "Estimated cost", ("`$" + ("{0:F6}" -f $pipelineUsage.total_cost_usd)))
+}
 
 Write-Host ""
 if ($pipelineExit -eq 0) {

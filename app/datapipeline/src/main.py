@@ -5,7 +5,6 @@ fetches each SharePoint page, extracts evaluation questions via LLM,
 and writes the results to the Phase 1 normalised tables:
   data_pipeline.policy_documents
   data_pipeline.questions
-  data_pipeline.question_categories
   data_pipeline.policy_document_sync  (housekeeping / change-detection)
 
 Feature flag — local source list:
@@ -26,7 +25,6 @@ Run locally:
 
 Deployed as an AWS Lambda (see lambda_function.py for the handler wrapper).
 """
-
 from __future__ import annotations
 
 import json
@@ -42,6 +40,7 @@ from app.datapipeline.src.db import (
     delete_policy_document_by_url,
     delete_questions_for_doc,
     fetch_all_policy_sources,
+    insert_cost_usage,
     insert_policy_document,
     insert_questions,
     load_local_policy_sources,
@@ -124,17 +123,16 @@ def _write_debug_file(
 
 
 def _get_db_connection() -> psycopg2.extensions.connection:
-    schema = os.environ.get("DB_SCHEMA", "aia_app")
+    schema = os.environ.get("DB_SCHEMA", "data_pipeline")
     conn = psycopg2.connect(
         host=os.environ["DB_HOST"],
         port=int(os.environ.get("DB_PORT", "5432")),
         dbname=os.environ["DB_NAME"],
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
+        # Set search_path at connection level so it survives rollbacks.
+        options=f"-c search_path={schema},public",
     )
-    with conn.cursor() as cur:
-        cur.execute(f"SET search_path TO {schema}, public")
-    conn.commit()
     logger.info("DB search_path set to schema: %s", schema)
     return conn
 
@@ -194,6 +192,8 @@ def run() -> dict[str, int]:
         return {"processed": 0, "skipped": 0, "failed": 0, "cleaned": 0}
 
     processed = skipped = failed = cleaned = 0
+    total_input_tokens = total_output_tokens = 0
+    total_cost_usd = 0.0
 
     for source in sources:
         url = source.url
@@ -232,11 +232,22 @@ def run() -> dict[str, int]:
 
         # 3. Extract questions via LLM
         try:
-            questions = extractor.extract(url, content, source.category)
+            questions, llm_usage = extractor.extract(url, content, source.category)
         except Exception as exc:
             logger.error("Question extraction failed url=%s: %s", url, exc)
             failed += 1
             continue
+
+        print(
+            f"  {'URL':<12} {url}\n"
+            f"  {'Input tokens':<12} {llm_usage['input_tokens']:,}\n"
+            f"  {'Output tokens':<12} {llm_usage['output_tokens']:,}\n"
+            f"  {'Total tokens':<12} {llm_usage['total_tokens']:,}\n"
+            f"  {'Cost (USD)':<12} ${llm_usage['estimated_cost_usd']:.6f}\n"
+        )
+        total_input_tokens  += llm_usage["input_tokens"]
+        total_output_tokens += llm_usage["output_tokens"]
+        total_cost_usd      += llm_usage["estimated_cost_usd"]
 
         if not questions:
             logger.warning(
@@ -260,6 +271,17 @@ def run() -> dict[str, int]:
             delete_questions_for_doc(conn, policy_doc_id)
             insert_questions(conn, policy_doc_id, questions)
             upsert_sync_record(conn, url, last_modified, content_size, policy_doc_id)
+            insert_cost_usage(
+                conn,
+                policy_doc_id,
+                input_tokens=llm_usage["input_tokens"],
+                output_tokens=llm_usage["output_tokens"],
+                amount=round(llm_usage["estimated_cost_usd"], 4),
+            )
+            print(
+                f"  {'Saved to DB':<12} {os.environ.get('DB_SCHEMA', 'data_pipeline')}.policydoc_costusage  "
+                f"policy_doc_id={policy_doc_id}"
+            )
         except Exception as exc:
             logger.error("DB write failed url=%s: %s", url, exc)
             conn.rollback()
@@ -280,8 +302,15 @@ def run() -> dict[str, int]:
         "skipped": skipped,
         "failed": failed,
         "cleaned": cleaned,
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
+        "total_tokens": total_input_tokens + total_output_tokens,
+        "total_cost_usd": round(total_cost_usd, 6),
     }
     logger.info("Pipeline complete: %s", summary)
+    # Emit a machine-readable line so callers (e.g. reset-datapipeline.ps1) can
+    # parse token usage without screen-scraping log lines.
+    print(f"PIPELINE_USAGE: {json.dumps(summary)}")
     return summary
 
 
