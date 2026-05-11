@@ -33,6 +33,15 @@ class MarkdownReportGenerator:
         max_priority_actions: int = 10,
     ) -> str:
         lines: list[str] = [f"# {document_title}", ""]
+        # Render Final Evaluation Summary first
+        lines.extend(
+            self._render_final_summary(
+                results, section_labels, agent_type_order, max_priority_actions
+            )
+        )
+        lines.append("---")
+        lines.append("")
+        # Then render detailed category sections
         for agent_type in agent_type_order:
             result_list = [r for r in results.get(agent_type, []) if r is not None]
             if not result_list:
@@ -41,11 +50,6 @@ class MarkdownReportGenerator:
             lines.extend(self._render_category_section(result_list, label))
             lines.append("---")
             lines.append("")
-        lines.extend(
-            self._render_final_summary(
-                results, section_labels, agent_type_order, max_priority_actions
-            )
-        )
         return "\n".join(lines)
 
     def _render_category_section(
