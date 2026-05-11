@@ -16,12 +16,12 @@
     "isactive": true
   },
   {
-    "url_id": 3,
-    "url": "https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/Tools%20Authority/Tools%20Radar/20260217%20DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf",
+    "url_id": 3,     
+    "url": "https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/Tools%20Authority/Tools%20Radar/DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf",
     "filename": "DDTS Tools Authority Supplier Radar",
     "category": "technical",
     "type": "pdf",
-    "isactive": false
+    "isactive": true
   },
   {
     "url_id": 4,
@@ -33,11 +33,11 @@
   },
   {
     "url_id": 5,
-    "url": "https://defra.sharepoint.com/teams/Team3221/Soln%20and%20App%20Architecture/Forms/AllItems.aspx",
+    "url": "https://defra.sharepoint.com/:f:/r/teams/Team3221/Soln%20and%20App%20Architecture/Solution%20Design%20Authority",
     "filename": "Defra Architecture - Delivery Architecture Team - Solution Design Authority",
     "category": "technical",
     "type": "page",
-    "isactive": false
+    "isactive": true
   },
   {
     "url_id": 6,
