@@ -79,39 +79,30 @@ async def verify_auth(
 
     return {"user_id": verified_user_id}
 
-def get_app_context() -> AppContext:
-    return AppContext()
-
-def get_document_repository(
-    pool: asyncpg.Pool = Depends(get_db_pool),
-    context: AppContext = Depends(get_app_context),
-) -> DocumentRepository:
-    return DocumentRepository(pool, context)
-
-def get_user_repository(
-    pool: asyncpg.Pool = Depends(get_db_pool),
-) -> UserRepository:
-    return UserRepository(pool)
-
 
 def get_cost_usage_repository(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> CostUsageRepository:
     return CostUsageRepository(pool)
 
+
 def get_cost_usage_service(
     repo: CostUsageRepository = Depends(get_cost_usage_repository),
 ) -> CostUsageService:
     return CostUsageService(repo)
 
+
 def get_s3_service() -> S3Service:
     return S3Service()
+
 
 def get_sqs_service() -> SQSService:
     return SQSService()
 
+
 def get_orchestrator_service() -> OrchestratorService:
     return OrchestratorService()
+
 
 def get_upload_service(
     repo: DocumentRepository = Depends(get_document_repository),
