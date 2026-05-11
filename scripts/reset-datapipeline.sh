@@ -251,15 +251,15 @@ for r in rows:
 
 if categories:
     print("INSERT INTO data_pipeline.policy_source_categories (category) VALUES")
-    print(",\\n".join(["('" + c + "')" for c in sorted(categories)]))
+    print(",\n".join(["('" + c + "')" for c in sorted(categories)]))
     print("ON CONFLICT (category) DO NOTHING;")
 
 if vals:
     print("INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive) VALUES")
-    print(",\\n".join(vals))
+    print(",\n".join(vals))
     print("ON CONFLICT DO NOTHING;")
 
-print("SELECT setval('data_pipeline.source_policy_docs_url_id_seq', (SELECT COALESCE(MAX(url_id), 1) FROM data_pipeline.source_policy_docs), true);")
+print("SELECT setval(pg_get_serial_sequence('data_pipeline.source_policy_docs', 'url_id'), (SELECT COALESCE(MAX(url_id), 1) FROM data_pipeline.source_policy_docs), true);")
 PY
 )"
         if echo "$SEED_SQL" | pg_pipe > /dev/null 2>&1; then
@@ -279,7 +279,60 @@ if [[ "$FAIL_COUNT" -gt 0 ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 5 — run data pipeline"
+banner "Step 5 — validate AWS authentication"
+
+# Bedrock is the default LLM provider in the datapipeline. Validate AWS auth
+# upfront to fail fast on expired/invalid credentials before pipeline execution.
+LLM_PROVIDER_LOWER="$(echo "${LLM_PROVIDER:-bedrock}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$LLM_PROVIDER_LOWER" == "bedrock" ]]; then
+    if AWS_IDENTITY="$($VENV_PYTHON - <<'PY'
+import os
+import sys
+
+try:
+    import boto3
+except Exception as exc:
+    print(f"boto3 unavailable for AWS auth validation: {exc}")
+    sys.exit(2)
+
+region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
+if not region:
+    print("Missing AWS_DEFAULT_REGION/AWS_REGION for Bedrock authentication")
+    sys.exit(2)
+
+session_kwargs = {"region_name": region}
+access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
+secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+session_token = os.environ.get("AWS_SESSION_TOKEN", "").strip()
+
+if access_key and secret_key:
+    session_kwargs["aws_access_key_id"] = access_key
+    session_kwargs["aws_secret_access_key"] = secret_key
+    if session_token:
+        session_kwargs["aws_session_token"] = session_token
+
+try:
+    session = boto3.Session(**session_kwargs)
+    identity = session.client("sts").get_caller_identity()
+except Exception as exc:
+    print(f"AWS authentication failed: {exc}")
+    sys.exit(1)
+
+print(f"account={identity.get('Account')} arn={identity.get('Arn')}")
+PY
+    )"; then
+        ok "AWS authentication" "$AWS_IDENTITY"
+    else
+        fail "AWS authentication" "$AWS_IDENTITY"
+        echo -e "${RED}Aborting pipeline run due to AWS authentication failure.${NC}"
+        exit 1
+    fi
+else
+    warn "AWS authentication" "skipped (LLM_PROVIDER=${LLM_PROVIDER:-bedrock})"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+banner "Step 6 — run data pipeline"
 
 echo ""
 echo "  $ .venv/bin/python -m app.datapipeline.src.main"
@@ -296,7 +349,7 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 6 — final row counts"
+banner "Step 7 — final row counts"
 
 PD_COUNT="$(row_count "data_pipeline.policy_documents")"
 Q_COUNT="$(row_count "data_pipeline.questions")"
