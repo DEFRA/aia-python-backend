@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 
 import psycopg2
@@ -12,6 +14,25 @@ from app.datapipeline.src.schemas import ExtractedQuestion, PolicySource
 from app.datapipeline.src.utils import new_uuid
 
 logger = logging.getLogger(__name__)
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DEFAULT_SCHEMA = "data_pipeline"
+
+
+def _resolved_db_schema() -> str:
+    schema = os.environ.get("DB_SCHEMA", _DEFAULT_SCHEMA)
+    if not _IDENTIFIER_RE.fullmatch(schema):
+        logger.warning(
+            "Invalid DB_SCHEMA=%r; falling back to %s",
+            schema,
+            _DEFAULT_SCHEMA,
+        )
+        return _DEFAULT_SCHEMA
+    return schema
+
+
+def _qualified_table(table: str) -> str:
+    return f"{_resolved_db_schema()}.{table}"
 
 
 def load_local_policy_sources(path: str | Path) -> list[PolicySource]:
@@ -31,9 +52,9 @@ def fetch_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySou
     """Fetch all active policy source URLs from data_pipeline.source_policy_docs."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            """
+            f"""
             SELECT url_id, url, filename, category, type, isactive
-            FROM data_pipeline.source_policy_docs
+            FROM {_qualified_table("source_policy_docs")}
             WHERE isactive = TRUE
             ORDER BY url_id
             """
@@ -49,9 +70,9 @@ def fetch_all_policy_sources(
     """Fetch ALL policy sources (active and inactive) from data_pipeline.source_policy_docs."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            """
+            f"""
             SELECT url_id, url, filename, category, type, isactive
-            FROM data_pipeline.source_policy_docs
+            FROM {_qualified_table("source_policy_docs")}
             ORDER BY url_id
             """
         )
@@ -79,7 +100,7 @@ def delete_policy_document_by_url(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM policy_documents WHERE source_url = %s",
+            f"DELETE FROM {_qualified_table('policy_documents')} WHERE source_url = %s",
             (url,),
         )
         count: int = cur.rowcount
@@ -105,8 +126,8 @@ def insert_policy_document(
     policy_doc_id = new_uuid()
     with conn.cursor() as cur:
         cur.execute(
-            """
-            INSERT INTO policy_documents (policy_doc_id, source_url, filename, category)
+            f"""
+            INSERT INTO {_qualified_table("policy_documents")} (policy_doc_id, source_url, filename, category)
             VALUES (%s::uuid, %s, %s, %s)
             ON CONFLICT (source_url) DO UPDATE
                 SET filename  = EXCLUDED.filename,
@@ -137,7 +158,7 @@ def delete_questions_for_doc(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM questions WHERE policy_doc_id = %s::uuid",
+            f"DELETE FROM {_qualified_table('questions')} WHERE policy_doc_id = %s::uuid",
             (policy_doc_id,),
         )
         count: int = cur.rowcount
@@ -167,8 +188,8 @@ def insert_questions(
         for q in questions:
             question_id = new_uuid()
             cur.execute(
-                """
-                INSERT INTO questions
+                f"""
+                INSERT INTO {_qualified_table("questions")}
                     (id, question_text, reference, source_excerpt, policy_doc_id)
                 VALUES (%s::uuid, %s, %s, %s, %s::uuid)
                 """,
@@ -182,9 +203,7 @@ def insert_questions(
             )
             count += 1
     conn.commit()
-    logger.info(
-        "Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id
-    )
+    logger.info("Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id)
     return count
 
 
@@ -199,8 +218,8 @@ def insert_cost_usage(
     """Insert an LLM cost-usage record for a processed policy document."""
     with conn.cursor() as cur:
         cur.execute(
-            """
-            INSERT INTO policydoc_costusage
+            f"""
+            INSERT INTO {_qualified_table("policydoc_costusage")}
                 (policy_doc_id, input_tokens, output_tokens, amount, currency)
             VALUES (%s::uuid, %s, %s, %s, %s)
             """,
@@ -209,5 +228,9 @@ def insert_cost_usage(
     conn.commit()
     logger.info(
         "Cost usage recorded policy_doc_id=%s input=%d output=%d amount=%s %s",
-        policy_doc_id, input_tokens, output_tokens, amount, currency,
+        policy_doc_id,
+        input_tokens,
+        output_tokens,
+        amount,
+        currency,
     )
