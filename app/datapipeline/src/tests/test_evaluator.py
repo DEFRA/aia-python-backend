@@ -64,7 +64,9 @@ class TestQuestionExtractorExtract:
         mock_client.messages.create.return_value = _make_llm_response(_VALID_JSON)
 
         extractor = _make_extractor()
-        questions = extractor.extract(_POLICY_URL, "Policy content here", "security")
+        questions, usage = extractor.extract(
+            _POLICY_URL, "Policy content here", "security"
+        )
 
         assert len(questions) == 1
         q = questions[0]
@@ -72,6 +74,12 @@ class TestQuestionExtractorExtract:
         assert q.question_text == "Does the system encrypt data at rest?"
         assert q.reference == "Section 3.2"
         assert q.source_excerpt == "All data must be encrypted at rest using AES-256."
+        assert set(usage.keys()) == {
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "estimated_cost_usd",
+        }
 
     @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
     def test_handles_json_fences_in_response(self, mock_bedrock_cls: MagicMock) -> None:
@@ -81,7 +89,7 @@ class TestQuestionExtractorExtract:
         mock_client.messages.create.return_value = _make_llm_response(fenced)
 
         extractor = _make_extractor()
-        questions = extractor.extract(_POLICY_URL, "content", "security")
+        questions, _ = extractor.extract(_POLICY_URL, "content", "security")
 
         assert len(questions) == 1
 
