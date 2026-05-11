@@ -5,6 +5,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+from pydantic import ValidationError
+
 
 from app.datapipeline.src.db import (
     delete_policy_document_by_url,
@@ -335,3 +338,18 @@ class TestLoadLocalPolicySources:
         sources = load_local_policy_sources(bundled)
         assert len(sources) > 0
         assert all(isinstance(s, PolicySource) for s in sources)
+
+    def test_raises_for_invalid_source_value(self) -> None:
+        invalid = [
+            {
+                "url_id": 9,
+                "url": "https://defra.sharepoint.com/teams/T1/SitePages/Invalid.aspx",
+                "filename": "Invalid Source",
+                "category": "technical",
+                "source": "UnknownSource",
+                "isactive": True,
+            }
+        ]
+        path = self._write_file(invalid)
+        with pytest.raises(ValidationError):
+            load_local_policy_sources(path)

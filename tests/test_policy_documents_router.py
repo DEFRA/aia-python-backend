@@ -35,7 +35,7 @@ class TestFetchPolicyDocuments:
                     "urlId": 1,
                     "filename": "Secure by Design",
                     "category": "security",
-                    "source": "page",
+                    "source": "SharePoint",
                     "url": "https://example.com/policy",
                     "isActive": True,
                     "updatedAt": None,
@@ -59,6 +59,34 @@ class TestFetchPolicyDocuments:
         app.dependency_overrides.pop(get_user_repository, None)
 
 
+class TestFetchPolicyDocumentOptions:
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_fetch_policy_document_options_returns_sources_and_categories(
+        self, _mock_get_user, _mock_auth
+    ):
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_user_by_id.return_value = MOCK_USER
+        app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+
+        mock_service = AsyncMock()
+        mock_service.fetch_policy_document_options.return_value = {
+            "sources": ["SharePoint", "Confluence", "GitHub"],
+            "categories": ["security", "technical"],
+        }
+        app.dependency_overrides[get_policy_document_service] = lambda: mock_service
+
+        response = client.get("/api/v1/policy-documents/options", headers=BASE_HEADERS)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["sources"] == ["SharePoint", "Confluence", "GitHub"]
+        assert body["categories"] == ["security", "technical"]
+
+        app.dependency_overrides.pop(get_policy_document_service, None)
+        app.dependency_overrides.pop(get_user_repository, None)
+
+
 class TestFetchPolicyDocumentByUrlId:
     @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
     @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
@@ -72,7 +100,7 @@ class TestFetchPolicyDocumentByUrlId:
             "urlId": 10,
             "filename": "Policy",
             "category": "technical",
-            "source": "page",
+            "source": "SharePoint",
             "url": "https://example.com/policy-10",
             "isActive": True,
             "updatedAt": None,
@@ -119,7 +147,7 @@ class TestUpdatePolicyDocumentByUrlId:
             "urlId": 5,
             "filename": "Updated Policy",
             "category": "security",
-            "source": "page",
+            "source": "SharePoint",
             "url": "https://example.com/updated-policy",
             "isActive": False,
             "updatedAt": None,
@@ -129,7 +157,7 @@ class TestUpdatePolicyDocumentByUrlId:
         payload = {
             "filename": "Updated Policy",
             "category": "security",
-            "source": "page",
+            "source": "SharePoint",
             "url": "https://example.com/updated-policy",
             "isActive": False,
         }
@@ -146,9 +174,41 @@ class TestUpdatePolicyDocumentByUrlId:
         payload = {
             "filename": "Updated Policy",
             "category": "security",
-            "source": "page",
+            "source": "SharePoint",
             "url": "https://example.com/updated-policy",
             "isActive": True,
         }
         response = client.put("/api/v1/policy-documents/5", json=payload)
         assert response.status_code == 401
+
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_update_policy_document_invalid_category_returns_400(
+        self, _mock_get_user, _mock_auth
+    ):
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_user_by_id.return_value = MOCK_USER
+        app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+
+        mock_service = AsyncMock()
+        mock_service.update_policy_document_by_url_id.side_effect = ValueError(
+            "Unsupported category: invalid"
+        )
+        app.dependency_overrides[get_policy_document_service] = lambda: mock_service
+
+        payload = {
+            "filename": "Updated Policy",
+            "category": "invalid",
+            "source": "SharePoint",
+            "url": "https://example.com/updated-policy",
+            "isActive": True,
+        }
+        response = client.put(
+            "/api/v1/policy-documents/5", headers=BASE_HEADERS, json=payload
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Unsupported category: invalid"
+
+        app.dependency_overrides.pop(get_policy_document_service, None)
+        app.dependency_overrides.pop(get_user_repository, None)

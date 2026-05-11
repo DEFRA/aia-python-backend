@@ -6,8 +6,41 @@ from app.models.policy_document import PolicyDocumentRecord, PolicyDocumentUpdat
 
 
 class PolicyDocumentRepository:
+    SOURCE_OPTIONS: tuple[str, ...] = (
+        "SharePoint",
+        "Confluence",
+        "GitHub",
+    )
+
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
+
+    async def category_exists(self, category: str) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM data_pipeline.policy_source_categories
+                WHERE category = $1 AND isactive = TRUE
+                LIMIT 1
+                """,
+                category,
+            )
+        return row is not None
+
+    async def fetch_policy_document_options(self) -> tuple[list[str], list[str]]:
+        async with self.pool.acquire() as conn:
+            category_rows = await conn.fetch(
+                """
+                SELECT category
+                FROM data_pipeline.policy_source_categories
+                WHERE isactive = TRUE
+                ORDER BY category ASC
+                """
+            )
+
+        categories = [str(row["category"]) for row in category_rows]
+        return list(self.SOURCE_OPTIONS), categories
 
     async def fetch_policy_documents(
         self, page: int = 1, limit: int = 20

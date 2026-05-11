@@ -227,20 +227,41 @@ else
         fail "seed file not found" "$SEED_FILE"
         FAIL_COUNT=$(( FAIL_COUNT + 1 ))
     else
-        SEED_SQL="$("$VENV_PYTHON" -c "
-import json, sys
-with open('$SEED_FILE') as f:
+        SEED_SQL="$(SEED_FILE="$SEED_FILE" "$VENV_PYTHON" - <<'PY'
+import json
+import os
+
+with open(os.environ["SEED_FILE"], encoding="utf-8") as f:
     rows = json.load(f)
+
+
+def esc(value):
+    return str(value).replace("'", "''")
+
+
 vals = []
+categories = set()
 for r in rows:
-    def esc(s): return str(s).replace(\"'\", \"''\")
-    isactive = 'true' if r['isactive'] else 'false'
-    vals.append(\"(\" + str(r['url_id']) + \", '\" + esc(r['url']) + \"', '\" + esc(r['filename']) + \"', '\" + esc(r['category']) + \"', '\" + esc(r['source']) + \"', \" + isactive + \")\")
-print('INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive) VALUES')
-print(',\n'.join(vals))
-print(\"ON CONFLICT DO NOTHING;\")
-print(\"SELECT setval('data_pipeline.source_policy_docs_url_id_seq', (SELECT COALESCE(MAX(url_id), 1) FROM data_pipeline.source_policy_docs), true);\")
-")"
+    isactive = "true" if r["isactive"] else "false"
+    categories.add(esc(r["category"]))
+    vals.append(
+        "(" + str(r["url_id"]) + ", '" + esc(r["url"]) + "', '" + esc(r["filename"]) + "', '"
+        + esc(r["category"]) + "', '" + esc(r["source"]) + "', " + isactive + ")"
+    )
+
+if categories:
+    print("INSERT INTO data_pipeline.policy_source_categories (category) VALUES")
+    print(",\\n".join(["('" + c + "')" for c in sorted(categories)]))
+    print("ON CONFLICT (category) DO NOTHING;")
+
+if vals:
+    print("INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive) VALUES")
+    print(",\\n".join(vals))
+    print("ON CONFLICT DO NOTHING;")
+
+print("SELECT setval('data_pipeline.source_policy_docs_url_id_seq', (SELECT COALESCE(MAX(url_id), 1) FROM data_pipeline.source_policy_docs), true);")
+PY
+)"
         if echo "$SEED_SQL" | pg_pipe > /dev/null 2>&1; then
             SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
             ok "data_pipeline.source_policy_docs" "$SEED_COUNT rows (seeded from JSON)"

@@ -4,6 +4,16 @@
 CREATE SCHEMA IF NOT EXISTS data_pipeline;
 
 -- ---------------------------------------------------------------------------
+-- Reference: allowed policy categories (managed data; can evolve over time)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS data_pipeline.policy_source_categories (
+    category   TEXT PRIMARY KEY,
+    description TEXT,
+    isactive   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ---------------------------------------------------------------------------
 -- Migration: rename legacy table if it exists under the old name
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
@@ -141,10 +151,78 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     url_id   SERIAL PRIMARY KEY,
     url      TEXT    NOT NULL UNIQUE,
     filename TEXT    NOT NULL,
-    category TEXT    NOT NULL,
+    category TEXT    NOT NULL
+        REFERENCES data_pipeline.policy_source_categories(category),
     source   TEXT    NOT NULL DEFAULT 'SharePoint',
+    CONSTRAINT source_policy_docs_source_check
+        CHECK (source IN ('SharePoint', 'Confluence', 'GitHub')),
     isactive BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+-- ---------------------------------------------------------------------------
+-- Migration: enforce source/category integrity on existing source_policy_docs
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    -- Backfill categories from existing rows before applying FK.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'data_pipeline' AND table_name = 'source_policy_docs'
+    ) THEN
+        INSERT INTO data_pipeline.policy_source_categories (category)
+        SELECT DISTINCT spd.category
+        FROM data_pipeline.source_policy_docs spd
+        WHERE spd.category IS NOT NULL
+        ON CONFLICT (category) DO NOTHING;
+    END IF;
+
+    -- Add category FK if missing.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'category'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema    = 'data_pipeline'
+          AND table_name      = 'source_policy_docs'
+          AND constraint_type = 'FOREIGN KEY'
+          AND constraint_name = 'source_policy_docs_category_fkey'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs
+            ADD CONSTRAINT source_policy_docs_category_fkey
+            FOREIGN KEY (category)
+            REFERENCES data_pipeline.policy_source_categories(category);
+    END IF;
+
+    -- Add source check if missing and current data is compatible.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'source'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema    = 'data_pipeline'
+          AND table_name      = 'source_policy_docs'
+          AND constraint_type = 'CHECK'
+          AND constraint_name = 'source_policy_docs_source_check'
+    ) THEN
+        IF EXISTS (
+            SELECT 1
+            FROM data_pipeline.source_policy_docs
+            WHERE source NOT IN ('SharePoint', 'Confluence', 'GitHub')
+        ) THEN
+            RAISE WARNING 'Skipping source_policy_docs_source_check: found unsupported source values';
+        ELSE
+            ALTER TABLE data_pipeline.source_policy_docs
+                ADD CONSTRAINT source_policy_docs_source_check
+                CHECK (source IN ('SharePoint', 'Confluence', 'GitHub'));
+        END IF;
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Output: one row per unique policy URL processed
@@ -214,6 +292,20 @@ BEGIN
             RAISE WARNING 'Policy sources seed file not found/readable at /docker-entrypoint-initdb.d/policy_sources.json: %', SQLERRM;
             seed_json := '[]';
     END;
+
+    -- Keep category reference table in sync with JSON source list.
+    INSERT INTO data_pipeline.policy_source_categories (category)
+    SELECT DISTINCT row.category
+    FROM jsonb_to_recordset(seed_json::jsonb) AS row(
+        url_id INTEGER,
+        url TEXT,
+        filename TEXT,
+        category TEXT,
+        source TEXT,
+        isactive BOOLEAN
+    )
+    WHERE row.category IS NOT NULL
+    ON CONFLICT (category) DO NOTHING;
 
     INSERT INTO data_pipeline.source_policy_docs (url, filename, category, source, isactive)
     SELECT

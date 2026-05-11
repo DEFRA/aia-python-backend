@@ -2,6 +2,7 @@ from typing import Optional
 
 from app.models.policy_document import (
     PolicyDocumentListResponse,
+    PolicyDocumentOptionsResponse,
     PolicyDocumentRecord,
     PolicyDocumentUpdateRequest,
 )
@@ -11,6 +12,10 @@ from app.repositories.policy_document_repository import PolicyDocumentRepository
 class PolicyDocumentService:
     def __init__(self, repo: PolicyDocumentRepository):
         self.repo = repo
+
+    async def fetch_policy_document_options(self) -> PolicyDocumentOptionsResponse:
+        sources, categories = await self.repo.fetch_policy_document_options()
+        return PolicyDocumentOptionsResponse(sources=sources, categories=categories)
 
     async def fetch_policy_documents(
         self, page: int = 1, limit: int = 20
@@ -36,4 +41,6 @@ class PolicyDocumentService:
     async def update_policy_document_by_url_id(
         self, url_id: int, request: PolicyDocumentUpdateRequest
     ) -> Optional[PolicyDocumentRecord]:
+        if not await self.repo.category_exists(request.category):
+            raise ValueError(f"Unsupported category: {request.category}")
         return await self.repo.update_policy_document_by_url_id(url_id, request)

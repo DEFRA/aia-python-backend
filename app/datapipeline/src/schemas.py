@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel
+
+
+class PolicySourceType(str, Enum):
+    SHAREPOINT = "SharePoint"
+    CONFLUENCE = "Confluence"
+    GITHUB = "GitHub"
 
 
 class PolicySource(BaseModel):
@@ -10,7 +17,7 @@ class PolicySource(BaseModel):
     url: str
     filename: str
     category: str
-    source: str
+    source: PolicySourceType
     isactive: bool
 
 
