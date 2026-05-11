@@ -105,6 +105,21 @@ DO $$ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Migration: ensure source_url unique constraint exists on policy_documents
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema    = 'data_pipeline'
+          AND table_name      = 'policy_documents'
+          AND constraint_type = 'UNIQUE'
+          AND constraint_name = 'policy_documents_source_url_key'
+    ) THEN
+        ALTER TABLE data_pipeline.policy_documents ADD CONSTRAINT policy_documents_source_url_key UNIQUE (source_url);
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Source: active policy URLs to process
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
@@ -152,6 +167,21 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policy_document_sync (
     last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     policy_doc_id  UUID
         REFERENCES data_pipeline.policy_documents(policy_doc_id) ON DELETE SET NULL
+);
+
+-- ---------------------------------------------------------------------------
+-- Cost tracking: LLM token usage and estimated cost per policy document run
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS data_pipeline.policydoc_costusage (
+    id             SERIAL      PRIMARY KEY,
+    policy_doc_id  UUID        NOT NULL
+        REFERENCES data_pipeline.policy_documents(policy_doc_id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    input_tokens   INTEGER     NOT NULL,
+    output_tokens  INTEGER     NOT NULL,
+    amount         NUMERIC(10,4) NOT NULL,
+    currency       VARCHAR(100)  NOT NULL DEFAULT 'USD',
+    created_at     TIMESTAMP   NOT NULL DEFAULT NOW()
 );
 
 -- ---------------------------------------------------------------------------
