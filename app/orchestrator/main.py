@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 
@@ -32,9 +33,61 @@ from app.utils.postgres import close_postgres_pool, get_postgres_pool, init_db  
 
 logger = get_logger("app.orchestrator")
 
+# References: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html
+_MAX_SQS_MESSAGE_BYTES = 1024 * 1024
+_POSTGRES_INT_MAX = 2_147_483_647
+
 _session_store = SessionStore()
 _summary_generator = MarkdownReportGenerator()
 _poller_task: asyncio.Task | None = None
+
+
+class NonRetriableStatusMessageError(ValueError):
+    """Raised when a status payload is malformed or violates invariants."""
+
+
+def _known_agent_types() -> set[str]:
+    known = {config.orchestrator.default_agent_type}
+    for agent_types in config.templates.values():
+        known.update(agent_types)
+    return known
+
+
+def _parse_status_message(body: str) -> StatusMessage:
+    """Parse and validate a raw status queue payload.
+
+    Raises NonRetriableStatusMessageError for malformed or poison messages so they can
+    be deleted immediately instead of retried forever.
+    """
+    if len(body.encode("utf-8")) > _MAX_SQS_MESSAGE_BYTES:
+        raise NonRetriableStatusMessageError(
+            "Status message exceeds SQS payload limit"
+        )
+
+    try:
+        status_msg = StatusMessage.model_validate_json(body)
+    except ValidationError as exc:
+        raise NonRetriableStatusMessageError("Status payload validation failed") from exc
+
+    expected_task_id = f"{status_msg.document_id}_{status_msg.agent_type}"
+    if status_msg.task_id != expected_task_id:
+        raise NonRetriableStatusMessageError(
+            "task_id must match {document_id}_{agent_type}"
+        )
+
+    if status_msg.agent_type not in _known_agent_types():
+        raise NonRetriableStatusMessageError("Unknown agent_type in status payload")
+
+    if status_msg.input_tokens is not None and status_msg.input_tokens > _POSTGRES_INT_MAX:
+        raise NonRetriableStatusMessageError("input_tokens exceeds DB integer limit")
+
+    if (
+        status_msg.output_tokens is not None
+        and status_msg.output_tokens > _POSTGRES_INT_MAX
+    ):
+        raise NonRetriableStatusMessageError("output_tokens exceeds DB integer limit")
+
+    return status_msg
 
 
 def _pricing_map() -> dict[str, dict[str, float]]:
@@ -353,8 +406,9 @@ async def _status_queue_poller() -> None:
             )
             for msg in messages:
                 receipt = msg["receipt_handle"]
+                body = msg.get("body", "")
                 try:
-                    status_msg = StatusMessage.model_validate_json(msg["body"])
+                    status_msg = _parse_status_message(body)
                     logger.info(
                         "[TOKEN] Status message received task_id=%s doc_id=%s agent_type=%s model_id=%s inputTokens=%s outputTokens=%s",
                         status_msg.task_id,
@@ -391,11 +445,22 @@ async def _status_queue_poller() -> None:
                             status_msg.task_id,
                             all_received,
                         )
+                except NonRetriableStatusMessageError as exc:
+                    preview = body[:200].replace("\n", "\\n")
+                    logger.warning(
+                        "Discarding poison status message and deleting from queue: %s | body_preview=%s",
+                        exc,
+                        preview,
+                    )
+                    try:
+                        await sqs.delete_message(queue_url, receipt)
+                    except Exception:
+                        logger.exception("Failed to delete poison status message")
                 except Exception as exc:
                     logger.exception(
                         "Failed to process status message: %s — body=%s",
                         exc,
-                        msg["body"],
+                        body,
                     )
         except asyncio.CancelledError:
             logger.info("Status queue poller stopped")

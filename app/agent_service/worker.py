@@ -12,6 +12,8 @@ import os
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 # ---------------------------------------------------------------------------
 # Evaluation module path injection — must precede 'src.*' imports below.
 # The evaluation sub-package uses bare 'src.*' imports because its Lambda
@@ -54,6 +56,41 @@ from app.services.sqs_service import SQSService  # noqa: E402
 from app.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger("app.agent_service")
+
+# References: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html
+_MAX_SQS_MESSAGE_BYTES = 1024 * 1024
+
+
+class NonRetriableTaskMessageError(ValueError):
+    """Raised when a task payload is malformed or violates invariants."""
+
+
+def _parse_task_message(body: str) -> TaskMessage:
+    """Parse and validate a raw task queue payload.
+
+    Raises NonRetriableTaskMessageError for malformed or poison messages so they can
+    be deleted immediately instead of retried forever.
+    """
+    if len(body.encode("utf-8")) > _MAX_SQS_MESSAGE_BYTES:
+        raise NonRetriableTaskMessageError(
+            "Task message exceeds SQS payload limit"
+        )
+
+    try:
+        task = TaskMessage.model_validate_json(body)
+    except ValidationError as exc:
+        raise NonRetriableTaskMessageError("Task payload validation failed") from exc
+
+    expected_task_id = f"{task.document_id}_{task.agent_type}"
+    if task.task_id != expected_task_id:
+        raise NonRetriableTaskMessageError(
+            "task_id must match {document_id}_{agent_type}"
+        )
+
+    if task.agent_type not in AGENT_REGISTRY:
+        raise NonRetriableTaskMessageError("Unknown agent_type in task payload")
+
+    return task
 
 
 def _on_task_done(task: asyncio.Task) -> None:  # type: ignore[type-arg]
@@ -347,8 +384,9 @@ async def _process_message(
 ) -> None:
     async with semaphore:
         receipt = msg["receipt_handle"]
+        body = msg.get("body", "")
         try:
-            task = TaskMessage.model_validate_json(msg["body"])
+            task = _parse_task_message(body)
             logger.info(
                 "Received task_id=%s agent_type=%s doc_id=%s policy_doc_id=%s",
                 task.task_id,
@@ -364,6 +402,22 @@ async def _process_message(
                 task.task_id,
                 status.error,
             )
+        except NonRetriableTaskMessageError as exc:
+            preview = body[:200].replace("\n", "\\n")
+            logger.warning(
+                "Discarding poison task message and deleting from queue: %s | body_preview=%s",
+                exc,
+                preview,
+            )
+            try:
+                await _delete_with_retry(
+                    sqs,
+                    task_url,
+                    receipt,
+                    task_id="invalid_task_message",
+                )
+            except Exception:
+                logger.exception("Failed to delete poison task message")
         except Exception as exc:
             logger.exception(
                 "Unhandled task error — message not deleted (will retry): %s",
