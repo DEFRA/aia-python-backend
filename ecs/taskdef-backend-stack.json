@@ -1,0 +1,169 @@
+{
+  "family": "aia-backend-stack",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/aia-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/aia-backend-task-role",
+  "containerDefinitions": [
+    {
+      "name": "corebackend",
+      "image": "<BACKEND_IMAGE_URI>",
+      "essential": true,
+      "command": ["python", "-m", "app.api.main"],
+      "portMappings": [
+        {
+          "containerPort": 8086,
+          "hostPort": 8086,
+          "protocol": "tcp"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "orchestrator",
+          "condition": "HEALTHY"
+        }
+      ],
+      "environment": [
+        {
+          "name": "HOST",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "PORT",
+          "value": "8086"
+        },
+        {
+          "name": "ORCHESTRATOR_URL",
+          "value": "http://localhost:8001"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "<AWS_REGION>"
+        },
+        {
+          "name": "POSTGRES_URI",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:POSTGRES_URI::"
+        },
+        {
+          "name": "JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:JWT_SECRET::"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:S3_BUCKET_NAME::"
+        },
+        {
+          "name": "TASK_QUEUE_URL",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:TASK_QUEUE_URL::"
+        },
+        {
+          "name": "STATUS_QUEUE_URL",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:STATUS_QUEUE_URL::"
+        },
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:AWS_ACCESS_KEY_ID::"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:AWS_SECRET_ACCESS_KEY::"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:AWS_SESSION_TOKEN::"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8086/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 45
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aia-backend-stack",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "corebackend"
+        }
+      }
+    },
+    {
+      "name": "orchestrator",
+      "image": "<BACKEND_IMAGE_URI>",
+      "essential": true,
+      "command": ["python", "-m", "app.orchestrator.main"],
+      "portMappings": [
+        {
+          "containerPort": 8001,
+          "hostPort": 8001,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "HOST",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "<AWS_REGION>"
+        },
+        {
+          "name": "ORCHESTRATOR_PORT",
+          "value": "8001"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "POSTGRES_URI",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:POSTGRES_URI::"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:S3_BUCKET_NAME::"
+        },
+        {
+          "name": "TASK_QUEUE_URL",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:TASK_QUEUE_URL::"
+        },
+        {
+          "name": "STATUS_QUEUE_URL",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:STATUS_QUEUE_URL::"
+        },
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:AWS_ACCESS_KEY_ID::"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:AWS_SECRET_ACCESS_KEY::"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:aia/backend-runtime:AWS_SESSION_TOKEN::"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8001/docs || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aia-backend-stack",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "orchestrator"
+        }
+      }
+    }
+  ]
+}

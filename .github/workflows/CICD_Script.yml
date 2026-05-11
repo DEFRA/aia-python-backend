@@ -1,0 +1,227 @@
+name: Build And Deploy To ECS
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+concurrency:
+  group: ecs-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  BACKEND_ECR_REPOSITORY: ${{ vars.BACKEND_ECR_REPOSITORY }}
+  AGENT_ECR_REPOSITORY: ${{ vars.AGENT_ECR_REPOSITORY }}
+  BACKEND_TASKDEF_PATH: ${{ vars.BACKEND_TASKDEF_PATH }}
+  AGENT_TASKDEF_PATH: ${{ vars.AGENT_TASKDEF_PATH }}
+  COREBACKEND_CONTAINER_NAME: ${{ vars.COREBACKEND_CONTAINER_NAME || 'corebackend' }}
+  ORCHESTRATOR_CONTAINER_NAME: ${{ vars.ORCHESTRATOR_CONTAINER_NAME || 'orchestrator' }}
+  AGENT_CONTAINER_NAME: ${{ vars.AGENT_CONTAINER_NAME || 'agent-service' }}
+
+jobs:
+  build-and-deploy-backend-stack:
+    name: Build/Deploy Backend + Orchestrator
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate backend CI/CD inputs
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          BACKEND_ECR_REPOSITORY: ${{ vars.BACKEND_ECR_REPOSITORY }}
+          BACKEND_ECS_SERVICE: ${{ vars.BACKEND_ECS_SERVICE }}
+          BACKEND_ECS_CLUSTER: ${{ vars.BACKEND_ECS_CLUSTER }}
+          BACKEND_TASKDEF_PATH: ${{ vars.BACKEND_TASKDEF_PATH }}
+        run: |
+          set -euo pipefail
+          required_vars=(
+            AWS_REGION
+            BACKEND_ECR_REPOSITORY
+            BACKEND_ECS_SERVICE
+            BACKEND_ECS_CLUSTER
+            BACKEND_TASKDEF_PATH
+          )
+
+          for name in "${required_vars[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required repository variable '$name' is not set."
+              exit 1
+            fi
+          done
+
+          if [ ! -f "Dockerfile.backend" ]; then
+            echo "::error::Dockerfile.backend not found at repository root."
+            exit 1
+          fi
+
+          if [ ! -f "$BACKEND_TASKDEF_PATH" ]; then
+            echo "::error::Backend task definition not found at '$BACKEND_TASKDEF_PATH'."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set backend image URI
+        id: backend-image
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_ECR_REPOSITORY }}:${{ github.sha }}"
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend/orchestrator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ${{ steps.backend-image.outputs.image_uri }}
+
+      - name: Render backend task definition (CoreBackend)
+        id: render-corebackend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.BACKEND_TASKDEF_PATH }}
+          container-name: ${{ env.COREBACKEND_CONTAINER_NAME }}
+          image: ${{ steps.backend-image.outputs.image_uri }}
+
+      - name: Render backend task definition (Orchestrator)
+        id: render-orchestrator
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-corebackend.outputs.task-definition }}
+          container-name: ${{ env.ORCHESTRATOR_CONTAINER_NAME }}
+          image: ${{ steps.backend-image.outputs.image_uri }}
+
+      - name: Deploy backend stack to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-orchestrator.outputs.task-definition }}
+          service: ${{ vars.BACKEND_ECS_SERVICE }}
+          cluster: ${{ vars.BACKEND_ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Backend deployment summary
+        run: |
+          {
+            echo "## Backend + Orchestrator Deployment"
+            echo "- Image: \\`${{ steps.backend-image.outputs.image_uri }}\\`"
+            echo "- ECS Cluster: \\`${{ vars.BACKEND_ECS_CLUSTER }}\\`"
+            echo "- ECS Service: \\`${{ vars.BACKEND_ECS_SERVICE }}\\`"
+            echo "- Task Definition: \\`${{ env.BACKEND_TASKDEF_PATH }}\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-and-deploy-agent:
+    name: Build/Deploy Agent Service
+    runs-on: ubuntu-latest
+    environment: production
+    needs: build-and-deploy-backend-stack
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate agent CI/CD inputs
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AGENT_ECR_REPOSITORY: ${{ vars.AGENT_ECR_REPOSITORY }}
+          AGENT_ECS_SERVICE: ${{ vars.AGENT_ECS_SERVICE }}
+          AGENT_ECS_CLUSTER: ${{ vars.AGENT_ECS_CLUSTER }}
+          AGENT_TASKDEF_PATH: ${{ vars.AGENT_TASKDEF_PATH }}
+        run: |
+          set -euo pipefail
+          required_vars=(
+            AWS_REGION
+            AGENT_ECR_REPOSITORY
+            AGENT_ECS_SERVICE
+            AGENT_ECS_CLUSTER
+            AGENT_TASKDEF_PATH
+          )
+
+          for name in "${required_vars[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required repository variable '$name' is not set."
+              exit 1
+            fi
+          done
+
+          if [ ! -f "Dockerfile.agent" ]; then
+            echo "::error::Dockerfile.agent not found at repository root."
+            exit 1
+          fi
+
+          if [ ! -f "$AGENT_TASKDEF_PATH" ]; then
+            echo "::error::Agent task definition not found at '$AGENT_TASKDEF_PATH'."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set agent image URI
+        id: agent-image
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.AGENT_ECR_REPOSITORY }}:${{ github.sha }}"
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.agent
+          push: true
+          tags: |
+            ${{ steps.agent-image.outputs.image_uri }}
+
+      - name: Render agent task definition
+        id: render-agent
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.AGENT_TASKDEF_PATH }}
+          container-name: ${{ env.AGENT_CONTAINER_NAME }}
+          image: ${{ steps.agent-image.outputs.image_uri }}
+
+      - name: Deploy agent service to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-agent.outputs.task-definition }}
+          service: ${{ vars.AGENT_ECS_SERVICE }}
+          cluster: ${{ vars.AGENT_ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Agent deployment summary
+        run: |
+          {
+            echo "## Agent Deployment"
+            echo "- Image: \\`${{ steps.agent-image.outputs.image_uri }}\\`"
+            echo "- ECS Cluster: \\`${{ vars.AGENT_ECS_CLUSTER }}\\`"
+            echo "- ECS Service: \\`${{ vars.AGENT_ECS_SERVICE }}\\`"
+            echo "- Task Definition: \\`${{ env.AGENT_TASKDEF_PATH }}\\`"
+            echo ""
+            echo "> Note: Data Pipeline is intentionally excluded from this workflow and should be deployed via a separate AWS Lambda CI/CD pipeline."
+          } >> "$GITHUB_STEP_SUMMARY"
