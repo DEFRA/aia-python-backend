@@ -4,7 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from anthropic import AnthropicBedrock
+import anthropic
+from anthropic import Anthropic, AnthropicBedrock
 
 from app.datapipeline.src.schemas import ExtractedQuestion
 
@@ -31,24 +32,78 @@ def _strip_fences(text: str) -> str:
 
 
 class QuestionExtractor:
-    """Calls Anthropic via Bedrock to extract structured questions from policy content."""
+    """Calls Anthropic (directly or via Bedrock) to extract structured questions.
+
+    Provider is selected by the LLM_PROVIDER env var:
+      - "bedrock"   (default) — uses AWS Bedrock; requires AWS credentials.
+      - "anthropic"           — uses the direct Anthropic API; requires ANTHROPIC_API_KEY.
+    """
 
     _SYSTEM_PROMPT: str = _load_prompt("policy_evaluation_prompt.md")
 
     def __init__(
         self,
-        aws_access_key: str,
-        aws_secret_key: str,
         aws_region: str,
         model_id: str,
+        provider: str = "bedrock",
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
         aws_session_token: str | None = None,
+        anthropic_api_key: str | None = None,
     ) -> None:
         self._model_id = model_id
-        self._client = AnthropicBedrock(
-            aws_access_key=aws_access_key,
-            aws_secret_key=aws_secret_key,
-            aws_session_token=aws_session_token,
-            aws_region=aws_region,
+        self._provider = provider
+
+        if provider == "anthropic":
+            if not anthropic_api_key:
+                raise ValueError(
+                    "LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY to be set"
+                )
+            self._client: Anthropic | AnthropicBedrock = Anthropic(
+                api_key=anthropic_api_key
+            )
+            logger.info("LLM provider: Anthropic direct API")
+        else:
+            # Bedrock — only pass explicit credentials when both key + secret are present.
+            # Omitting them lets the SDK fall back to the standard AWS credential chain
+            # (env vars, ~/.aws/credentials, instance profile), which avoids 403s
+            # from expired STS session tokens left in .env.
+            kwargs: dict = {"aws_region": aws_region}
+            if aws_access_key and aws_secret_key:
+                kwargs["aws_access_key"] = aws_access_key
+                kwargs["aws_secret_key"] = aws_secret_key
+                if aws_session_token:
+                    kwargs["aws_session_token"] = aws_session_token
+            self._client = AnthropicBedrock(**kwargs)
+            logger.info("LLM provider: AWS Bedrock region=%s", aws_region)
+
+    # Pricing per million tokens (USD) — update if rates change.
+    # https://aws.amazon.com/bedrock/pricing/  /  https://anthropic.com/pricing
+    _PRICING: dict[str, dict[str, float]] = {
+        # Bedrock model IDs
+        "anthropic.claude-3-7-sonnet-20250219-v1:0": {"input": 3.00, "output": 15.00},
+        "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00, "output": 15.00},
+        "anthropic.claude-3-5-haiku-20241022-v1:0":  {"input": 0.80, "output":  4.00},
+        # Direct Anthropic API model IDs
+        "claude-3-7-sonnet-20250219":  {"input": 3.00, "output": 15.00},
+        "claude-3-5-sonnet-20241022":  {"input": 3.00, "output": 15.00},
+        "claude-3-5-haiku-20241022":   {"input": 0.80, "output":  4.00},
+    }
+
+    def _log_usage(self, policy_url: str, usage: object) -> None:
+        """Log token counts and estimated USD cost for one LLM call."""
+        input_tokens: int = getattr(usage, "input_tokens", 0)
+        output_tokens: int = getattr(usage, "output_tokens", 0)
+        rates = self._PRICING.get(self._model_id, {"input": 0.0, "output": 0.0})
+        cost = (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
+        logger.info(
+            "LLM usage  url=%s  input_tokens=%d  output_tokens=%d  "
+            "total_tokens=%d  estimated_cost=$%.6f",
+            policy_url,
+            input_tokens,
+            output_tokens,
+            input_tokens + output_tokens,
+            cost,
         )
 
     def extract(
@@ -56,8 +111,8 @@ class QuestionExtractor:
         policy_url: str,
         content: str,
         category: str,
-    ) -> list[ExtractedQuestion]:
-        """Call the LLM and return validated ExtractedQuestion objects.
+    ) -> tuple[list[ExtractedQuestion], dict]:
+        """Call the LLM and return validated ExtractedQuestion objects plus usage info.
 
         Args:
             policy_url: Source URL — included in the prompt for traceability.
@@ -66,7 +121,8 @@ class QuestionExtractor:
                       Passed as a hint so the LLM assigns categories accurately.
 
         Returns:
-            List of ExtractedQuestion instances parsed from the LLM response.
+            Tuple of (questions, usage) where usage contains:
+              input_tokens, output_tokens, total_tokens, estimated_cost_usd.
 
         Raises:
             ValueError: If the LLM response cannot be parsed as a JSON array
@@ -90,6 +146,17 @@ class QuestionExtractor:
             messages=[{"role": "user", "content": user_message}],
         )
 
+        self._log_usage(policy_url, response.usage)
+        input_tokens: int = getattr(response.usage, "input_tokens", 0)
+        output_tokens: int = getattr(response.usage, "output_tokens", 0)
+        rates = self._PRICING.get(self._model_id, {"input": 0.0, "output": 0.0})
+        cost = (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
+        usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "estimated_cost_usd": cost,
+        }
         raw = _strip_fences(response.content[0].text)
 
         try:
@@ -114,4 +181,4 @@ class QuestionExtractor:
         logger.info(
             "Extracted %d question(s) policy_url=%s", len(questions), policy_url
         )
-        return questions
+        return questions, usage

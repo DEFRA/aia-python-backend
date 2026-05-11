@@ -79,7 +79,7 @@ def delete_policy_document_by_url(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM data_pipeline.policy_documents WHERE source_url = %s",
+            "DELETE FROM policy_documents WHERE source_url = %s",
             (url,),
         )
         count: int = cur.rowcount
@@ -106,7 +106,7 @@ def insert_policy_document(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, filename, category)
+            INSERT INTO policy_documents (policy_doc_id, source_url, filename, category)
             VALUES (%s::uuid, %s, %s, %s)
             ON CONFLICT (source_url) DO UPDATE
                 SET filename  = EXCLUDED.filename,
@@ -137,7 +137,7 @@ def delete_questions_for_doc(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM data_pipeline.questions WHERE policy_doc_id = %s::uuid",
+            "DELETE FROM questions WHERE policy_doc_id = %s::uuid",
             (policy_doc_id,),
         )
         count: int = cur.rowcount
@@ -168,7 +168,7 @@ def insert_questions(
             question_id = new_uuid()
             cur.execute(
                 """
-                INSERT INTO data_pipeline.questions
+                INSERT INTO questions
                     (id, question_text, reference, source_excerpt, policy_doc_id)
                 VALUES (%s::uuid, %s, %s, %s, %s::uuid)
                 """,
@@ -182,5 +182,32 @@ def insert_questions(
             )
             count += 1
     conn.commit()
-    logger.info("Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id)
+    logger.info(
+        "Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id
+    )
     return count
+
+
+def insert_cost_usage(
+    conn: psycopg2.extensions.connection,
+    policy_doc_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    amount: float,
+    currency: str = "USD",
+) -> None:
+    """Insert an LLM cost-usage record for a processed policy document."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO policydoc_costusage
+                (policy_doc_id, input_tokens, output_tokens, amount, currency)
+            VALUES (%s::uuid, %s, %s, %s, %s)
+            """,
+            (policy_doc_id, input_tokens, output_tokens, amount, currency),
+        )
+    conn.commit()
+    logger.info(
+        "Cost usage recorded policy_doc_id=%s input=%d output=%d amount=%s %s",
+        policy_doc_id, input_tokens, output_tokens, amount, currency,
+    )
