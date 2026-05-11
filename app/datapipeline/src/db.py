@@ -32,7 +32,7 @@ def fetch_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySou
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT url_id, url, filename, category, type, isactive
+            SELECT url_id, url, filename, category, source, isactive
             FROM data_pipeline.source_policy_docs
             WHERE isactive = TRUE
             ORDER BY url_id
@@ -50,7 +50,7 @@ def fetch_all_policy_sources(
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT url_id, url, filename, category, type, isactive
+            SELECT url_id, url, filename, category, source, isactive
             FROM data_pipeline.source_policy_docs
             ORDER BY url_id
             """
@@ -79,7 +79,7 @@ def delete_policy_document_by_url(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM policy_documents WHERE source_url = %s",
+            "DELETE FROM data_pipeline.policy_documents WHERE source_url = %s",
             (url,),
         )
         count: int = cur.rowcount
@@ -106,7 +106,7 @@ def insert_policy_document(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO policy_documents (policy_doc_id, source_url, filename, category)
+            INSERT INTO data_pipeline.policy_documents (policy_doc_id, source_url, filename, category)
             VALUES (%s::uuid, %s, %s, %s)
             ON CONFLICT (source_url) DO UPDATE
                 SET filename  = EXCLUDED.filename,
@@ -137,7 +137,7 @@ def delete_questions_for_doc(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM questions WHERE policy_doc_id = %s::uuid",
+            "DELETE FROM data_pipeline.questions WHERE policy_doc_id = %s::uuid",
             (policy_doc_id,),
         )
         count: int = cur.rowcount
@@ -168,7 +168,7 @@ def insert_questions(
             question_id = new_uuid()
             cur.execute(
                 """
-                INSERT INTO questions
+                INSERT INTO data_pipeline.questions
                     (id, question_text, reference, source_excerpt, policy_doc_id)
                 VALUES (%s::uuid, %s, %s, %s, %s::uuid)
                 """,
@@ -182,9 +182,7 @@ def insert_questions(
             )
             count += 1
     conn.commit()
-    logger.info(
-        "Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id
-    )
+    logger.info("Inserted %d question(s) for policy_doc_id=%s", count, policy_doc_id)
     return count
 
 
@@ -200,7 +198,7 @@ def insert_cost_usage(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO policydoc_costusage
+            INSERT INTO data_pipeline.policydoc_costusage
                 (policy_doc_id, input_tokens, output_tokens, amount, currency)
             VALUES (%s::uuid, %s, %s, %s, %s)
             """,
@@ -209,5 +207,9 @@ def insert_cost_usage(
     conn.commit()
     logger.info(
         "Cost usage recorded policy_doc_id=%s input=%d output=%d amount=%s %s",
-        policy_doc_id, input_tokens, output_tokens, amount, currency,
+        policy_doc_id,
+        input_tokens,
+        output_tokens,
+        amount,
+        currency,
     )

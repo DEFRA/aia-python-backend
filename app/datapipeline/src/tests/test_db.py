@@ -43,7 +43,7 @@ class TestFetchPolicySources:
                 "url": "https://sp.com/teams/T1/SitePages/P.aspx",
                 "filename": "Data Policy",
                 "category": "security",
-                "type": "page",
+                "source": "SharePoint",
                 "isactive": True,
             }
         ]
@@ -145,7 +145,7 @@ class TestInsertQuestions:
 
         execute_calls = cursor.execute.call_args_list
         question_inserts = [
-            c for c in execute_calls if "data_pipeline.questions" in str(c)
+            c for c in execute_calls if "INSERT INTO data_pipeline.questions" in str(c)
         ]
         assert len(question_inserts) == 2
 
@@ -167,7 +167,7 @@ class TestFetchAllPolicySources:
                 "url": "https://sp.com/active",
                 "filename": "Active",
                 "category": "security",
-                "type": "page",
+                "source": "SharePoint",
                 "isactive": True,
             },
             {
@@ -175,7 +175,7 @@ class TestFetchAllPolicySources:
                 "url": "https://sp.com/inactive",
                 "filename": "Inactive",
                 "category": "technical",
-                "type": "page",
+                "source": "SharePoint",
                 "isactive": False,
             },
         ]
@@ -235,7 +235,7 @@ class TestDeletePolicyDocumentByUrl:
         delete_policy_document_by_url(conn, "https://sp.com/page")
 
         sql, params = cursor.execute.call_args[0]
-        assert "policy_documents" in sql
+        assert "data_pipeline.policy_documents" in sql
         assert "source_url" in sql
         assert params == ("https://sp.com/page",)
 
@@ -259,7 +259,7 @@ class TestDeleteQuestionsForDoc:
         delete_questions_for_doc(conn, "doc-uuid-abc")
 
         sql = cursor.execute.call_args[0][0]
-        assert "data_pipeline.questions" in sql
+        assert "DELETE FROM data_pipeline.questions" in sql
         assert "policy_doc_id" in sql
 
     def test_returns_zero_when_no_questions_exist(self) -> None:
@@ -278,7 +278,7 @@ _SAMPLE_SOURCES = [
         "url": "https://defra.sharepoint.com/teams/T1/SitePages/Policy.aspx",
         "filename": "Policy Page",
         "category": "security",
-        "type": "page",
+        "source": "SharePoint",
         "isactive": True,
     },
     {
@@ -286,7 +286,7 @@ _SAMPLE_SOURCES = [
         "url": "https://defra.sharepoint.com/teams/T1/SitePages/Inactive.aspx",
         "filename": "Inactive Page",
         "category": "technical",
-        "type": "page",
+        "source": "SharePoint",
         "isactive": False,
     },
 ]

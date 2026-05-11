@@ -16,7 +16,7 @@ DO $$ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- Migration: source_policy_docs — rename desp → filename, drop datasize
+-- Migration: source_policy_docs — rename desp → filename, type → source, drop datasize
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
     IF EXISTS (
@@ -26,6 +26,21 @@ DO $$ BEGIN
           AND column_name  = 'desp'
     ) THEN
         ALTER TABLE data_pipeline.source_policy_docs RENAME COLUMN desp TO filename;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'type'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'source'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs RENAME COLUMN type TO source;
     END IF;
 
     IF EXISTS (
@@ -127,7 +142,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     url      TEXT    NOT NULL UNIQUE,
     filename TEXT    NOT NULL,
     category TEXT    NOT NULL,
-    type     TEXT    NOT NULL DEFAULT 'page',
+    source   TEXT    NOT NULL DEFAULT 'SharePoint',
     isactive BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -185,48 +200,35 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policydoc_costusage (
 );
 
 -- ---------------------------------------------------------------------------
--- Seed: known policy source URLs
--- Remove any row you do not want processed (or set isactive = FALSE).
+-- Seed: policy source URLs from JSON file (no hardcoded rows)
+-- Expects /docker-entrypoint-initdb.d/policy_sources.json to be mounted.
 -- ---------------------------------------------------------------------------
-INSERT INTO data_pipeline.source_policy_docs (url, filename, category, type, isactive) VALUES
-    (
-        'https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx',
-        'Strategic Architecture Principles',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/teams/Team3221/Published%20Architecture%20Documentation/Forms/AllItems.aspx',
-        'Defra Architecture - Published Guardrails - All Documents',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/Tools%20Authority/Tools%20Radar/20260217%20DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf',
-        'DDTS Tools Authority Supplier Radar',
-        'technical', 'pdf', FALSE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/def-ddts-portfoliohub/SitePages/Secure-by-Design.aspx',
-        'Secure by Design',
-        'security', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/teams/Team3221/Soln%20and%20App%20Architecture/Forms/AllItems.aspx',
-        'Defra Architecture - Delivery Architecture Team - Solution Design Authority',
-        'technical', 'page', FALSE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/Community3868/SitePages/Integration.aspx',
-        'GIO Integration',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/Community448/SitePages/CDAP-The-Common-Data-Analytics-Platform.aspx',
-        'The Data Analytics and Science Hub (DASH) Platform',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/Community3868/SitePages/Reporting.aspx',
-        'GIO Data Platform',
-        'technical', 'page', TRUE
+DO $$
+DECLARE
+    seed_json TEXT;
+BEGIN
+    BEGIN
+        seed_json := pg_read_file('/docker-entrypoint-initdb.d/policy_sources.json');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RAISE WARNING 'Policy sources seed file not found/readable at /docker-entrypoint-initdb.d/policy_sources.json: %', SQLERRM;
+            seed_json := '[]';
+    END;
+
+    INSERT INTO data_pipeline.source_policy_docs (url, filename, category, source, isactive)
+    SELECT
+        row.url,
+        row.filename,
+        row.category,
+        COALESCE(row.source, 'SharePoint') AS source,
+        COALESCE(row.isactive, TRUE) AS isactive
+    FROM jsonb_to_recordset(seed_json::jsonb) AS row(
+        url_id INTEGER,
+        url TEXT,
+        filename TEXT,
+        category TEXT,
+        source TEXT,
+        isactive BOOLEAN
     )
-ON CONFLICT (url) DO NOTHING;
+    ON CONFLICT (url) DO NOTHING;
+END $$;

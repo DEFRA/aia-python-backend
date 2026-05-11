@@ -15,6 +15,7 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./data/policy_sources.json:/docker-entrypoint-initdb.d/policy_sources.json:ro
       - datapipeline_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-aiauser} -d ${DB_NAME:-aiadocuments}"]

@@ -10,7 +10,7 @@ class PolicySource(BaseModel):
     url: str
     filename: str
     category: str
-    type: str
+    source: str
     isactive: bool
 
 

@@ -235,11 +235,11 @@ vals = []
 for r in rows:
     def esc(s): return str(s).replace(\"'\", \"''\")
     isactive = 'true' if r['isactive'] else 'false'
-    vals.append(\"(\" + str(r['url_id']) + \", '\" + esc(r['url']) + \"', '\" + esc(r['filename']) + \"', '\" + esc(r['category']) + \"', '\" + esc(r['type']) + \"', \" + isactive + \")\")
-print('INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, type, isactive) VALUES')
+    vals.append(\"(\" + str(r['url_id']) + \", '\" + esc(r['url']) + \"', '\" + esc(r['filename']) + \"', '\" + esc(r['category']) + \"', '\" + esc(r['source']) + \"', \" + isactive + \")\")
+print('INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive) VALUES')
 print(',\n'.join(vals))
 print(\"ON CONFLICT DO NOTHING;\")
-print(\"SELECT setval('data_pipeline.source_path_policydoc_url_id_seq', (SELECT MAX(url_id) FROM data_pipeline.source_policy_docs));\")
+print(\"SELECT setval('data_pipeline.source_policy_docs_url_id_seq', (SELECT COALESCE(MAX(url_id), 1) FROM data_pipeline.source_policy_docs), true);\")
 ")"
         if echo "$SEED_SQL" | pg_pipe > /dev/null 2>&1; then
             SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"

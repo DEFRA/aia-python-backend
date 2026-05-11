@@ -213,7 +213,7 @@ Input configuration — the list of SharePoint URLs the pipeline should process.
 | `url` | `TEXT NOT NULL UNIQUE` | Full SharePoint URL |
 | `filename` | `TEXT NOT NULL` | Human-readable name for the document |
 | `category` | `TEXT NOT NULL` | Agent type: `security`, `technical`, etc. |
-| `type` | `TEXT NOT NULL DEFAULT 'page'` | `page` or `pdf` |
+| `source` | `TEXT NOT NULL DEFAULT 'SharePoint'` | `SharePoint` or `Confluence` |
 | `isactive` | `BOOLEAN NOT NULL DEFAULT TRUE` | `false` → pipeline deletes data and skips |
 
 > Setting `isactive = false` on the next pipeline run will delete the corresponding `policy_documents` row and cascade to `questions`.
@@ -327,7 +327,7 @@ Used when `USE_LOCAL_POLICY_SOURCES=true`. Entries with `isactive: false` are sk
     "url": "https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx",
     "filename": "Strategic Architecture Principles",
     "category": "technical",
-    "type": "page",
+    "source": "SharePoint",
     "isactive": true
   }
 ]
