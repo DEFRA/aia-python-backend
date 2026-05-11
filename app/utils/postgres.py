@@ -46,15 +46,15 @@ CREATE TABLE IF NOT EXISTS backend.document_uploads (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
     ON backend.document_uploads (user_id, file_name);
 
-CREATE TABLE backend.cost_usage (
-    doc_id         VARCHAR(40)    NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
-    agent_name     VARCHAR(50)    NOT NULL,
-    input_tokens   INT            NOT NULL,
-    output_tokens  INT            NOT NULL
+CREATE TABLE IF NOT EXISTS backend.cost_usage (
+    doc_id         UUID             NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
+    agent_name     VARCHAR(50)      NOT NULL,
+    input_tokens   INT              NOT NULL,
+    output_tokens  INT              NOT NULL,
+    unit_cost      DOUBLE PRECISION NOT NULL
 );
 
--- Index is also scoped to the schema automatically
-CREATE INDEX idx_cost_usage_doc_id ON backend.cost_usage(doc_id);
+CREATE INDEX IF NOT EXISTS idx_cost_usage_doc_id ON backend.cost_usage(doc_id);
 
 """
 """
@@ -110,13 +110,6 @@ VALUES (
 );
 
 """
-_MIGRATE_SQL_STATEMENTS = [
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ;",
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS result_md TEXT;",
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS error_message TEXT;",
-]
-
-
 async def get_postgres_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
@@ -130,11 +123,6 @@ async def init_db() -> None:
     pool = await get_postgres_pool()
     async with pool.acquire() as conn:
         await conn.execute(_CREATE_TABLES_SQL)
-        for statement in _MIGRATE_SQL_STATEMENTS:
-            try:
-                await conn.execute(statement)
-            except asyncpg.exceptions.DuplicateColumnError:
-                pass
     logger.info("PostgreSQL schema initialised")
 
 

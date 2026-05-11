@@ -261,7 +261,109 @@ Returns the full document record including the AI assessment result. Call this a
 
 ---
 
-### 6. Get Current User
+### 6. Get Cost Usage (paginated)
+
+```
+GET /api/v1/cost-usage?page=1&limit=10
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Returns paginated per-document token consumption and cost for every document the user has uploaded that has at least one cost-usage row recorded. Pagination is applied at the **document** level — each entry in `costUsage[]` is one document, and its `agents[]` array is never split across pages. The `summary` block aggregates totals across the user's entire result set, not just the current page.
+
+**Query parameters:**
+
+| Param | Type | Default | Range | Description |
+|-------|------|---------|-------|-------------|
+| `page` | int | `1` | `≥ 1` | 1-based page number |
+| `limit` | int | `10` | `1`–`100` | Documents per page |
+
+`page=0` or `limit > 100` returns `422 Unprocessable Entity`.
+
+**Response `200`:**
+```json
+{
+  "costUsage": [
+    {
+      "doc_id": "11111111-1111-1111-1111-111111111111",
+      "file_name": "Architecture_Review_Q1_2026.docx",
+      "uploadedAt": "2026-05-01T10:30:00Z",
+      "agents": [
+        { "name": "Security",     "inputTokens": 12500, "outputTokens": 8200 },
+        { "name": "Technology",   "inputTokens":  9800, "outputTokens": 6400 },
+        { "name": "Architecture", "inputTokens": 11200, "outputTokens": 7800 }
+      ],
+      "totalCost": 0.4365,
+      "currency": "USD"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 4,
+    "totalPages": 1,
+    "hasNext": false,
+    "hasPrevious": false,
+    "nextPage": null,
+    "previousPage": null
+  },
+  "summary": {
+    "totalCost": 1.2345,
+    "currency": "USD",
+    "totalDocuments": 4,
+    "totalInputTokens": 109000,
+    "totalOutputTokens": 72500,
+    "totalTokens": 181500
+  }
+}
+```
+
+**Field notes:**
+- `totalCost` per document is the sum of `unit_cost` across that document's agent rows in the database.
+- `currency` is currently fixed to `USD`; promoted to a column when multi-currency is introduced.
+- `summary.totalDocuments` counts only documents that have at least one cost-usage row.
+
+---
+
+### 7. Get Cost Usage for a Single Document
+
+```
+GET /api/v1/cost-usage/{documentId}
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+**Path parameter:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `documentId` | UUID string | Document identifier |
+
+**Response `200`:**
+```json
+{
+  "doc_id": "11111111-1111-1111-1111-111111111111",
+  "file_name": "Architecture_Review_Q1_2026.docx",
+  "uploadedAt": "2026-05-01T10:30:00Z",
+  "agents": [
+    { "name": "Security",     "inputTokens": 12500, "outputTokens": 8200 },
+    { "name": "Technology",   "inputTokens":  9800, "outputTokens": 6400 },
+    { "name": "Architecture", "inputTokens": 11200, "outputTokens": 7800 }
+  ],
+  "totalCost": 0.4365,
+  "currency": "USD"
+}
+```
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| Document not found / not owned by user / no cost-usage rows | `404` | `"Document '...' not found."` |
+
+---
+
+### 8. Get Current User
 
 ```
 GET /api/v1/users/me
@@ -293,6 +395,8 @@ Returns the authenticated user's profile.
 | `GET` | `/api/v1/documents/status` | Required | `{ processingDocumentIds }` |
 | `GET` | `/api/v1/documents` | Required | Paginated `HistoryRecord` list |
 | `GET` | `/api/v1/documents/{documentId}` | Required | `ResultRecord` |
+| `GET` | `/api/v1/cost-usage` | Required | Paginated `CostUsageResponse` |
+| `GET` | `/api/v1/cost-usage/{documentId}` | Required | `CostUsageDocument` |
 | `GET` | `/api/v1/users/me` | Required | `UserRecord` |
 
 ---
@@ -344,6 +448,47 @@ export interface UserRecord {
   userId: string
   email: string
   name: string
+}
+
+export interface AgentTokenUsage {
+  name: string          // e.g. "Security", "Technology", "Architecture", "Governance"
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface CostUsageDocument {
+  doc_id: string
+  file_name: string
+  uploadedAt: string    // ISO 8601 UTC
+  agents: AgentTokenUsage[]
+  totalCost: number     // SUM(unit_cost) across the doc's agent rows
+  currency: string      // currently always "USD"
+}
+
+export interface Pagination {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+  hasNext: boolean
+  hasPrevious: boolean
+  nextPage: number | null
+  previousPage: number | null
+}
+
+export interface CostUsageSummary {
+  totalCost: number
+  currency: string
+  totalDocuments: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalTokens: number
+}
+
+export interface CostUsageResponse {
+  costUsage: CostUsageDocument[]
+  pagination: Pagination
+  summary: CostUsageSummary   // aggregated across the full result set, not just the current page
 }
 
 export interface ApiError {
