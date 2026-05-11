@@ -87,11 +87,6 @@ class MarkdownReportGenerator:
         max_priority_actions: int,
     ) -> list[str]:
         lines: list[str] = ["## Final Evaluation Summary", ""]
-        # ── Scorecard ─────────────────────────────────────────────────────────
-        lines.append("### Cross-Category Scorecard")
-        lines.append("")
-        lines.append("| Category | 🟢 Green | 🟡 Amber | 🔴 Red | Score |")
-        lines.append("|---|---|---|---|---|")
         total_g = total_a = total_r = 0
         # category_score[label] = % green (lower = worse)
         category_score: dict[str, int] = {}
@@ -124,12 +119,65 @@ class MarkdownReportGenerator:
             total = g + a + r
             score = round((g / total) * 100) if total > 0 else 0
             category_score[label] = score
-            lines.append(f"| {label} | {g} | {a} | {r} | {score}% |")
             total_g += g
             total_a += a
             total_r += r
         total_all = total_g + total_a + total_r
         overall_score = round((total_g / total_all) * 100) if total_all > 0 else 0
+
+        # ── Overall Conclusion ────────────────────────────────────────────────
+        lines.append("### Overall Conclusion")
+        lines.append("")
+        risk = self._classify_risk(overall_score)
+        weakest = self._weakest_category(results, section_labels, agent_type_order)
+        top = self._top_finding(results, agent_type_order)
+        n_categories = sum(
+            1
+            for at in agent_type_order
+            if any(r is not None for r in results.get(at, []))
+        )
+        lines.append(
+            f"The assessment reviewed {total_all} controls across {n_categories} policy areas. "
+            f"Overall compliance stands at **{overall_score}% — {risk}** "
+            f"({total_g} Green, {total_a} Amber, {total_r} Red). "
+            f"{weakest} is the weakest area with {total_r} critical gap(s). "
+            f'Most urgent finding: *"{top}"* — immediate remediation required.'
+        )
+        lines.append("")
+
+        # ── Scorecard ─────────────────────────────────────────────────────────
+        lines.append("### Cross-Category Scorecard")
+        lines.append("")
+        lines.append("| Category | 🟢 Green | 🟡 Amber | 🔴 Red | Score |")
+        lines.append("|---|---|---|---|---|")
+        for agent_type in agent_type_order:
+            result_list = [r for r in results.get(agent_type, []) if r is not None]
+            if not result_list:
+                continue
+            label = section_labels.get(agent_type, agent_type.title())
+            g = sum(
+                1
+                for result in result_list
+                for doc in result.docs
+                for r in doc.assessments
+                if r.Rating == "Green"
+            )
+            a = sum(
+                1
+                for result in result_list
+                for doc in result.docs
+                for r in doc.assessments
+                if r.Rating == "Amber"
+            )
+            r = sum(
+                1
+                for result in result_list
+                for doc in result.docs
+                for r in doc.assessments
+                if r.Rating == "Red"
+            )
+            score = category_score[label]
+            lines.append(f"| {label} | {g} | {a} | {r} | {score}% |")
         lines.append(
             f"| **Overall** | **{total_g}** | **{total_a}** | **{total_r}** | **{overall_score}%** |"
         )
@@ -171,26 +219,6 @@ class MarkdownReportGenerator:
             lines.append(
                 f"{i}. {emoji} **{label}** — {row.Question} *({row.Reference})*"
             )
-        lines.append("")
-
-        # ── Overall Conclusion ────────────────────────────────────────────────
-        lines.append("### Overall Conclusion")
-        lines.append("")
-        risk = self._classify_risk(overall_score)
-        weakest = self._weakest_category(results, section_labels, agent_type_order)
-        top = self._top_finding(results, agent_type_order)
-        n_categories = sum(
-            1
-            for at in agent_type_order
-            if any(r is not None for r in results.get(at, []))
-        )
-        lines.append(
-            f"The assessment reviewed {total_all} controls across {n_categories} policy areas. "
-            f"Overall compliance stands at **{overall_score}% — {risk}** "
-            f"({total_g} Green, {total_a} Amber, {total_r} Red). "
-            f"{weakest} is the weakest area with {total_r} critical gap(s). "
-            f'Most urgent finding: *"{top}"* — immediate remediation required.'
-        )
         lines.append("")
         return lines
 
