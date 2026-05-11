@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/reset-datapipeline.sh
 #
-# Truncate the three mutable data-pipeline tables, confirm they are empty,
+# Truncate the mutable data-pipeline tables, confirm they are empty,
 # then run the data-pipeline to re-populate them from source_policy_docs.
 #
 # Usage:
@@ -22,13 +22,15 @@
 #   • data_pipeline.policy_document_sync  — 0 rows
 #   • data_pipeline.questions             — 0 rows
 #   • data_pipeline.policy_documents      — 0 rows
-#   • data_pipeline.source_policy_docs    — unchanged (seed data)
+#   • data_pipeline.policydoc_costusage   — 0 rows
+#   • data_pipeline.source_policy_docs     — unchanged (seed data)
 #   • policy_documents + questions        — re-populated by the pipeline run
 
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_PYTHON="$REPO_ROOT/.venv/bin/python"
+INIT_SQL="$REPO_ROOT/app/datapipeline/db/init.sql"
 
 # ── Colours ────────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -155,7 +157,24 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 2 — truncate mutable tables (CASCADE)"
+banner "Step 2 — apply init.sql migrations"
+
+if [[ ! -f "$INIT_SQL" ]]; then
+    fail "init.sql" "not found at $INIT_SQL"
+    exit 1
+fi
+
+INIT_OUTPUT=""
+if INIT_OUTPUT="$(cat "$INIT_SQL" | pg_pipe 2>&1)"; then
+    ok "init.sql applied" "schema/tables/migrations are up to date"
+else
+    fail "init.sql apply failed" "check DB permissions and SQL errors"
+    echo "$INIT_OUTPUT"
+    exit 1
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+banner "Step 3 — truncate mutable tables (CASCADE)"
 
 # Truncate in dependency order: sync → questions → policy_documents.
 # CASCADE covers any FK children we may have missed.
@@ -163,19 +182,20 @@ TRUNCATE_SQL="
 TRUNCATE TABLE
     data_pipeline.policy_document_sync,
     data_pipeline.questions,
-    data_pipeline.policy_documents
+    data_pipeline.policy_documents,
+    data_pipeline.policydoc_costusage
 CASCADE;
 "
 
 if pg -c "$TRUNCATE_SQL" > /dev/null 2>&1; then
-    ok "Truncated" "policy_document_sync, questions, policy_documents"
+    ok "Truncated" "policy_document_sync, questions, policy_documents, policydoc_costusage"
 else
     fail "Truncate failed" "check psql output above"
     exit 1
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 3 — confirm row counts"
+banner "Step 4 — confirm row counts"
 
 FAIL_COUNT=0
 
@@ -194,6 +214,7 @@ check_empty() {
 check_empty "data_pipeline.policy_document_sync"
 check_empty "data_pipeline.questions"
 check_empty "data_pipeline.policy_documents"
+check_empty "data_pipeline.policydoc_costusage"
 
 # source_policy_docs must have rows (seed table — never truncated by this script).
 SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
@@ -237,7 +258,7 @@ if [[ "$FAIL_COUNT" -gt 0 ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 4 — run data pipeline"
+banner "Step 5 — run data pipeline"
 
 echo ""
 echo "  $ .venv/bin/python -m app.datapipeline.src.main"
@@ -254,7 +275,7 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 5 — final row counts"
+banner "Step 6 — final row counts"
 
 PD_COUNT="$(row_count "data_pipeline.policy_documents")"
 Q_COUNT="$(row_count "data_pipeline.questions")"
