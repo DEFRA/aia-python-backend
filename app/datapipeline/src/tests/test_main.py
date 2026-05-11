@@ -73,7 +73,15 @@ def _patch_pipeline(
     sp_mock.return_value.read_page_content.return_value = (content, last_modified)
 
     extractor_mock = patches["app.datapipeline.src.main._build_extractor"].return_value
-    extractor_mock.return_value.extract.return_value = questions
+    extractor_mock.return_value.extract.return_value = (
+        questions,
+        {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "estimated_cost_usd": 0.0,
+        },
+    )
 
     return patches
 
@@ -401,7 +409,15 @@ def _build_mocks(
     sp = MagicMock()
     sp.read_page_content.return_value = ("Policy content", _TS)
     extractor = MagicMock()
-    extractor.extract.return_value = questions
+    extractor.extract.return_value = (
+        questions,
+        {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "estimated_cost_usd": 0.0,
+        },
+    )
 
     return {
         "_get_db_connection": MagicMock(return_value=conn),
