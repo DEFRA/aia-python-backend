@@ -17,7 +17,26 @@ from app.utils.postgres import get_db_pool
 logger = get_logger(__name__)
 
 
-async def verify_auth(request: Request) -> dict:
+def get_app_context() -> AppContext:
+    return AppContext()
+
+
+def get_document_repository(
+    pool: asyncpg.Pool = Depends(get_db_pool),
+    context: AppContext = Depends(get_app_context),
+) -> DocumentRepository:
+    return DocumentRepository(pool, context)
+
+
+def get_user_repository(
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> UserRepository:
+    return UserRepository(pool)
+
+
+async def verify_auth(
+    request: Request, user_repo: UserRepository = Depends(get_user_repository)
+) -> dict:
     auth_header = request.headers.get("Authorization", "")
     sso_token = None
     if auth_header.lower().startswith("bearer "):
@@ -43,28 +62,20 @@ async def verify_auth(request: Request) -> dict:
             "Identity mismatch: header=%s token=%s", claimed_user_id, verified_user_id
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail=messages.AUTH_IDENTITY_MISMATCH,
         )
 
+    # Verify user exists in database
+    user = await user_repo.get_user_by_id(verified_user_id)
+    if user is None:
+        logger.warning("Unauthorized: User %s not found in database", verified_user_id)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=messages.AUTH_USER_NOT_FOUND,
+        )
+
     return {"user_id": verified_user_id}
-
-
-def get_app_context() -> AppContext:
-    return AppContext()
-
-
-def get_document_repository(
-    pool: asyncpg.Pool = Depends(get_db_pool),
-    context: AppContext = Depends(get_app_context),
-) -> DocumentRepository:
-    return DocumentRepository(pool, context)
-
-
-def get_user_repository(
-    pool: asyncpg.Pool = Depends(get_db_pool),
-) -> UserRepository:
-    return UserRepository(pool)
 
 
 def get_s3_service() -> S3Service:

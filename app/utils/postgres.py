@@ -47,7 +47,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
     ON backend.document_uploads (user_id, file_name);
 
 CREATE TABLE backend.cost_usage (
-    doc_id         VARCHAR(40)    NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
+    doc_id         UUID           NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
     agent_name     VARCHAR(50)    NOT NULL,
     input_tokens   INT            NOT NULL,
     output_tokens  INT            NOT NULL
@@ -111,9 +111,9 @@ VALUES (
 
 """
 _MIGRATE_SQL_STATEMENTS = [
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ;",
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS result_md TEXT;",
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS error_message TEXT;",
+    "ALTER TABLE backend.document_uploads ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ;",
+    "ALTER TABLE backend.document_uploads ADD COLUMN IF NOT EXISTS result_md TEXT;",
+    "ALTER TABLE backend.document_uploads ADD COLUMN IF NOT EXISTS error_message TEXT;",
 ]
 
 
