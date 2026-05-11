@@ -31,6 +31,26 @@ class AuthService:
                 token, config.auth.jwt_secret.strip(), algorithms=["HS256"]
             )
 
+            # Verify 'iat' (issued at) claim exists and is not in the future
+            import time
+            iat = payload.get("iat")
+            if iat is None:
+                logger.error("JWT payload missing 'iat' claim (token issuance time)")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=messages.TOKEN_MISSING_IAT,
+                )
+            
+            current_time = int(time.time())
+            if iat > current_time:
+                logger.error(
+                    "JWT 'iat' claim is in the future: iat=%d, current_time=%d", iat, current_time
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=messages.TOKEN_IAT_IN_FUTURE,
+                )
+
             # Extract the 'sub' (subject) claim as the unique user identifier
             user_id = payload.get("sub")
 
@@ -62,6 +82,9 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=messages.TOKEN_INVALID_FORMAT.format(error=str(e)),
             )
+        except HTTPException:
+            # Re-raise HTTPExceptions from payload validation above
+            raise
         except Exception:
             logger.exception("Unexpected error during JWT validation")
             raise HTTPException(
