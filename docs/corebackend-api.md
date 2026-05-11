@@ -319,7 +319,7 @@ Returns paginated per-document token consumption and cost for every document the
 ```
 
 **Field notes:**
-- `totalCost` per document is the sum of `unit_cost` across that document's agent rows in the database.
+- `totalCost` per document is the sum of `total_cost_usd` across that document's agent rows in the database.
 - `currency` is currently fixed to `USD`; promoted to a column when multi-currency is introduced.
 - `summary.totalDocuments` counts only documents that have at least one cost-usage row.
 
@@ -461,7 +461,7 @@ export interface CostUsageDocument {
   file_name: string
   uploadedAt: string    // ISO 8601 UTC
   agents: AgentTokenUsage[]
-  totalCost: number     // SUM(unit_cost) across the doc's agent rows
+  totalCost: number     // SUM(total_cost_usd) across the doc's agent rows
   currency: string      // currently always "USD"
 }
 

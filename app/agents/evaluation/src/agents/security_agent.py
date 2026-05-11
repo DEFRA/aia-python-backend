@@ -102,4 +102,4 @@ class SecurityAgent:
             meta.output_tokens,
         )
 
-        return AgentLLMOutput(rows=raw_rows, summary=summary_obj)
+        return AgentLLMOutput(rows=raw_rows, summary=summary_obj, llm_meta=meta)

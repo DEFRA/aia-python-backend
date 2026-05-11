@@ -20,6 +20,7 @@ from app.core.enums import DocumentStatus  # noqa: E402
 from app.models.orchestrate_request import OrchestrateRequest  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
+from app.repositories.cost_usage_repository import CostUsageRepository  # noqa: E402
 from app.orchestrator.session import SessionStore  # noqa: E402
 from app.orchestrator.summary import MarkdownReportGenerator  # noqa: E402
 from app.repositories.document_repository import DocumentRepository  # noqa: E402
@@ -34,6 +35,101 @@ logger = get_logger("app.orchestrator")
 _session_store = SessionStore()
 _summary_generator = MarkdownReportGenerator()
 _poller_task: asyncio.Task | None = None
+
+
+def _pricing_map() -> dict[str, dict[str, float]]:
+    return config.llm_pricing_usd_per_mtokens
+
+
+def _calculate_total_cost_usd(
+    model_id: str | None, input_tokens: int, output_tokens: int
+) -> float:
+    if not model_id:
+        return 0.0
+    rates = _pricing_map().get(model_id)
+    if rates is None or "input" not in rates or "output" not in rates:
+        return 0.0
+    return round(
+        (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000,
+        6,
+    )
+
+
+async def _persist_status_tokens(
+    status_msg: StatusMessage,
+    cost_usage_repo: CostUsageRepository | None,
+) -> None:
+    """Persist token usage for one status message when token data is present."""
+    if cost_usage_repo is None:
+        logger.warning(
+            "[TOKEN] Cost usage persistence skipped — DB unavailable task_id=%s doc_id=%s",
+            status_msg.task_id,
+            status_msg.document_id,
+        )
+        return
+
+    if status_msg.input_tokens is None and status_msg.output_tokens is None:
+        logger.info(
+            "[TOKEN] No token payload to persist task_id=%s doc_id=%s agent_type=%s",
+            status_msg.task_id,
+            status_msg.document_id,
+            status_msg.agent_type,
+        )
+        return
+
+    raw_input_tokens = int(status_msg.input_tokens or 0)
+    raw_output_tokens = int(status_msg.output_tokens or 0)
+    if raw_input_tokens < 0 or raw_output_tokens < 0:
+        logger.warning(
+            "[TOKEN] Negative token values detected task_id=%s doc_id=%s input_tokens=%d output_tokens=%d",
+            status_msg.task_id,
+            status_msg.document_id,
+            raw_input_tokens,
+            raw_output_tokens,
+        )
+
+    input_tokens = max(raw_input_tokens, 0)
+    output_tokens = max(raw_output_tokens, 0)
+
+    total_cost_usd = _calculate_total_cost_usd(
+        status_msg.model_id,
+        input_tokens,
+        output_tokens,
+    )
+    if status_msg.model_id and status_msg.model_id not in _pricing_map():
+        logger.warning(
+            "[TOKEN] No pricing configured for model_id=%s task_id=%s doc_id=%s; defaulting total_cost_usd=0.0",
+            status_msg.model_id,
+            status_msg.task_id,
+            status_msg.document_id,
+        )
+
+    try:
+        await cost_usage_repo.upsert_cost_usage(
+            doc_id=status_msg.document_id,
+            agent_name=status_msg.agent_type,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_cost_usd=total_cost_usd,
+        )
+        logger.info(
+            "[TOKEN] Persisted cost usage task_id=%s doc_id=%s agent_type=%s model_id=%s input_tokens=%d output_tokens=%d total_cost_usd=%.6f",
+            status_msg.task_id,
+            status_msg.document_id,
+            status_msg.agent_type,
+            status_msg.model_id,
+            input_tokens,
+            output_tokens,
+            total_cost_usd,
+        )
+    except Exception as exc:
+        logger.error(
+            "[TOKEN] Failed to persist cost usage task_id=%s doc_id=%s agent_type=%s: %s",
+            status_msg.task_id,
+            status_msg.document_id,
+            status_msg.agent_type,
+            exc,
+        )
 
 
 @asynccontextmanager
@@ -243,6 +339,10 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
 async def _status_queue_poller() -> None:
     """Continuously polls aia-status for agent results and routes them to the correct session."""
     sqs = SQSService()
+    cost_usage_repo: CostUsageRepository | None = None
+    if config.db.uri:
+        pool = await get_postgres_pool()
+        cost_usage_repo = CostUsageRepository(pool)
     queue_url = config.sqs.status_queue_url
     logger.info("Status queue poller started — polling %s", queue_url)
 
@@ -255,6 +355,16 @@ async def _status_queue_poller() -> None:
                 receipt = msg["receipt_handle"]
                 try:
                     status_msg = StatusMessage.model_validate_json(msg["body"])
+                    logger.info(
+                        "[TOKEN] Status message received task_id=%s doc_id=%s agent_type=%s model_id=%s inputTokens=%s outputTokens=%s",
+                        status_msg.task_id,
+                        status_msg.document_id,
+                        status_msg.agent_type,
+                        status_msg.model_id,
+                        status_msg.input_tokens,
+                        status_msg.output_tokens,
+                    )
+                    await _persist_status_tokens(status_msg, cost_usage_repo)
                     if status_msg.error:
                         agent_result = None
                     else:

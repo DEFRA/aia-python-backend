@@ -51,10 +51,32 @@ CREATE TABLE IF NOT EXISTS backend.cost_usage (
     agent_name     VARCHAR(50)      NOT NULL,
     input_tokens   INT              NOT NULL,
     output_tokens  INT              NOT NULL,
-    unit_cost      DOUBLE PRECISION NOT NULL
+    total_cost_usd DOUBLE PRECISION NOT NULL
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'backend'
+          AND table_name = 'cost_usage'
+          AND column_name = 'unit_cost'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'backend'
+          AND table_name = 'cost_usage'
+          AND column_name = 'total_cost_usd'
+    ) THEN
+        ALTER TABLE backend.cost_usage
+        RENAME COLUMN unit_cost TO total_cost_usd;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_cost_usage_doc_id ON backend.cost_usage(doc_id);
+CREATE INDEX IF NOT EXISTS idx_cost_usage_doc_agent ON backend.cost_usage(doc_id, agent_name);
 
 """
 """
@@ -110,6 +132,8 @@ VALUES (
 );
 
 """
+
+
 async def get_postgres_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:

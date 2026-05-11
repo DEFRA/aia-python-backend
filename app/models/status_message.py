@@ -14,3 +14,8 @@ class StatusMessage(BaseModel):
     agent_type: str
     result: dict[str, Any]
     error: Optional[str] = None
+    model_id: Optional[str] = None
+    input_tokens: Optional[int] = None  # Aggregated input tokens across all policy docs
+    output_tokens: Optional[int] = (
+        None  # Aggregated output tokens across all policy docs
+    )

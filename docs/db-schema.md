@@ -1,22 +1,35 @@
 # AIA Backend — Database Schema
 
 **Version:** 1.0 (POC)  
-**Last Updated:** 2026-04-27  
+**Last Updated:** 2026-05-11  
 **Database:** PostgreSQL (AWS RDS)  
+**Default Schema:** `backend`  
 **Managed by:** `app/utils/postgres.py` — `init_db()` runs on service startup
 
 ---
 
 ## Overview
 
-The AIA Backend uses two tables:
+The AIA Backend uses three tables:
 
 | Table | Purpose |
 |-------|---------|
 | `users` | Authenticated user identities |
 | `document_uploads` | Document lifecycle, processing status, and assessment results |
+| `cost_usage` | Per-document, per-agent token usage and cost metadata |
 
-Both tables are created with `CREATE TABLE IF NOT EXISTS` and are safe to run on each startup. Additive column migrations run as `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements, also idempotent.
+All tables are created with `CREATE TABLE IF NOT EXISTS` and are safe to run on each startup.
+
+Unless explicitly stated otherwise, table references in this document belong to the `backend` schema.
+
+---
+
+## Schema Changelog
+
+| Date | Version | Change |
+|------|---------|--------|
+| 2026-05-11 | 1.0 | Added `backend.cost_usage` table documentation, indexes, and upsert query pattern; linked ADR for composite index decision. |
+| 2026-04-27 | 1.0 | Initial schema documentation for `users` and `document_uploads`. |
 
 ---
 
@@ -46,7 +59,16 @@ erDiagram
         TEXT error_message "nullable"
     }
 
+    cost_usage {
+        UUID doc_id FK "NOT NULL → document_uploads.doc_id"
+        VARCHAR_50 agent_name "NOT NULL"
+        INT input_tokens "NOT NULL"
+        INT output_tokens "NOT NULL"
+        DOUBLE_PRECISION total_cost_usd "NOT NULL"
+    }
+
     users ||--o{ document_uploads : "owns"
+    document_uploads ||--o{ cost_usage : "has"
 ```
 
 ---
@@ -141,6 +163,49 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_filename
 
 ---
 
+## Table: `backend.cost_usage`
+
+Stores token/cost rows per `(doc_id, agent_name)` produced by the orchestrator status-processing path.
+
+> Decision note: index strategy for this table is documented in [ADR: Cost Usage Composite Index on (doc_id, agent_name)](adr-cost-usage-doc-agent-index.md).
+
+### DDL
+
+```sql
+CREATE TABLE IF NOT EXISTS backend.cost_usage (
+    doc_id         UUID             NOT NULL REFERENCES backend.document_uploads(doc_id) ON DELETE CASCADE,
+    agent_name     VARCHAR(50)      NOT NULL,
+    input_tokens   INT              NOT NULL,
+    output_tokens  INT              NOT NULL,
+    total_cost_usd DOUBLE PRECISION NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_usage_doc_id
+    ON backend.cost_usage (doc_id);
+
+CREATE INDEX IF NOT EXISTS idx_cost_usage_doc_agent
+    ON backend.cost_usage (doc_id, agent_name);
+```
+
+### Columns
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `doc_id` | UUID | No | Foreign key to `document_uploads.doc_id`. One uploaded document can have multiple cost rows (typically one per agent type). |
+| `agent_name` | VARCHAR(50) | No | Agent identifier (e.g. `security`, `technical`, `risk`). |
+| `input_tokens` | INT | No | Aggregated input token count for the agent task. |
+| `output_tokens` | INT | No | Aggregated output token count for the agent task. |
+| `total_cost_usd` | DOUBLE PRECISION | No | Persisted total estimated USD cost for the row. Currently may be `0.0` when pricing configuration is not enabled. |
+
+### Indexes
+
+| Index | Type | Columns | Notes |
+|-------|------|---------|-------|
+| `idx_cost_usage_doc_id` | INDEX | `doc_id` | Supports document-level joins and filtering |
+| `idx_cost_usage_doc_agent` | INDEX | `(doc_id, agent_name)` | Supports doc+agent upsert/read patterns |
+
+---
+
 ## Status Values
 
 The `status` column drives the document processing lifecycle. Only `PROCESSING` is non-terminal; all other statuses are final.
@@ -169,11 +234,15 @@ The `status` column drives the document processing lifecycle. Only `PROCESSING` 
 
 ---
 
-## Foreign Key Relationship
+## Foreign Key Relationships
 
 `document_uploads.user_id → users.user_id`
 
+`cost_usage.doc_id → document_uploads.doc_id (ON DELETE CASCADE)`
+
 This relationship is enforced in application code (not as a DB-level `FOREIGN KEY` constraint in the current POC). CoreBackend always passes a validated `user_id` from the JWT; the `NOT NULL` constraint ensures no orphaned records.
+
+The `cost_usage.doc_id` relationship is enforced as a DB-level foreign key.
 
 ---
 
@@ -218,6 +287,27 @@ FROM document_uploads
 WHERE doc_id = $1::uuid AND user_id = $2
 ```
 
+### Upsert cost usage row (orchestrator)
+
+```sql
+WITH lock_row AS (
+    SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))
+),
+updated AS (
+    UPDATE backend.cost_usage
+    SET input_tokens = $3,
+        output_tokens = $4,
+                total_cost_usd = $5
+    WHERE doc_id = $1::uuid
+      AND agent_name = $2
+    RETURNING 1
+)
+INSERT INTO backend.cost_usage (doc_id, agent_name, input_tokens, output_tokens, total_cost_usd)
+SELECT $1::uuid, $2, $3, $4, $5
+FROM lock_row
+WHERE NOT EXISTS (SELECT 1 FROM updated);
+```
+
 ### Duplicate check (before insert)
 
 ```sql
@@ -229,22 +319,13 @@ WHERE user_id = $1 AND file_name = $2
 
 ## Migration Strategy
 
-The `init_db()` function in `app/utils/postgres.py` runs on every service startup and applies migrations idempotently:
-
-```python
-_MIGRATE_SQL_STATEMENTS = [
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ;",
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS result_md TEXT;",
-    "ALTER TABLE document_uploads ADD COLUMN IF NOT EXISTS error_message TEXT;",
-]
-```
+The `init_db()` function in `app/utils/postgres.py` runs on every service startup and applies idempotent DDL via `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`.
 
 This means:
-- New deployments create tables from scratch via `CREATE TABLE IF NOT EXISTS`
-- Existing deployments get missing columns added via `ADD COLUMN IF NOT EXISTS`
-- No manual migration scripts are needed for column additions
+- New deployments create tables/indexes from scratch.
+- Existing deployments converge by adding any missing tables/indexes.
 
-For destructive changes (column renames, type changes, dropped columns) a manual migration script is required before deploying.
+For destructive changes (column renames, type changes, dropped columns, constraints) use an explicit migration script before deploying.
 
 ---
 
