@@ -156,7 +156,8 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     source   TEXT    NOT NULL DEFAULT 'SharePoint',
     CONSTRAINT source_policy_docs_source_check
         CHECK (source IN ('SharePoint', 'Confluence', 'GitHub')),
-    isactive BOOLEAN NOT NULL DEFAULT TRUE
+    isactive BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NULL
 );
 
 -- ---------------------------------------------------------------------------
@@ -221,6 +222,17 @@ BEGIN
                 ADD CONSTRAINT source_policy_docs_source_check
                 CHECK (source IN ('SharePoint', 'Confluence', 'GitHub'));
         END IF;
+    END IF;
+
+    -- Add updated_at column if missing.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'updated_at'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs
+            ADD COLUMN updated_at TIMESTAMPTZ NULL;
     END IF;
 END $$;
 

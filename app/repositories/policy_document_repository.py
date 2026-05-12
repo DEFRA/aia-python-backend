@@ -52,7 +52,8 @@ class PolicyDocumentRepository:
                         category,
                         source,
                         url,
-                        isactive
+                        isactive,
+                        updated_at
                     """,
                     request.filename,
                     request.category,
@@ -72,7 +73,7 @@ class PolicyDocumentRepository:
             source=row["source"],
             url=row["url"],
             is_active=row["isactive"],
-            updated_at=None,
+            updated_at=row["updated_at"],
         )
 
     async def category_exists(self, category: str) -> bool:
@@ -118,7 +119,8 @@ class PolicyDocumentRepository:
                     category,
                     source,
                     url,
-                    isactive
+                    isactive,
+                    updated_at
                 FROM data_pipeline.source_policy_docs
                 ORDER BY url_id DESC
                 LIMIT $1 OFFSET $2
@@ -135,7 +137,7 @@ class PolicyDocumentRepository:
                 source=row["source"],
                 url=row["url"],
                 is_active=row["isactive"],
-                updated_at=None,
+                updated_at=row["updated_at"],
             )
             for row in rows
         ]
@@ -154,7 +156,8 @@ class PolicyDocumentRepository:
                     category,
                     source,
                     url,
-                    isactive
+                    isactive,
+                    updated_at
                 FROM data_pipeline.source_policy_docs
                 WHERE url_id = $1
                 """,
@@ -171,7 +174,7 @@ class PolicyDocumentRepository:
             source=row["source"],
             url=row["url"],
             is_active=row["isactive"],
-            updated_at=None,
+            updated_at=row["updated_at"],
         )
 
     async def update_policy_document_by_url_id(
@@ -187,7 +190,8 @@ class PolicyDocumentRepository:
                         category = $3,
                         source = $4,
                         url = $5,
-                        isactive = $6
+                        isactive = $6,
+                        updated_at = NOW()
                     WHERE url_id = $1
                     RETURNING
                         url_id,
@@ -195,7 +199,8 @@ class PolicyDocumentRepository:
                         category,
                         source,
                         url,
-                        isactive
+                        isactive,
+                        updated_at
                     """,
                     url_id,
                     request.filename,
@@ -219,5 +224,5 @@ class PolicyDocumentRepository:
             source=row["source"],
             url=row["url"],
             is_active=row["isactive"],
-            updated_at=None,
+            updated_at=row["updated_at"],
         )
