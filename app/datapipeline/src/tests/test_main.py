@@ -14,7 +14,7 @@ _SOURCE = PolicySource(
     url=_URL,
     filename="Test policy",
     category="security",
-    type="page",
+    source="SharePoint",
     isactive=True,
 )
 _QUESTIONS = [
@@ -198,7 +198,7 @@ _INACTIVE_SOURCE = PolicySource(
     url="https://defra.sharepoint.com/teams/T1/SitePages/Old.aspx",
     filename="Old policy",
     category="technical",
-    type="page",
+    source="SharePoint",
     isactive=False,
 )
 

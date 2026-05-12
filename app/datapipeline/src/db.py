@@ -53,7 +53,7 @@ def fetch_policy_sources(conn: psycopg2.extensions.connection) -> list[PolicySou
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             f"""
-            SELECT url_id, url, filename, category, type, isactive
+            SELECT url_id, url, filename, category, source, isactive
             FROM {_qualified_table("source_policy_docs")}
             WHERE isactive = TRUE
             ORDER BY url_id
@@ -71,7 +71,7 @@ def fetch_all_policy_sources(
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             f"""
-            SELECT url_id, url, filename, category, type, isactive
+            SELECT url_id, url, filename, category, source, isactive
             FROM {_qualified_table("source_policy_docs")}
             ORDER BY url_id
             """

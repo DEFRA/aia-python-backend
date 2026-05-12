@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INIT_SQL="$REPO_ROOT/app/datapipeline/db/init.sql"
+POLICY_SOURCES_JSON="$REPO_ROOT/app/datapipeline/data/policy_sources.json"
 CONTAINER="${DATAPIPELINE_CONTAINER:-aiadocuments}"
 
 # Load .env so DB_* vars are available
@@ -33,6 +34,7 @@ podman run -d \
   -e POSTGRES_PASSWORD="$DB_PASSWORD" \
   -p "${DB_PORT}:5432" \
   -v "$INIT_SQL:/docker-entrypoint-initdb.d/01_init.sql:ro,z" \
+  -v "$POLICY_SOURCES_JSON:/docker-entrypoint-initdb.d/policy_sources.json:ro,z" \
   postgres:16-alpine
 
 echo "Waiting for PostgreSQL to be ready..."

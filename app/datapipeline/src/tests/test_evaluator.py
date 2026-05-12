@@ -78,6 +78,12 @@ class TestQuestionExtractorExtract:
         assert q.question_text == "Does the system encrypt data at rest?"
         assert q.reference == "Section 3.2"
         assert q.source_excerpt == "All data must be encrypted at rest using AES-256."
+        assert set(usage.keys()) == {
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "estimated_cost_usd",
+        }
         assert usage["input_tokens"] == 10
         assert usage["output_tokens"] == 5
         assert usage["total_tokens"] == 15

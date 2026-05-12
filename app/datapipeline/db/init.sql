@@ -4,6 +4,16 @@
 CREATE SCHEMA IF NOT EXISTS data_pipeline;
 
 -- ---------------------------------------------------------------------------
+-- Reference: allowed policy categories (managed data; can evolve over time)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS data_pipeline.policy_source_categories (
+    category   TEXT PRIMARY KEY,
+    description TEXT,
+    isactive   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ---------------------------------------------------------------------------
 -- Migration: rename legacy table if it exists under the old name
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
@@ -16,7 +26,7 @@ DO $$ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- Migration: source_policy_docs — rename desp → filename, drop datasize
+-- Migration: source_policy_docs — rename desp → filename, type → source, drop datasize
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN
     IF EXISTS (
@@ -26,6 +36,21 @@ DO $$ BEGIN
           AND column_name  = 'desp'
     ) THEN
         ALTER TABLE data_pipeline.source_policy_docs RENAME COLUMN desp TO filename;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'type'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'source'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs RENAME COLUMN type TO source;
     END IF;
 
     IF EXISTS (
@@ -126,10 +151,103 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     url_id   SERIAL PRIMARY KEY,
     url      TEXT    NOT NULL UNIQUE,
     filename TEXT    NOT NULL,
-    category TEXT    NOT NULL,
-    type     TEXT    NOT NULL DEFAULT 'page',
-    isactive BOOLEAN NOT NULL DEFAULT TRUE
+    category TEXT    NOT NULL
+        REFERENCES data_pipeline.policy_source_categories(category),
+    source   TEXT    NOT NULL DEFAULT 'SharePoint',
+    CONSTRAINT source_policy_docs_source_check
+        CHECK (source IN ('SharePoint', 'Confluence', 'GitHub')),
+    isactive BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NULL DEFAULT NOW()
 );
+
+-- ---------------------------------------------------------------------------
+-- Migration: enforce source/category integrity on existing source_policy_docs
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    -- Backfill categories from existing rows before applying FK.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'data_pipeline' AND table_name = 'source_policy_docs'
+    ) THEN
+        INSERT INTO data_pipeline.policy_source_categories (category)
+        SELECT DISTINCT spd.category
+        FROM data_pipeline.source_policy_docs spd
+        WHERE spd.category IS NOT NULL
+        ON CONFLICT (category) DO NOTHING;
+    END IF;
+
+    -- Add category FK if missing.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'category'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema    = 'data_pipeline'
+          AND table_name      = 'source_policy_docs'
+          AND constraint_type = 'FOREIGN KEY'
+          AND constraint_name = 'source_policy_docs_category_fkey'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs
+            ADD CONSTRAINT source_policy_docs_category_fkey
+            FOREIGN KEY (category)
+            REFERENCES data_pipeline.policy_source_categories(category);
+    END IF;
+
+    -- Add source check if missing and current data is compatible.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'source'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema    = 'data_pipeline'
+          AND table_name      = 'source_policy_docs'
+          AND constraint_type = 'CHECK'
+          AND constraint_name = 'source_policy_docs_source_check'
+    ) THEN
+        IF EXISTS (
+            SELECT 1
+            FROM data_pipeline.source_policy_docs
+            WHERE source NOT IN ('SharePoint', 'Confluence', 'GitHub')
+        ) THEN
+            RAISE WARNING 'Skipping source_policy_docs_source_check: found unsupported source values';
+        ELSE
+            ALTER TABLE data_pipeline.source_policy_docs
+                ADD CONSTRAINT source_policy_docs_source_check
+                CHECK (source IN ('SharePoint', 'Confluence', 'GitHub'));
+        END IF;
+    END IF;
+
+    -- Add updated_at column if missing.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'updated_at'
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs
+            ADD COLUMN updated_at TIMESTAMPTZ NULL;
+    END IF;
+
+    -- Ensure updated_at has a default for newly inserted rows.
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'updated_at'
+          AND column_default IS NULL
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs
+            ALTER COLUMN updated_at SET DEFAULT NOW();
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Output: one row per unique policy URL processed
@@ -185,48 +303,57 @@ CREATE TABLE IF NOT EXISTS data_pipeline.policydoc_costusage (
 );
 
 -- ---------------------------------------------------------------------------
--- Seed: known policy source URLs
--- Remove any row you do not want processed (or set isactive = FALSE).
+-- Seed: policy source URLs from JSON file (no hardcoded rows)
+-- Expects /docker-entrypoint-initdb.d/policy_sources.json to be mounted.
 -- ---------------------------------------------------------------------------
-INSERT INTO data_pipeline.source_policy_docs (url, filename, category, type, isactive) VALUES
-    (
-        'https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx',
-        'Strategic Architecture Principles',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/teams/Team3221/Published%20Architecture%20Documentation/Forms/AllItems.aspx',
-        'Defra Architecture - Published Guardrails - All Documents',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/Tools%20Authority/Tools%20Radar/20260217%20DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf',
-        'DDTS Tools Authority Supplier Radar',
-        'technical', 'pdf', FALSE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/def-ddts-portfoliohub/SitePages/Secure-by-Design.aspx',
-        'Secure by Design',
-        'security', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/teams/Team3221/Soln%20and%20App%20Architecture/Forms/AllItems.aspx',
-        'Defra Architecture - Delivery Architecture Team - Solution Design Authority',
-        'technical', 'page', FALSE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/Community3868/SitePages/Integration.aspx',
-        'GIO Integration',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/Community448/SitePages/CDAP-The-Common-Data-Analytics-Platform.aspx',
-        'The Data Analytics and Science Hub (DASH) Platform',
-        'technical', 'page', TRUE
-    ),
-    (
-        'https://defra.sharepoint.com/sites/Community3868/SitePages/Reporting.aspx',
-        'GIO Data Platform',
-        'technical', 'page', TRUE
+DO $$
+DECLARE
+    seed_json TEXT;
+BEGIN
+    BEGIN
+        seed_json := pg_read_file('/docker-entrypoint-initdb.d/policy_sources.json');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RAISE WARNING 'Policy sources seed file not found/readable at /docker-entrypoint-initdb.d/policy_sources.json: %', SQLERRM;
+            seed_json := '[]';
+    END;
+
+    -- Keep category reference table in sync with JSON source list.
+    INSERT INTO data_pipeline.policy_source_categories (category)
+    SELECT DISTINCT row.category
+    FROM jsonb_to_recordset(seed_json::jsonb) AS row(
+        url_id INTEGER,
+        url TEXT,
+        filename TEXT,
+        category TEXT,
+        source TEXT,
+        isactive BOOLEAN,
+        "updatedAt" TEXT,
+        updated_at TEXT
     )
-ON CONFLICT (url) DO NOTHING;
+    WHERE row.category IS NOT NULL
+    ON CONFLICT (category) DO NOTHING;
+
+    INSERT INTO data_pipeline.source_policy_docs (url, filename, category, source, isactive, updated_at)
+    SELECT
+        row.url,
+        row.filename,
+        row.category,
+        COALESCE(row.source, 'SharePoint') AS source,
+        COALESCE(row.isactive, TRUE) AS isactive,
+        COALESCE(
+            NULLIF(row."updatedAt", '')::timestamptz,
+            NULLIF(row.updated_at, '')::timestamptz
+        ) AS updated_at
+    FROM jsonb_to_recordset(seed_json::jsonb) AS row(
+        url_id INTEGER,
+        url TEXT,
+        filename TEXT,
+        category TEXT,
+        source TEXT,
+        isactive BOOLEAN,
+        "updatedAt" TEXT,
+        updated_at TEXT
+    )
+    ON CONFLICT (url) DO NOTHING;
+END $$;

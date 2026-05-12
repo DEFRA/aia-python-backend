@@ -227,20 +227,48 @@ else
         fail "seed file not found" "$SEED_FILE"
         FAIL_COUNT=$(( FAIL_COUNT + 1 ))
     else
-        SEED_SQL="$("$VENV_PYTHON" -c "
-import json, sys
-with open('$SEED_FILE') as f:
+        SEED_SQL="$(SEED_FILE="$SEED_FILE" "$VENV_PYTHON" - <<'PY'
+import json
+import os
+
+with open(os.environ["SEED_FILE"], encoding="utf-8") as f:
     rows = json.load(f)
+
+
+def esc(value):
+    return str(value).replace("'", "''")
+
+
+def sql_timestamptz(value):
+    if not value:
+        return "NULL"
+    return "'" + esc(value) + "'::timestamptz"
+
+
 vals = []
+categories = set()
 for r in rows:
-    def esc(s): return str(s).replace(\"'\", \"''\")
-    isactive = 'true' if r['isactive'] else 'false'
-    vals.append(\"(\" + str(r['url_id']) + \", '\" + esc(r['url']) + \"', '\" + esc(r['filename']) + \"', '\" + esc(r['category']) + \"', '\" + esc(r['type']) + \"', \" + isactive + \")\")
-print('INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, type, isactive) VALUES')
-print(',\n'.join(vals))
-print(\"ON CONFLICT DO NOTHING;\")
-print(\"SELECT setval('data_pipeline.source_path_policydoc_url_id_seq', (SELECT MAX(url_id) FROM data_pipeline.source_policy_docs));\")
-")"
+    isactive = "true" if r["isactive"] else "false"
+    updated_at = sql_timestamptz(r.get("updatedAt") or r.get("updated_at"))
+    categories.add(esc(r["category"]))
+    vals.append(
+        "(" + str(r["url_id"]) + ", '" + esc(r["url"]) + "', '" + esc(r["filename"]) + "', '"
+        + esc(r["category"]) + "', '" + esc(r["source"]) + "', " + isactive + ", " + updated_at + ")"
+    )
+
+if categories:
+    print("INSERT INTO data_pipeline.policy_source_categories (category) VALUES")
+    print(",\n".join(["('" + c + "')" for c in sorted(categories)]))
+    print("ON CONFLICT (category) DO NOTHING;")
+
+if vals:
+    print("INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive, updated_at) VALUES")
+    print(",\n".join(vals))
+    print("ON CONFLICT DO NOTHING;")
+
+print("SELECT setval(pg_get_serial_sequence('data_pipeline.source_policy_docs', 'url_id'), (SELECT COALESCE(MAX(url_id), 1) FROM data_pipeline.source_policy_docs), true);")
+PY
+)"
         if echo "$SEED_SQL" | pg_pipe > /dev/null 2>&1; then
             SEED_COUNT="$(row_count "data_pipeline.source_policy_docs")"
             ok "data_pipeline.source_policy_docs" "$SEED_COUNT rows (seeded from JSON)"
@@ -258,7 +286,60 @@ if [[ "$FAIL_COUNT" -gt 0 ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 5 — run data pipeline"
+banner "Step 5 — validate AWS authentication"
+
+# Bedrock is the default LLM provider in the datapipeline. Validate AWS auth
+# upfront to fail fast on expired/invalid credentials before pipeline execution.
+LLM_PROVIDER_LOWER="$(echo "${LLM_PROVIDER:-bedrock}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$LLM_PROVIDER_LOWER" == "bedrock" ]]; then
+    if AWS_IDENTITY="$($VENV_PYTHON - <<'PY'
+import os
+import sys
+
+try:
+    import boto3
+except Exception as exc:
+    print(f"boto3 unavailable for AWS auth validation: {exc}")
+    sys.exit(2)
+
+region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
+if not region:
+    print("Missing AWS_DEFAULT_REGION/AWS_REGION for Bedrock authentication")
+    sys.exit(2)
+
+session_kwargs = {"region_name": region}
+access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
+secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+session_token = os.environ.get("AWS_SESSION_TOKEN", "").strip()
+
+if access_key and secret_key:
+    session_kwargs["aws_access_key_id"] = access_key
+    session_kwargs["aws_secret_access_key"] = secret_key
+    if session_token:
+        session_kwargs["aws_session_token"] = session_token
+
+try:
+    session = boto3.Session(**session_kwargs)
+    identity = session.client("sts").get_caller_identity()
+except Exception as exc:
+    print(f"AWS authentication failed: {exc}")
+    sys.exit(1)
+
+print(f"account={identity.get('Account')} arn={identity.get('Arn')}")
+PY
+    )"; then
+        ok "AWS authentication" "$AWS_IDENTITY"
+    else
+        fail "AWS authentication" "$AWS_IDENTITY"
+        echo -e "${RED}Aborting pipeline run due to AWS authentication failure.${NC}"
+        exit 1
+    fi
+else
+    warn "AWS authentication" "skipped (LLM_PROVIDER=${LLM_PROVIDER:-bedrock})"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+banner "Step 6 — run data pipeline"
 
 echo ""
 echo "  $ .venv/bin/python -m app.datapipeline.src.main"
@@ -275,7 +356,7 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-banner "Step 6 — final row counts"
+banner "Step 7 — final row counts"
 
 PD_COUNT="$(row_count "data_pipeline.policy_documents")"
 Q_COUNT="$(row_count "data_pipeline.questions")"

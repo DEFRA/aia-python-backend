@@ -143,6 +143,28 @@ Category is a document-level attribute sourced from `source_policy_docs.category
 
 The system prompt is loaded from `prompts/policy_evaluation_prompt.md` — edit the prompt there without touching Python code.
 
+### Token Usage and Cost Calculation
+
+For each LLM call, DataPipeline captures:
+- `input_tokens`
+- `output_tokens`
+- `total_tokens`
+- `estimated_cost_usd`
+
+Pricing is model-aware and defined in `app/datapipeline/src/evaluator.py` (`QuestionExtractor._PRICING`) as USD per 1M tokens.
+
+Cost formula used in DataPipeline:
+
+```text
+estimated_cost_usd = (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
+```
+
+The per-document usage is written to `data_pipeline.policydoc_costusage` with:
+- `input_tokens`
+- `output_tokens`
+- `amount` (rounded estimated USD to 4 decimal places)
+- `currency` (USD)
+
 ### 6. Debug Output (optional)
 When `SAVE_DEBUG_OUTPUT=true`, the pipeline writes a plain-text file for each successfully processed URL **before** the DB write. This lets you inspect exactly what was fetched and what questions were generated without querying the database.
 
@@ -213,7 +235,7 @@ Input configuration — the list of SharePoint URLs the pipeline should process.
 | `url` | `TEXT NOT NULL UNIQUE` | Full SharePoint URL |
 | `filename` | `TEXT NOT NULL` | Human-readable name for the document |
 | `category` | `TEXT NOT NULL` | Agent type: `security`, `technical`, etc. |
-| `type` | `TEXT NOT NULL DEFAULT 'page'` | `page` or `pdf` |
+| `source` | `TEXT NOT NULL DEFAULT 'SharePoint'` | `SharePoint` or `Confluence` |
 | `isactive` | `BOOLEAN NOT NULL DEFAULT TRUE` | `false` → pipeline deletes data and skips |
 
 > Setting `isactive = false` on the next pipeline run will delete the corresponding `policy_documents` row and cascade to `questions`.
@@ -327,7 +349,7 @@ Used when `USE_LOCAL_POLICY_SOURCES=true`. Entries with `isactive: false` are sk
     "url": "https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx",
     "filename": "Strategic Architecture Principles",
     "category": "technical",
-    "type": "page",
+    "source": "SharePoint",
     "isactive": true
   }
 ]
