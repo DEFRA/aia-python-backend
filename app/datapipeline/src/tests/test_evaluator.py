@@ -53,6 +53,8 @@ def _make_llm_response(text: str) -> MagicMock:
     content_block.text = text
     response = MagicMock()
     response.content = [content_block]
+    response.usage.input_tokens = 10
+    response.usage.output_tokens = 5
     return response
 
 
@@ -65,7 +67,9 @@ class TestQuestionExtractorExtract:
 
         extractor = _make_extractor()
         questions, usage = extractor.extract(
-            _POLICY_URL, "Policy content here", "security"
+            _POLICY_URL,
+            "Policy content here",
+            "security",
         )
 
         assert len(questions) == 1
@@ -80,6 +84,9 @@ class TestQuestionExtractorExtract:
             "total_tokens",
             "estimated_cost_usd",
         }
+        assert usage["input_tokens"] == 10
+        assert usage["output_tokens"] == 5
+        assert usage["total_tokens"] == 15
 
     @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
     def test_handles_json_fences_in_response(self, mock_bedrock_cls: MagicMock) -> None:
@@ -89,7 +96,7 @@ class TestQuestionExtractorExtract:
         mock_client.messages.create.return_value = _make_llm_response(fenced)
 
         extractor = _make_extractor()
-        questions, _ = extractor.extract(_POLICY_URL, "content", "security")
+        questions, _usage = extractor.extract(_POLICY_URL, "content", "security")
 
         assert len(questions) == 1
 

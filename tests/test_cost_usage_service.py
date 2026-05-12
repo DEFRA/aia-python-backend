@@ -13,7 +13,7 @@ def _row(
     agent_name: str,
     input_tokens: int,
     output_tokens: int,
-    unit_cost: float,
+    total_cost_usd: float,
 ) -> dict:
     return {
         "doc_id": doc_id,
@@ -22,7 +22,7 @@ def _row(
         "agent_name": agent_name,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "unit_cost": unit_cost,
+        "total_cost_usd": total_cost_usd,
     }
 
 

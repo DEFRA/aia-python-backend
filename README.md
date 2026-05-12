@@ -283,7 +283,7 @@ PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
 | `test_sqs_service.py` | SQS send/receive/delete | No (mocked) |
 | `test_agent_service.py` | Agent Service `_process_message()`, `_get_document()`, concurrent `run_worker()` loop | No (mocked) |
 | `test_cost_usage_repository.py` | `CostUsageRepository` JOIN query shape and parameter binding | No (mocked) |
-| `test_cost_usage_service.py` | Document grouping, per-doc `totalCost = SUM(unit_cost)`, summary aggregation, document-level pagination | No |
+| `test_cost_usage_service.py` | Document grouping, per-doc `totalCost = SUM(total_cost_usd)`, summary aggregation, document-level pagination | No |
 | `test_cost_usage_router.py` | `/cost-usage` and `/cost-usage/{id}` — auth, query-param validation, 404 path | No (mocked) |
 
 > Orchestrator and Agent Service tests use `pytest-asyncio`. This is included in `requirements-dev.txt`.

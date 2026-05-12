@@ -158,7 +158,11 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
         ),
         patch(
             "app.agent_service.worker.CONFIG_REGISTRY",
-            {"security": MagicMock(return_value=MagicMock())},
+            {
+                "security": MagicMock(
+                    return_value=MagicMock(model="claude-3-5-haiku-20241022")
+                )
+            },
         ),
     ):
         mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
@@ -204,7 +208,11 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
         ),
         patch(
             "app.agent_service.worker.CONFIG_REGISTRY",
-            {"security": MagicMock(return_value=MagicMock())},
+            {
+                "security": MagicMock(
+                    return_value=MagicMock(model="claude-3-5-haiku-20241022")
+                )
+            },
         ),
     ):
         mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
@@ -252,7 +260,11 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
         ),
         patch(
             "app.agent_service.worker.CONFIG_REGISTRY",
-            {"security": MagicMock(return_value=MagicMock())},
+            {
+                "security": MagicMock(
+                    return_value=MagicMock(model="claude-3-5-haiku-20241022")
+                )
+            },
         ),
         patch("app.agent_service.worker._AGENT_TIMEOUT_SECONDS", 1),
     ):
@@ -353,3 +365,61 @@ async def test_process_message_retries_delete_on_transient_failure() -> None:
 
     assert mock_sqs.delete_message.call_count == 2
     mock_sqs.publish.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_process_message_deletes_poison_payload() -> None:
+    """Malformed payloads are deleted immediately to avoid poison-message retries."""
+    from app.agent_service.worker import _process_message
+
+    raw_msg = {
+        "body": "{\"documentId\": \"doc1\", \"agentType\": \"security\"}",
+        "receipt_handle": "rh-poison",
+    }
+
+    mock_sqs = AsyncMock()
+    mock_s3 = AsyncMock()
+    semaphore = asyncio.Semaphore(10)
+
+    await _process_message(
+        raw_msg,
+        mock_sqs,
+        mock_s3,
+        "http://localhost/tasks",
+        "http://localhost/status",
+        semaphore,
+    )
+
+    mock_sqs.publish.assert_not_called()
+    mock_sqs.delete_message.assert_called_once_with("http://localhost/tasks", "rh-poison")
+
+
+def test_parse_task_message_rejects_invariant_violation() -> None:
+    from app.agent_service.worker import NonRetriableTaskMessageError, _parse_task_message
+
+    bad_task = {
+        "taskId": "doc1_technical",
+        "documentId": "doc1",
+        "agentType": "security",
+        "templateType": "SDA",
+        "fileContent": "text",
+    }
+
+    with pytest.raises(NonRetriableTaskMessageError, match="task_id"):
+        _parse_task_message(json.dumps(bad_task))
+
+
+def test_parse_task_message_rejects_extra_fields() -> None:
+    from app.agent_service.worker import NonRetriableTaskMessageError, _parse_task_message
+
+    bad_task = {
+        "taskId": "doc1_security",
+        "documentId": "doc1",
+        "agentType": "security",
+        "templateType": "SDA",
+        "fileContent": "text",
+        "unexpected": "poison",
+    }
+
+    with pytest.raises(NonRetriableTaskMessageError, match="validation failed"):
+        _parse_task_message(json.dumps(bad_task))

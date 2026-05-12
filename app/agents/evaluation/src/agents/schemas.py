@@ -41,6 +41,7 @@ class RawAssessmentRow(BaseModel):
 class AgentLLMOutput(BaseModel):
     rows: list[RawAssessmentRow]
     summary: Summary
+    llm_meta: LLMResponseMeta | None = None
 
 
 class PolicyDocResult(BaseModel):

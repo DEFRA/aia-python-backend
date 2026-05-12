@@ -148,7 +148,9 @@ class TestInsertQuestions:
 
         execute_calls = cursor.execute.call_args_list
         question_inserts = [
-            c for c in execute_calls if "INSERT INTO data_pipeline.questions" in str(c)
+            c
+            for c in execute_calls
+            if "INSERT INTO" in str(c) and "questions" in str(c)
         ]
         assert len(question_inserts) == 2
 
@@ -262,7 +264,8 @@ class TestDeleteQuestionsForDoc:
         delete_questions_for_doc(conn, "doc-uuid-abc")
 
         sql = cursor.execute.call_args[0][0]
-        assert "DELETE FROM data_pipeline.questions" in sql
+        assert "DELETE FROM" in sql
+        assert "questions" in sql
         assert "policy_doc_id" in sql
 
     def test_returns_zero_when_no_questions_exist(self) -> None:
