@@ -1,5 +1,6 @@
-from typing import Optional
 from enum import Enum
+from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -20,7 +21,7 @@ class PolicyDocumentRecord(BaseModel):
     source: PolicyDocumentSource
     url: str
     is_active: bool
-    updated_at: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
 
 class PolicyDocumentListResponse(BaseModel):

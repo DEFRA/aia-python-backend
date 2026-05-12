@@ -239,14 +239,21 @@ def esc(value):
     return str(value).replace("'", "''")
 
 
+def sql_timestamptz(value):
+    if not value:
+        return "NULL"
+    return "'" + esc(value) + "'::timestamptz"
+
+
 vals = []
 categories = set()
 for r in rows:
     isactive = "true" if r["isactive"] else "false"
+    updated_at = sql_timestamptz(r.get("updatedAt") or r.get("updated_at"))
     categories.add(esc(r["category"]))
     vals.append(
         "(" + str(r["url_id"]) + ", '" + esc(r["url"]) + "', '" + esc(r["filename"]) + "', '"
-        + esc(r["category"]) + "', '" + esc(r["source"]) + "', " + isactive + ")"
+        + esc(r["category"]) + "', '" + esc(r["source"]) + "', " + isactive + ", " + updated_at + ")"
     )
 
 if categories:
@@ -255,7 +262,7 @@ if categories:
     print("ON CONFLICT (category) DO NOTHING;")
 
 if vals:
-    print("INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive) VALUES")
+    print("INSERT INTO data_pipeline.source_policy_docs (url_id, url, filename, category, source, isactive, updated_at) VALUES")
     print(",\n".join(vals))
     print("ON CONFLICT DO NOTHING;")
 

@@ -43,9 +43,10 @@ class PolicyDocumentRepository:
                         category,
                         source,
                         url,
-                        isactive
+                        isactive,
+                        updated_at
                     )
-                    VALUES ($1, $2, $3, $4, $5)
+                    VALUES ($1, $2, $3, $4, $5, NOW())
                     RETURNING
                         url_id,
                         filename,

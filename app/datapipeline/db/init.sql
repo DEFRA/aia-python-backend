@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS data_pipeline.source_policy_docs (
     CONSTRAINT source_policy_docs_source_check
         CHECK (source IN ('SharePoint', 'Confluence', 'GitHub')),
     isactive BOOLEAN NOT NULL DEFAULT TRUE,
-    updated_at TIMESTAMPTZ NULL
+    updated_at TIMESTAMPTZ NULL DEFAULT NOW()
 );
 
 -- ---------------------------------------------------------------------------
@@ -233,6 +233,19 @@ BEGIN
     ) THEN
         ALTER TABLE data_pipeline.source_policy_docs
             ADD COLUMN updated_at TIMESTAMPTZ NULL;
+    END IF;
+
+    -- Ensure updated_at has a default for newly inserted rows.
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'data_pipeline'
+          AND table_name   = 'source_policy_docs'
+          AND column_name  = 'updated_at'
+          AND column_default IS NULL
+    ) THEN
+        ALTER TABLE data_pipeline.source_policy_docs
+            ALTER COLUMN updated_at SET DEFAULT NOW();
     END IF;
 END $$;
 
@@ -314,25 +327,33 @@ BEGIN
         filename TEXT,
         category TEXT,
         source TEXT,
-        isactive BOOLEAN
+        isactive BOOLEAN,
+        "updatedAt" TEXT,
+        updated_at TEXT
     )
     WHERE row.category IS NOT NULL
     ON CONFLICT (category) DO NOTHING;
 
-    INSERT INTO data_pipeline.source_policy_docs (url, filename, category, source, isactive)
+    INSERT INTO data_pipeline.source_policy_docs (url, filename, category, source, isactive, updated_at)
     SELECT
         row.url,
         row.filename,
         row.category,
         COALESCE(row.source, 'SharePoint') AS source,
-        COALESCE(row.isactive, TRUE) AS isactive
+        COALESCE(row.isactive, TRUE) AS isactive,
+        COALESCE(
+            NULLIF(row."updatedAt", '')::timestamptz,
+            NULLIF(row.updated_at, '')::timestamptz
+        ) AS updated_at
     FROM jsonb_to_recordset(seed_json::jsonb) AS row(
         url_id INTEGER,
         url TEXT,
         filename TEXT,
         category TEXT,
         source TEXT,
-        isactive BOOLEAN
+        isactive BOOLEAN,
+        "updatedAt" TEXT,
+        updated_at TEXT
     )
     ON CONFLICT (url) DO NOTHING;
 END $$;
