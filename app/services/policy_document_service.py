@@ -46,6 +46,9 @@ class PolicyDocumentService:
     ) -> Optional[PolicyDocumentRecord]:
         return await self.repo.fetch_policy_document_by_url_id(url_id)
 
+    async def delete_policy_document_by_url_id(self, url_id: int) -> bool:
+        return await self.repo.delete_policy_document_by_url_id(url_id)
+
     async def update_policy_document_by_url_id(
         self, url_id: int, request: PolicyDocumentUpdateRequest
     ) -> Optional[PolicyDocumentRecord]:

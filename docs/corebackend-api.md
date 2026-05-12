@@ -51,6 +51,7 @@ All error responses follow FastAPI's standard format:
 
 | Code | When used |
 |------|-----------|
+| `204` | Successful DELETE (no content) |
 | `200` | Successful GET |
 | `202` | Upload accepted — processing started asynchronously |
 | `400` | Bad request (duplicate file, missing field) |
@@ -465,7 +466,7 @@ x-user-id: <userId>
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `urlId` | integer | `url_id` of the policy document |
+| `urlId` | integer | `url_id` of the policy document (must be > 0) |
 
 **Response `200`:**
 ```json
@@ -530,7 +531,33 @@ Creates a new row in `data_pipeline.source_policy_docs`.
 
 ---
 
-### 13. Update a Policy Document
+### 13. Delete a Policy Document
+
+```
+DELETE /api/v1/policy-documents/{urlId}
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Permanently deletes the record from `data_pipeline.source_policy_docs`.
+
+**Path parameter:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `urlId` | integer | `url_id` of the policy document |
+
+**Response `204`:** No response body.
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| `urlId` not found | `404` | `"Policy document '1' not found."` |
+
+---
+
+### 14. Update a Policy Document
 
 ```
 PUT /api/v1/policy-documents/{urlId}
@@ -595,6 +622,7 @@ Replaces all mutable fields on a policy document. All fields in the request body
 | `POST` | `/api/v1/policy-documents` | Required | `PolicyDocumentRecord` (created) |
 | `GET` | `/api/v1/policy-documents` | Required | Paginated `PolicyDocumentListResponse` |
 | `GET` | `/api/v1/policy-documents/{urlId}` | Required | `PolicyDocumentRecord` |
+| `DELETE` | `/api/v1/policy-documents/{urlId}` | Required | No content (`204`) |
 | `PUT` | `/api/v1/policy-documents/{urlId}` | Required | `PolicyDocumentRecord` (updated) |
 
 ---

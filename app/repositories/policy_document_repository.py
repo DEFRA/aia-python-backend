@@ -19,6 +19,18 @@ class PolicyDocumentRepository:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
+    async def delete_policy_document_by_url_id(self, url_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM data_pipeline.source_policy_docs
+                WHERE url_id = $1
+                RETURNING url_id
+                """,
+                url_id,
+            )
+        return row is not None
+
     async def create_policy_document(
         self, request: PolicyDocumentCreateRequest
     ) -> PolicyDocumentRecord:

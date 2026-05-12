@@ -363,3 +363,68 @@ class TestUpdatePolicyDocumentByUrlId:
 
         app.dependency_overrides.pop(get_policy_document_service, None)
         app.dependency_overrides.pop(get_user_repository, None)
+
+
+class TestDeletePolicyDocumentByUrlId:
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_delete_policy_document_returns_204(self, _mock_get_user, _mock_auth):
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_user_by_id.return_value = MOCK_USER
+        app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+
+        mock_service = AsyncMock()
+        mock_service.delete_policy_document_by_url_id.return_value = True
+        app.dependency_overrides[get_policy_document_service] = lambda: mock_service
+
+        response = client.delete("/api/v1/policy-documents/7", headers=BASE_HEADERS)
+
+        assert response.status_code == 204
+        assert response.content == b""
+
+        app.dependency_overrides.pop(get_policy_document_service, None)
+        app.dependency_overrides.pop(get_user_repository, None)
+
+    def test_delete_policy_document_no_auth_returns_401(self):
+        response = client.delete("/api/v1/policy-documents/7")
+        assert response.status_code == 401
+
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_delete_policy_document_invalid_url_id_returns_422(
+        self, _mock_get_user, _mock_auth
+    ):
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_user_by_id.return_value = MOCK_USER
+        app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+
+        mock_service = AsyncMock()
+        app.dependency_overrides[get_policy_document_service] = lambda: mock_service
+
+        response = client.delete("/api/v1/policy-documents/0", headers=BASE_HEADERS)
+
+        assert response.status_code == 422
+
+        app.dependency_overrides.pop(get_policy_document_service, None)
+        app.dependency_overrides.pop(get_user_repository, None)
+
+    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    def test_delete_policy_document_returns_404_when_missing(
+        self, _mock_get_user, _mock_auth
+    ):
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_user_by_id.return_value = MOCK_USER
+        app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+
+        mock_service = AsyncMock()
+        mock_service.delete_policy_document_by_url_id.return_value = False
+        app.dependency_overrides[get_policy_document_service] = lambda: mock_service
+
+        response = client.delete("/api/v1/policy-documents/999", headers=BASE_HEADERS)
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Policy document '999' not found."
+
+        app.dependency_overrides.pop(get_policy_document_service, None)
+        app.dependency_overrides.pop(get_user_repository, None)

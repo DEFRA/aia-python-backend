@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from app.core.dependencies import get_policy_document_service, verify_auth
 from app.models.policy_document import (
@@ -102,3 +102,21 @@ async def update_policy_document_by_url_id(
             detail=f"Policy document '{url_id}' not found.",
         )
     return updated
+
+
+@router.delete(
+    "/{url_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a policy document by url_id",
+)
+async def delete_policy_document_by_url_id(
+    url_id: int = Path(..., gt=0),
+    _auth: dict = Depends(verify_auth),
+    service: PolicyDocumentService = Depends(get_policy_document_service),
+) -> None:
+    deleted = await service.delete_policy_document_by_url_id(url_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Policy document '{url_id}' not found.",
+        )
