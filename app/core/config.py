@@ -15,6 +15,19 @@ TEMPLATE_AGENTS: dict[str, list[str]] = {
     # "CHEDP": ["security", "data", "risk", "ea", "solution"],
 }
 
+# Pricing per million tokens (USD). Can be overridden via env var
+# LLM_PRICING_USD_PER_MTOKENS as JSON.
+DEFAULT_LLM_PRICING_USD_PER_MTOKENS: dict[str, dict[str, float]] = {
+    # Bedrock model IDs
+    "anthropic.claude-3-7-sonnet-20250219-v1:0": {"input": 3.00, "output": 15.00},
+    "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00, "output": 15.00},
+    "anthropic.claude-3-5-haiku-20241022-v1:0": {"input": 0.80, "output": 4.00},
+    # Anthropic direct model IDs
+    "claude-3-7-sonnet-20250219": {"input": 3.00, "output": 15.00},
+    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
+}
+
 
 class AWSConfig(BaseModel):
     region: str = "eu-west-2"
@@ -109,6 +122,10 @@ class AppConfig(BaseSettings):
     orchestrator_agent_timeout: int = Field(480, alias="AGENT_TIMEOUT_SECONDS")
     orchestrator_default_agent_type: str = Field(
         "general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE"
+    )
+    llm_pricing_usd_per_mtokens: dict[str, dict[str, float]] = Field(
+        default_factory=lambda: DEFAULT_LLM_PRICING_USD_PER_MTOKENS.copy(),
+        alias="LLM_PRICING_USD_PER_MTOKENS",
     )
 
     model_config = SettingsConfigDict(

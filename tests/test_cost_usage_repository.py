@@ -23,7 +23,7 @@ async def test_fetch_all_cost_usage_returns_rows_for_user():
             "agent_name": "Security",
             "input_tokens": 100,
             "output_tokens": 50,
-            "unit_cost": 0.0012,
+            "total_cost_usd": 0.0012,
         }
     ]
     pool, conn = _make_pool(rows)
@@ -62,7 +62,7 @@ async def test_fetch_cost_usage_by_doc_filters_by_doc_and_user():
             "agent_name": "Security",
             "input_tokens": 100,
             "output_tokens": 50,
-            "unit_cost": 0.0012,
+            "total_cost_usd": 0.0012,
         }
     ]
     pool, conn = _make_pool(rows)
@@ -86,3 +86,31 @@ async def test_fetch_cost_usage_by_doc_returns_empty_when_doc_missing():
 
     assert result == []
     conn.fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_upsert_cost_usage_executes_update_then_insert_cte():
+    pool, conn = _make_pool([])
+    repo = CostUsageRepository(pool)
+
+    await repo.upsert_cost_usage(
+        doc_id="aaaaaaaa-0000-0000-0000-000000000001",
+        agent_name="security",
+        input_tokens=1200,
+        output_tokens=480,
+        total_cost_usd=0.0,
+    )
+
+    conn.execute.assert_awaited_once()
+    sql, *params = conn.execute.call_args[0]
+    assert "pg_advisory_xact_lock" in sql
+    assert "updated AS" in sql
+    assert "UPDATE backend.cost_usage" in sql
+    assert "INSERT INTO backend.cost_usage" in sql
+    assert params == [
+        "aaaaaaaa-0000-0000-0000-000000000001",
+        "security",
+        1200,
+        480,
+        0.0,
+    ]

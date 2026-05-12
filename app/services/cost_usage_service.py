@@ -75,7 +75,7 @@ def _build_document(rows: List[Any]) -> CostUsageDocument:
         )
         for row in rows
     ]
-    total_cost = sum(float(row["unit_cost"]) for row in rows)
+    total_cost = sum(float(row["total_cost_usd"]) for row in rows)
     return CostUsageDocument(
         doc_id=first["doc_id"],
         file_name=first["file_name"],
@@ -93,7 +93,7 @@ def _build_summary(rows: List[Any], total_documents: int) -> CostUsageSummary:
     for row in rows:
         total_input += int(row["input_tokens"])
         total_output += int(row["output_tokens"])
-        total_cost += float(row["unit_cost"])
+        total_cost += float(row["total_cost_usd"])
     return CostUsageSummary(
         totalCost=round(total_cost, 4),
         currency=_DEFAULT_CURRENCY,
