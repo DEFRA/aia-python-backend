@@ -22,7 +22,9 @@ DEFAULT_LLM_PRICING_USD_PER_MTOKENS: dict[str, dict[str, float]] = {
     "anthropic.claude-3-7-sonnet-20250219-v1:0": {"input": 3.00, "output": 15.00},
     "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00, "output": 15.00},
     "anthropic.claude-3-5-haiku-20241022-v1:0": {"input": 0.80, "output": 4.00},
+    "anthropic.claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     # Anthropic direct model IDs
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-3-7-sonnet-20250219": {"input": 3.00, "output": 15.00},
     "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
     "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
