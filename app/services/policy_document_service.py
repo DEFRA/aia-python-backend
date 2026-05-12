@@ -1,6 +1,7 @@
 from typing import Optional
 
 from app.models.policy_document import (
+    PolicyDocumentCreateRequest,
     PolicyDocumentListResponse,
     PolicyDocumentOptionsResponse,
     PolicyDocumentRecord,
@@ -12,6 +13,13 @@ from app.repositories.policy_document_repository import PolicyDocumentRepository
 class PolicyDocumentService:
     def __init__(self, repo: PolicyDocumentRepository):
         self.repo = repo
+
+    async def create_policy_document(
+        self, request: PolicyDocumentCreateRequest
+    ) -> PolicyDocumentRecord:
+        if not await self.repo.category_exists(request.category):
+            raise ValueError(f"Unsupported category: {request.category}")
+        return await self.repo.create_policy_document(request)
 
     async def fetch_policy_document_options(self) -> PolicyDocumentOptionsResponse:
         sources, categories = await self.repo.fetch_policy_document_options()

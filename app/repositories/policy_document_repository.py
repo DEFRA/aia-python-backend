@@ -2,7 +2,11 @@ from typing import Optional
 
 import asyncpg
 
-from app.models.policy_document import PolicyDocumentRecord, PolicyDocumentUpdateRequest
+from app.models.policy_document import (
+    PolicyDocumentCreateRequest,
+    PolicyDocumentRecord,
+    PolicyDocumentUpdateRequest,
+)
 
 
 class PolicyDocumentRepository:
@@ -14,6 +18,50 @@ class PolicyDocumentRepository:
 
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
+
+    async def create_policy_document(
+        self, request: PolicyDocumentCreateRequest
+    ) -> PolicyDocumentRecord:
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO data_pipeline.source_policy_docs (
+                        filename,
+                        category,
+                        source,
+                        url,
+                        isactive
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING
+                        url_id,
+                        filename,
+                        category,
+                        source,
+                        url,
+                        isactive
+                    """,
+                    request.filename,
+                    request.category,
+                    request.source,
+                    request.url,
+                    request.is_active,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise ValueError(
+                f"Policy document with URL already exists: {request.url}"
+            ) from exc
+
+        return PolicyDocumentRecord(
+            url_id=row["url_id"],
+            filename=row["filename"],
+            category=row["category"],
+            source=row["source"],
+            url=row["url"],
+            is_active=row["isactive"],
+            updated_at=None,
+        )
 
     async def category_exists(self, category: str) -> bool:
         async with self.pool.acquire() as conn:
@@ -117,32 +165,37 @@ class PolicyDocumentRepository:
     async def update_policy_document_by_url_id(
         self, url_id: int, request: PolicyDocumentUpdateRequest
     ) -> Optional[PolicyDocumentRecord]:
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                UPDATE data_pipeline.source_policy_docs
-                SET
-                    filename = $2,
-                    category = $3,
-                    source = $4,
-                    url = $5,
-                    isactive = $6
-                WHERE url_id = $1
-                RETURNING
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE data_pipeline.source_policy_docs
+                    SET
+                        filename = $2,
+                        category = $3,
+                        source = $4,
+                        url = $5,
+                        isactive = $6
+                    WHERE url_id = $1
+                    RETURNING
+                        url_id,
+                        filename,
+                        category,
+                        source,
+                        url,
+                        isactive
+                    """,
                     url_id,
-                    filename,
-                    category,
-                    source,
-                    url,
-                    isactive
-                """,
-                url_id,
-                request.filename,
-                request.category,
-                request.source,
-                request.url,
-                request.is_active,
-            )
+                    request.filename,
+                    request.category,
+                    request.source,
+                    request.url,
+                    request.is_active,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise ValueError(
+                f"Policy document with URL already exists: {request.url}"
+            ) from exc
 
         if row is None:
             return None

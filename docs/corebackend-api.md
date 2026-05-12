@@ -488,7 +488,49 @@ x-user-id: <userId>
 
 ---
 
-### 12. Update a Policy Document
+### 12. Create a Policy Document
+
+```
+POST /api/v1/policy-documents
+Content-Type: application/json
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Creates a new row in `data_pipeline.source_policy_docs`.
+
+**Request body:**
+```json
+{
+  "filename": "Security Policy v4.docx",
+  "category": "security",
+  "source": "SharePoint",
+  "url": "https://company.sharepoint.com/sites/policies/Security_Policy_v4.docx",
+  "isActive": true
+}
+```
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `filename` | string | 1-500 chars | Display name of the document |
+| `category` | string | 1-100 chars; must exist in reference table | Document category |
+| `source` | string | `"SharePoint"` \| `"Confluence"` \| `"GitHub"` | Source system |
+| `url` | string | 1-4000 chars | Full URL to the document |
+| `isActive` | boolean | — | Whether the document is active |
+
+**Response `201`:** Same shape as **Get a Policy Document** (`PolicyDocumentRecord`), including generated `urlId`.
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| `category` value not in reference table | `400` | `"Unsupported category: <value>"` |
+| `url` already exists | `400` | `"Policy document with URL already exists: <url>"` |
+| `source` value not in allowed set | `422` | Pydantic validation error |
+
+---
+
+### 13. Update a Policy Document
 
 ```
 PUT /api/v1/policy-documents/{urlId}
@@ -531,7 +573,8 @@ Replaces all mutable fields on a policy document. All fields in the request body
 | Scenario | Code | `detail` value |
 |----------|------|----------------|
 | `urlId` not found | `404` | `"Policy document '1' not found."` |
-| `category` value not in reference table | `400` | `"Invalid category: 'unknown'. Must be one of: technical, security"` |
+| `category` value not in reference table | `400` | `"Unsupported category: <value>"` |
+| `url` already exists | `400` | `"Policy document with URL already exists: <url>"` |
 | `source` value not in allowed set | `422` | Pydantic validation error |
 
 ---
@@ -549,6 +592,7 @@ Replaces all mutable fields on a policy document. All fields in the request body
 | `GET` | `/api/v1/cost-usage/{documentId}` | Required | `CostUsageDocument` |
 | `GET` | `/api/v1/users/me` | Required | `UserRecord` |
 | `GET` | `/api/v1/policy-documents/options` | Required | `PolicyDocumentOptionsResponse` |
+| `POST` | `/api/v1/policy-documents` | Required | `PolicyDocumentRecord` (created) |
 | `GET` | `/api/v1/policy-documents` | Required | Paginated `PolicyDocumentListResponse` |
 | `GET` | `/api/v1/policy-documents/{urlId}` | Required | `PolicyDocumentRecord` |
 | `PUT` | `/api/v1/policy-documents/{urlId}` | Required | `PolicyDocumentRecord` (updated) |
@@ -673,11 +717,19 @@ export interface PolicyDocumentOptionsResponse {
   categories: string[]
 }
 
-export interface PolicyDocumentUpdateRequest {
-  filename: string        // 1–500 chars
-  category: string        // 1–100 chars; must exist in reference table
+export interface PolicyDocumentCreateRequest {
+  filename: string        // 1-500 chars
+  category: string        // 1-100 chars; must exist in reference table
   source: PolicyDocumentSource
-  url: string             // 1–4000 chars
+  url: string             // 1-4000 chars
+  isActive: boolean
+}
+
+export interface PolicyDocumentUpdateRequest {
+  filename: string        // 1-500 chars
+  category: string        // 1-100 chars; must exist in reference table
+  source: PolicyDocumentSource
+  url: string             // 1-4000 chars
   isActive: boolean
 }
 ```

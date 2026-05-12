@@ -39,7 +39,7 @@ class PolicyDocumentOptionsResponse(BaseModel):
     categories: list[str]
 
 
-class PolicyDocumentUpdateRequest(BaseModel):
+class PolicyDocumentWriteRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     filename: str = Field(min_length=1, max_length=500)
@@ -47,3 +47,11 @@ class PolicyDocumentUpdateRequest(BaseModel):
     source: PolicyDocumentSource
     url: str = Field(min_length=1, max_length=4000)
     is_active: bool
+
+
+class PolicyDocumentUpdateRequest(PolicyDocumentWriteRequest):
+    pass
+
+
+class PolicyDocumentCreateRequest(PolicyDocumentWriteRequest):
+    pass

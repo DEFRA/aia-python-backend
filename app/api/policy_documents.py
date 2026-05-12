@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.dependencies import get_policy_document_service, verify_auth
 from app.models.policy_document import (
+    PolicyDocumentCreateRequest,
     PolicyDocumentListResponse,
     PolicyDocumentOptionsResponse,
     PolicyDocumentRecord,
@@ -10,6 +11,26 @@ from app.models.policy_document import (
 from app.services.policy_document_service import PolicyDocumentService
 
 router = APIRouter(prefix="/policy-documents", tags=["policy-documents"])
+
+
+@router.post(
+    "",
+    response_model=PolicyDocumentRecord,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a policy document",
+)
+async def create_policy_document(
+    request: PolicyDocumentCreateRequest,
+    _auth: dict = Depends(verify_auth),
+    service: PolicyDocumentService = Depends(get_policy_document_service),
+) -> PolicyDocumentRecord:
+    try:
+        return await service.create_policy_document(request)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get(
