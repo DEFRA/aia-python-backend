@@ -11,6 +11,8 @@ from app.datapipeline.src.sharepoint import (
     _extract_canvas_text,
     _extract_page_name,
     _html_to_text,
+    _is_pdf_share_url,
+    _to_graph_share_id,
     extract_sharepoint_parts,
 )
 
@@ -18,6 +20,10 @@ _TEAMS_URL = "https://defra.sharepoint.com/teams/Team3221/SitePages/DataPolicy.a
 _SITES_URL = "https://defra.sharepoint.com/sites/environment/SitePages/Policy.aspx"
 _LIBRARY_URL = (
     "https://defra.sharepoint.com/teams/Team3221/Published%20Docs/Forms/AllItems.aspx"
+)
+_PDF_SHARE_URL = (
+    "https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/"
+    "Tools%20Authority/Tools%20Radar/DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf"
 )
 _TS_STR = "2024-06-01T12:00:00Z"
 _TS = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -68,6 +74,19 @@ class TestExtractPageName:
     def test_returns_none_for_pdf_url(self) -> None:
         url = "https://defra.sharepoint.com/:b:/r/teams/T1/Docs/file.pdf"
         assert _extract_page_name(url) is None
+
+
+class TestPdfShareHelpers:
+    def test_detects_pdf_share_url(self) -> None:
+        assert _is_pdf_share_url(_PDF_SHARE_URL) is True
+
+    def test_rejects_non_pdf_share_url(self) -> None:
+        assert _is_pdf_share_url(_TEAMS_URL) is False
+
+    def test_builds_graph_share_id(self) -> None:
+        share_id = _to_graph_share_id(_PDF_SHARE_URL)
+        assert share_id.startswith("u!")
+        assert "/" not in share_id
 
     def test_returns_none_for_root_site(self) -> None:
         url = "https://defra.sharepoint.com/teams/Team3221"
@@ -357,6 +376,52 @@ class TestReadPageContent:
         assert "microsoft.graph.sitePage" in second_call_url
         assert "DataPolicy.aspx" in second_call_url
         assert "canvasLayout" in second_call_url
+
+    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch("app.datapipeline.src.sharepoint.PdfReader")
+    @patch("app.datapipeline.src.sharepoint.requests.get")
+    def test_extracts_pdf_share_content(
+        self,
+        mock_get: MagicMock,
+        mock_pdf_reader: MagicMock,
+        mock_msal: MagicMock,
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+
+        site_resp = MagicMock()
+        site_resp.status_code = 200
+        site_resp.json.return_value = _site_response(
+            last_modified="2020-01-01T00:00:00Z"
+        )
+
+        item_resp = MagicMock()
+        item_resp.status_code = 200
+        item_resp.json.return_value = {
+            "name": "DDTS_Tools_Authority.pdf",
+            "lastModifiedDateTime": _TS_STR,
+        }
+
+        content_resp = MagicMock()
+        content_resp.status_code = 200
+        content_resp.content = b"%PDF-1.7 bytes"
+
+        mock_get.side_effect = [site_resp, item_resp, content_resp]
+
+        page1 = MagicMock()
+        page1.extract_text.return_value = "First page text"
+        page2 = MagicMock()
+        page2.extract_text.return_value = "Second page text"
+        mock_pdf_reader.return_value.pages = [page1, page2]
+
+        client = _make_client()
+        text, last_modified = client.read_page_content(_PDF_SHARE_URL)
+
+        assert "First page text" in text
+        assert "Second page text" in text
+        assert last_modified == _TS
+        assert mock_get.call_count == 3
 
 
 # ---------------------------------------------------------------------------
