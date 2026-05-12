@@ -188,6 +188,34 @@ Key environment variables:
 | `AWS_SESSION_TOKEN` | STS session token (required for temporary credentials) | — |
 | `AWS_DEFAULT_REGION` | AWS region for S3, SQS, and Bedrock | `eu-west-2` |
 
+### Token Pricing Configuration (Orchestrator)
+
+The Orchestrator calculates `total_cost_usd` from token usage using model-specific pricing in USD per 1M tokens.
+
+Source of truth in code:
+- `app/core/config.py` → `DEFAULT_LLM_PRICING_USD_PER_MTOKENS`
+- `app/orchestrator/main.py` → `_calculate_total_cost_usd(...)`
+
+You can override pricing via `.env` using `LLM_PRICING_USD_PER_MTOKENS` as JSON:
+
+```env
+LLM_PRICING_USD_PER_MTOKENS={"anthropic.claude-3-5-sonnet-20241022-v2:0":{"input":3.0,"output":15.0},"anthropic.claude-3-5-haiku-20241022-v1:0":{"input":0.8,"output":4.0}}
+```
+
+Example with Anthropic direct model IDs:
+
+```env
+LLM_PRICING_USD_PER_MTOKENS={"claude-3-5-sonnet-20241022":{"input":3.0,"output":15.0},"claude-3-5-haiku-20241022":{"input":0.8,"output":4.0}}
+```
+
+Cost formula used by Orchestrator:
+
+```text
+total_cost_usd = round((input_tokens * input_rate + output_tokens * output_rate) / 1_000_000, 6)
+```
+
+If a status message includes an unknown model ID, Orchestrator logs a warning and persists `total_cost_usd = 0.0` for that record.
+
 The evaluation pipeline also reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (individual vars) in addition to `POSTGRES_URI`.
 
 ## Running in Development

@@ -143,6 +143,28 @@ Category is a document-level attribute sourced from `source_policy_docs.category
 
 The system prompt is loaded from `prompts/policy_evaluation_prompt.md` — edit the prompt there without touching Python code.
 
+### Token Usage and Cost Calculation
+
+For each LLM call, DataPipeline captures:
+- `input_tokens`
+- `output_tokens`
+- `total_tokens`
+- `estimated_cost_usd`
+
+Pricing is model-aware and defined in `app/datapipeline/src/evaluator.py` (`QuestionExtractor._PRICING`) as USD per 1M tokens.
+
+Cost formula used in DataPipeline:
+
+```text
+estimated_cost_usd = (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
+```
+
+The per-document usage is written to `data_pipeline.policydoc_costusage` with:
+- `input_tokens`
+- `output_tokens`
+- `amount` (rounded estimated USD to 4 decimal places)
+- `currency` (USD)
+
 ### 6. Debug Output (optional)
 When `SAVE_DEBUG_OUTPUT=true`, the pipeline writes a plain-text file for each successfully processed URL **before** the DB write. This lets you inspect exactly what was fetched and what questions were generated without querying the database.
 
