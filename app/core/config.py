@@ -125,6 +125,7 @@ class AppConfig(BaseSettings):
     orchestrator_default_agent_type: str = Field(
         "general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE"
     )
+    max_file_upload: int = Field(50, alias="MAX_FILE_UPLOAD")
     llm_pricing_usd_per_mtokens: dict[str, dict[str, float]] = Field(
         default_factory=lambda: DEFAULT_LLM_PRICING_USD_PER_MTOKENS.copy(),
         alias="LLM_PRICING_USD_PER_MTOKENS",

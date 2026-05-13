@@ -10,6 +10,7 @@ from app.services.orchestrator_service import OrchestratorService
 from app.services.s3_service import S3Service
 from app.utils.app_context import AppContext
 from app.utils.logger import get_logger
+from app.core.messages import AppMessages
 
 logger = get_logger(__name__)
 
@@ -28,8 +29,15 @@ class UploadService:
         self.orchestrator_service = orchestrator_service
 
     async def process_upload_request(
-        self, request: UploadRequest, user_id: str
+        self, request: UploadRequest, user_id: str, file_size: int
     ) -> Optional[str]:
+        # Validate file size
+        max_file_size = config.max_file_upload * 1024 * 1024  # Convert MB to bytes
+        if file_size > max_file_size:
+            raise ValueError(
+                AppMessages.FILE_SIZE_EXCEEDS_LIMIT.format(max_size=max_file_size // (1024 * 1024))
+            )
+
         is_duplicate = await self.repo.check_duplicate(user_id, request.fileName)
         if is_duplicate:
             return None
