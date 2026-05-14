@@ -60,14 +60,14 @@ def _parse_status_message(body: str) -> StatusMessage:
     be deleted immediately instead of retried forever.
     """
     if len(body.encode("utf-8")) > _MAX_SQS_MESSAGE_BYTES:
-        raise NonRetriableStatusMessageError(
-            "Status message exceeds SQS payload limit"
-        )
+        raise NonRetriableStatusMessageError("Status message exceeds SQS payload limit")
 
     try:
         status_msg = StatusMessage.model_validate_json(body)
     except ValidationError as exc:
-        raise NonRetriableStatusMessageError("Status payload validation failed") from exc
+        raise NonRetriableStatusMessageError(
+            "Status payload validation failed"
+        ) from exc
 
     expected_task_id = f"{status_msg.document_id}_{status_msg.agent_type}"
     if status_msg.task_id != expected_task_id:
@@ -78,7 +78,10 @@ def _parse_status_message(body: str) -> StatusMessage:
     if status_msg.agent_type not in _known_agent_types():
         raise NonRetriableStatusMessageError("Unknown agent_type in status payload")
 
-    if status_msg.input_tokens is not None and status_msg.input_tokens > _POSTGRES_INT_MAX:
+    if (
+        status_msg.input_tokens is not None
+        and status_msg.input_tokens > _POSTGRES_INT_MAX
+    ):
         raise NonRetriableStatusMessageError("input_tokens exceeds DB integer limit")
 
     if (
@@ -418,27 +421,52 @@ async def _status_queue_poller() -> None:
                         status_msg.input_tokens,
                         status_msg.output_tokens,
                     )
-                    await _persist_status_tokens(status_msg, cost_usage_repo)
                     if status_msg.error:
                         agent_result = None
                     else:
                         agent_result = AgentResult.model_validate(status_msg.result)
+
+                    # Pre-check session/task state so we can distinguish:
+                    # - new valid result (persist tokens),
+                    # - stale/unknown session (discard),
+                    # - duplicate delivery (discard without double-counting).
+                    session = _session_store.get(status_msg.document_id)
+                    task_expected = (
+                        session is not None
+                        and status_msg.task_id in session.expected_task_ids
+                    )
+                    task_already_recorded = (
+                        session is not None
+                        and status_msg.task_id in session.collected_results
+                    )
+
                     all_received = await _session_store.record_result(
                         status_msg.document_id,
                         status_msg.task_id,
                         agent_result,
                     )
+
+                    if task_expected and not task_already_recorded:
+                        await _persist_status_tokens(status_msg, cost_usage_repo)
+
                     await sqs.delete_message(queue_url, receipt)
                     if all_received is False:
-                        # Session already completed/timed-out, or task_id not
-                        # expected (e.g. stale retry after orchestrator restart).
-                        # Message is deleted to prevent queue build-up.
-                        logger.warning(
-                            "Discarded status message for unknown/expired session "
-                            "task_id=%s doc_id=%s",
-                            status_msg.task_id,
-                            status_msg.document_id,
-                        )
+                        # False means either unknown/expired session, unexpected
+                        # task_id, or duplicate delivery; message is deleted to
+                        # prevent queue build-up.
+                        if task_already_recorded:
+                            logger.warning(
+                                "Discarded duplicate status message task_id=%s doc_id=%s",
+                                status_msg.task_id,
+                                status_msg.document_id,
+                            )
+                        else:
+                            logger.warning(
+                                "Discarded status message for unknown/expired session "
+                                "task_id=%s doc_id=%s",
+                                status_msg.task_id,
+                                status_msg.document_id,
+                            )
                     else:
                         logger.info(
                             "Result recorded task_id=%s all_received=%s",
