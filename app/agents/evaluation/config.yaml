@@ -9,6 +9,23 @@
 # "bedrock"   uses AWS Bedrock (AWS credentials required; no API key needed).
 llm:
   provider: "bedrock"
+  # Disable the SDK's silent built-in retries; tenacity owns retry policy.
+  sdk_max_retries: 0
+  # Per-request timeout in seconds for the AsyncAnthropic client.
+  request_timeout_s: 120
+
+# --- Retry policy (tenacity) ---
+# Drives application-level retries for LLM agent calls. Predicate
+# (which exceptions are transient) lives in src/utils/retry.py.
+retry:
+  # Maximum number of attempts before giving up (1 means no retry).
+  max_attempts: 3
+  # Initial backoff wait in seconds before the first retry.
+  initial_wait_s: 2
+  # Cap on wait between retries (exponential backoff is bounded by this).
+  max_wait_s: 30
+  # Random jitter added to each backoff wait to avoid thundering herds.
+  jitter_s: 1
 
 # --- Agent models ---
 agents:

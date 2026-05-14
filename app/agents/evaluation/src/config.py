@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -136,21 +136,58 @@ def _make_customise_sources(yaml_key: str) -> classmethod[Any, Any, Any]:
 
 
 class LLMConfig(BaseSettings):
-    """LLM provider selection.
+    """LLM provider selection and SDK transport tunables.
 
     ``provider`` controls which Anthropic client the pipeline constructs:
 
     * ``"anthropic"`` — direct Anthropic API; requires ``ANTHROPIC_API_KEY``.
     * ``"bedrock"``   — AWS Bedrock; uses the boto3 credential chain, no API key.
 
-    Override via the ``LLM_PROVIDER`` environment variable or the ``llm.provider``
-    key in ``config.yaml``.
+    ``sdk_max_retries`` and ``request_timeout_s`` flow through to the
+    underlying ``AsyncAnthropic`` / ``AsyncAnthropicBedrock`` constructor as
+    ``max_retries=`` and ``timeout=`` keyword arguments. The SDK retry count
+    is set to ``0`` by default because tenacity owns retry policy in this
+    pipeline (see ``src/utils/retry.py``).
+
+    Override via the ``LLM_PROVIDER``, ``LLM_SDK_MAX_RETRIES`` or
+    ``LLM_REQUEST_TIMEOUT_S`` environment variables, or the matching keys in
+    the ``llm`` block of ``config.yaml``.
     """
 
     provider: Literal["anthropic", "bedrock"] = Field(default="anthropic", alias="LLM_PROVIDER")
+    sdk_max_retries: int = Field(default=0, alias="LLM_SDK_MAX_RETRIES")
+    request_timeout_s: float = Field(default=120.0, alias="LLM_REQUEST_TIMEOUT_S")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
     settings_customise_sources = _make_customise_sources("llm")
+
+
+class RetryConfig(BaseSettings):
+    """Application-level retry policy for LLM agent calls.
+
+    Drives the ``agent_retry`` decorator in ``src/utils/retry.py``. All values
+    flow from the ``retry`` block in ``config.yaml`` (or the matching
+    ``RETRY_*`` environment variables). The transient/terminal classification
+    itself is hard-coded in ``src/utils/retry._is_transient`` — only the
+    backoff numbers are tunable here.
+    """
+
+    max_attempts: int = Field(default=3, alias="RETRY_MAX_ATTEMPTS")
+    initial_wait_s: float = Field(default=2.0, alias="RETRY_INITIAL_WAIT_S")
+    max_wait_s: float = Field(default=30.0, alias="RETRY_MAX_WAIT_S")
+    jitter_s: float = Field(default=1.0, alias="RETRY_JITTER_S")
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+    settings_customise_sources = _make_customise_sources("retry")
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> RetryConfig:
+        """Enforce ``max_attempts >= 1`` and ``max_wait_s >= initial_wait_s``."""
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
+        if self.max_wait_s < self.initial_wait_s:
+            raise ValueError("max_wait_s must be >= initial_wait_s")
+        return self
 
 
 # ---------------------------------------------------------------------------

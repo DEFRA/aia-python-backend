@@ -170,3 +170,20 @@ mypy src/handlers/compile.py
 - [ ] Compiled result written to Redis under `compiled:{docId}` with 1h TTL
 - [ ] Unit tests: provide mock `AgentResult` objects, assert `CompiledResult` structure and markdown content
 - [ ] `ruff check .` and `mypy src/` pass
+
+---
+
+## Idempotency
+
+The original design used a Redis counter (`INCR results_count:{docId}`) to detect when all agents had finished. Redis was removed from the pipeline in Plan 11, so the Compile Lambda now needs a different mechanism to deduplicate agent results — SQS at-least-once delivery means the same agent's `AgentStatusMessage` may be re-delivered after a transient failure, and we must not double-count.
+
+**Replacement: DynamoDB conditional-write dedupe table.**
+
+- **Table:** `defra-compile-dedupe-{env}`
+- **Partition key:** `docId` (string)
+- **Sort key:** `agentType` (string)
+- **TTL attribute:** `ttl` (epoch seconds), set to 24 hours after the write so old items expire automatically.
+- **Write logic:** `PutItem` with `ConditionExpression="attribute_not_exists(agentType)"`.
+- **Failure handling:** on `ConditionalCheckFailedException`, treat as a no-op — the result for that `(docId, agentType)` has already been counted by an earlier invocation; do not re-process and do not increment any aggregate counters.
+
+The actual table provisioning (Terraform / CDK) and the handler implementation ship with this Compile Lambda task itself. Plan 12 only updates this design note; no compile-handler code is changed in Plan 12.

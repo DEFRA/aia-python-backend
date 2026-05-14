@@ -7,12 +7,13 @@ import logging
 from typing import Any, cast
 
 import anthropic
-from anthropic.types import TextBlock
+from anthropic.types import Message, TextBlock
 
 from src.agents.prompts.tagging import SYSTEM_PROMPT
 from src.agents.schemas import TaggedChunk
 from src.config import TaggingAgentConfig
 from src.utils.helpers import strip_code_fences
+from src.utils.retry import agent_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -61,8 +62,13 @@ class TaggingAgent:
 
         return tagged
 
+    @agent_retry()
     async def _tag_batch(self, batch: list[dict[str, Any]]) -> list[TaggedChunk]:
         """Send a single batch to the LLM and parse the response.
+
+        Decorated with :func:`agent_retry` so a transient API error or
+        malformed-JSON response on a single batch retries that batch only —
+        successfully tagged batches are not re-run.
 
         Args:
             batch: Subset of chunks to tag in one API call.
@@ -70,7 +76,7 @@ class TaggingAgent:
         Returns:
             List of ``TaggedChunk`` validated from the LLM response.
         """
-        response = await self._client.messages.create(
+        response: Message = await self._client.messages.create(
             model=self._config.model,
             max_tokens=self._config.max_tokens,
             temperature=self._config.temperature,
@@ -83,5 +89,10 @@ class TaggingAgent:
             ],
         )
         raw: str = strip_code_fences(cast(TextBlock, response.content[0]).text)
-        items: list[dict[str, Any]] = json.loads(raw)
+        try:
+            items: list[dict[str, Any]] = json.loads(raw)
+        except json.JSONDecodeError:
+            # Transient: tenacity will retry. Log raw response for debugging.
+            logger.error("Failed to parse tagging response. raw=%.200s", raw)
+            raise
         return [TaggedChunk.model_validate(item) for item in items]
