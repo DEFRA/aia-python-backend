@@ -21,7 +21,7 @@ from src.agents.schemas import (
     Summary,
 )
 from src.config import TechnicalAgentConfig
-from src.utils.helpers import strip_code_fences
+from src.utils.helpers import parse_llm_json
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -89,8 +89,7 @@ class TechnicalAgent:
         raw_text: str = cast(TextBlock, response.content[0]).text
 
         try:
-            cleaned: str = strip_code_fences(raw_text)
-            payload: dict[str, object] = json.loads(cleaned)
+            payload: dict[str, object] = parse_llm_json(raw_text)
             technical_block: dict[str, object] = payload["Technical"]  # type: ignore[assignment]
             raw_rows: list[RawAssessmentRow] = [
                 RawAssessmentRow.model_validate(row)
