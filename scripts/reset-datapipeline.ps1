@@ -218,14 +218,14 @@ if ($failCount -gt 0) {
 banner "Step 4 - run data pipeline"
 
 Write-Host ""
-Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.main"
+Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.entrypoints.main"
 Write-Host ""
 
 # Temporarily relax error handling — Python logging writes to stderr, which
 # PowerShell treats as errors under $ErrorActionPreference='Stop'.
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$pipelineOutput = & $VenvPython -m app.datapipeline.src.main 2>&1
+$pipelineOutput = & $VenvPython -m app.datapipeline.src.entrypoints.main 2>&1
 $pipelineExit = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
 
