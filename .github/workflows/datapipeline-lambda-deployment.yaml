@@ -25,6 +25,7 @@ jobs:
     env:
       AWS_REGION: eu-west-2
       LAMBDA_FUNCTION_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.function_name || 'pocldnaia-KB' }}
+      LAYER_NAME: datapipeline-ca-bundle
 
     steps:
       - uses: actions/checkout@v4
@@ -34,11 +35,51 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Build Lambda Layer with certifi
+        run: |
+          cd app/datapipeline
+          
+          # Create layer directory structure
+          rm -rf layer-package layer-package.zip
+          mkdir -p layer-package/python/lib/python3.12/site-packages
+          
+          # Install certifi into the layer directory
+          pip install certifi -t layer-package/python/lib/python3.12/site-packages/
+          
+          # Create layer zip
+          cd layer-package && zip -r ../layer-package.zip . && cd ..
+          
+          echo "=== Layer package structure ==="
+          unzip -l layer-package.zip | grep -E "certifi" | head -10
+
+      - name: Publish Lambda Layer
+        run: |
+          cd app/datapipeline
+          
+          # Get the latest layer version if it exists
+          LAYER_VERSION=$(aws lambda list-layer-versions \
+            --layer-name "$LAYER_NAME" \
+            --region "$AWS_REGION" \
+            --query 'LayerVersions[0].Version' \
+            --output text 2>/dev/null || echo "0")
+          
+          # Publish new layer version
+          LAYER_ARN=$(aws lambda publish-layer-version \
+            --layer-name "$LAYER_NAME" \
+            --zip-file fileb://layer-package.zip \
+            --compatible-runtimes python3.12 \
+            --region "$AWS_REGION" \
+            --query 'LayerVersionArn' \
+            --output text)
+          
+          echo "Published layer: $LAYER_ARN"
+          echo "LAYER_ARN=$LAYER_ARN" >> $GITHUB_ENV
+
       - name: Build deployment package
         run: |
           cd app/datapipeline
 
-          # Clean previous artifacts
+          # Clean previous artifacts (excluding layer files)
           rm -rf package datapipeline-lambda.zip
           mkdir -p package/app/datapipeline
 
@@ -49,23 +90,12 @@ jobs:
           # Copy data folder (policy_sources.json, etc.) for local source feature flag
           cp -r data package/app/datapipeline/
 
-          # Install dependencies (including certifi for public CA certificates)
-          pip install -r requirements.txt -t package/
-
-          # Create deployment zip from package root
-          cd package && zip -r ../datapipeline-lambda.zip . && cd ..
-          
-          # Verify structure (src, data, dependencies, and certifi bundle)
-          echo "=== Package structure ==="
-          unzip -l datapipeline-lambda.zip | grep -E "(app/datapipeline/(src|data)/|certifi)" | head -30
-          fi
-
-          # Create deployment zip from package root
+          # Create deployment zip from package root (NO dependencies—they come from layer)
           cd package && zip -r ../datapipeline-lambda.zip . && cd ..
           
           # Verify structure
-          echo "=== Package structure ===" 
-          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/(src|data|certs)/" | head -30
+          echo "=== Package structure ==="
+          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/(src|data)/" | head -20
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -89,7 +119,7 @@ jobs:
             --function-name "$LAMBDA_FUNCTION_NAME" \
             --region "$AWS_REGION"
 
-      - name: Update Lambda configuration
+      - name: Update Lambda configuration with layer and environment
         run: |
           aws lambda update-function-configuration \
             --function-name "$LAMBDA_FUNCTION_NAME" \
@@ -97,8 +127,8 @@ jobs:
             --runtime python3.12 \
             --timeout 900 \
             --memory-size 2048 \
-            --environment "Variables={,
-              REQUESTS_CA_BUNDLE=/var/task/certifi/cacert.pem
+            --layers "$LAYER_ARN" \
+            --environment "Variables={
               DB_HOST=${{ secrets.DATAPIPELINE_DB_HOST }},
               DB_PORT=${{ secrets.DATAPIPELINE_DB_PORT }},
               DB_NAME=${{ secrets.DATAPIPELINE_DB_NAME }},
@@ -109,9 +139,7 @@ jobs:
               SHAREPOINT_CLIENT_ID=${{ secrets.SHAREPOINT_CLIENT_ID }},
               SHAREPOINT_CLIENT_SECRET=${{ secrets.SHAREPOINT_CLIENT_SECRET }},
               MODEL_ID=${{ secrets.DATAPIPELINE_MODEL_ID }},
-              REQUESTS_CA_BUNDLE=/var/task/app/datapipeline/certs/global-bundle.pem,
-              SSL_CERT_FILE=/var/task/app/datapipeline/certs/global-bundle.pem,
-              SHAREPOINT_SSL_VERIFY=true
+              REQUESTS_CA_BUNDLE=/opt/python/lib/python3.12/site-packages/certifi/cacert.pem
             }" \
             --region "$AWS_REGION"
 
@@ -122,11 +150,11 @@ jobs:
           echo "=== Lambda code/config summary ==="
           aws lambda get-function-configuration \
             --function-name "$LAMBDA_FUNCTION_NAME" \
-            --region "$AWS_REGION" | jq '{FunctionName, FunctionArn, LastModified, Version, CodeSha256, Handler, Runtime, MemorySize, Timeout}'
+            --region "$AWS_REGION" | jq '{FunctionName, FunctionArn, LastModified, Version, CodeSha256, Handler, Runtime, MemorySize, Timeout, Layers}'
 
       - name: Verify deployment
         run: |
           echo "=== Lambda function updated ==="
           aws lambda get-function-configuration \
             --function-name "$LAMBDA_FUNCTION_NAME" \
-            --region "$AWS_REGION" | jq '.Handler, .Runtime, .MemorySize, .Timeout'
+            --region "$AWS_REGION" | jq '.Handler, .Runtime, .MemorySize, .Timeout, .Layers'
