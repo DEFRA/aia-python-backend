@@ -37,24 +37,21 @@ jobs:
       - name: Build deployment package
         run: |
           cd app/datapipeline
-          
-          # Install runtime dependencies with Lambda-compatible wheels
-          pip install -r requirements.txt \
-            --platform manylinux2014_x86_64 \
-            --python-version 3.12 \
-            --implementation cp \
-            --only-binary=:all: \
-            --target package/
 
-          # Copy application source (preserves package structure)
-          cp -r src/* package/
+          # Clean previous artifacts
+          rm -rf package datapipeline-lambda.zip
+          mkdir -p package/app/datapipeline
+
+          # Copy application source while preserving full import path expected
+          # by relative imports inside src/entrypoints/main.py.
+          cp -r src package/app/datapipeline/
 
           # Create deployment zip from package root
           cd package && zip -r ../datapipeline-lambda.zip . && cd ..
           
           # Verify structure
           echo "=== Package structure ===" 
-          unzip -l datapipeline-lambda.zip | grep -E "entrypoints|adapters|domain|prompts|utils_pkg|__init__" | head -20
+          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/src/(entrypoints|adapters|domain|prompts|utils_pkg)|__init__" | head -20
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -82,7 +79,7 @@ jobs:
         run: |
           aws lambda update-function-configuration \
             --function-name "$LAMBDA_FUNCTION_NAME" \
-            --handler entrypoints.lambda_function.lambda_handler \
+            --handler app.datapipeline.src.entrypoints.lambda_function.lambda_handler \
             --runtime python3.12 \
             --timeout 900 \
             --memory-size 2048 \
