@@ -23,6 +23,6 @@ class StatusMessage(BaseModel):
         default=None,
         ge=0,
     )  # Aggregated input tokens across all policy docs
-    output_tokens: Optional[int] = (
-        Field(default=None, ge=0)  # Aggregated output tokens across all policy docs
-    )
+    output_tokens: Optional[int] = Field(
+        default=None, ge=0
+    )  # Aggregated output tokens across all policy docs

@@ -49,12 +49,15 @@ jobs:
           # Copy data folder (policy_sources.json, etc.) for local source feature flag
           cp -r data package/app/datapipeline/
 
-          # Copy CA bundle for outbound HTTPS trust chain validation
-          if [ -d "certs" ]; then
-            cp -r certs package/app/datapipeline/
-          else
-            echo "ERROR: certs directory not found (expected app/datapipeline/certs)"
-            exit 1
+          # Install dependencies (including certifi for public CA certificates)
+          pip install -r requirements.txt -t package/
+
+          # Create deployment zip from package root
+          cd package && zip -r ../datapipeline-lambda.zip . && cd ..
+          
+          # Verify structure (src, data, dependencies, and certifi bundle)
+          echo "=== Package structure ==="
+          unzip -l datapipeline-lambda.zip | grep -E "(app/datapipeline/(src|data)/|certifi)" | head -30
           fi
 
           # Create deployment zip from package root
@@ -94,7 +97,8 @@ jobs:
             --runtime python3.12 \
             --timeout 900 \
             --memory-size 2048 \
-            --environment "Variables={
+            --environment "Variables={,
+              REQUESTS_CA_BUNDLE=/var/task/certifi/cacert.pem
               DB_HOST=${{ secrets.DATAPIPELINE_DB_HOST }},
               DB_PORT=${{ secrets.DATAPIPELINE_DB_PORT }},
               DB_NAME=${{ secrets.DATAPIPELINE_DB_NAME }},
