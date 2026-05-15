@@ -10,8 +10,8 @@ import psycopg2
 import psycopg2.extensions
 from psycopg2.extras import RealDictCursor
 
-from app.datapipeline.src.schemas import ExtractedQuestion, PolicySource
-from app.datapipeline.src.utils import new_uuid
+from schemas import ExtractedQuestion, PolicySource
+from utils import new_uuid
 
 logger = logging.getLogger(__name__)
 

@@ -7,11 +7,11 @@ from pathlib import Path
 import anthropic
 from anthropic import Anthropic, AnthropicBedrock
 
-from app.datapipeline.src.schemas import ExtractedQuestion
+from schemas import ExtractedQuestion
 
 logger = logging.getLogger(__name__)
 
-_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+_PROMPTS_DIR = Path(__file__).resolve().parent
 
 
 def _load_prompt(name: str) -> str:

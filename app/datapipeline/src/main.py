@@ -36,7 +36,7 @@ from pathlib import Path
 import psycopg2
 from dotenv import load_dotenv
 
-from app.datapipeline.src.db import (
+from db import (
     delete_policy_document_by_url,
     delete_questions_for_doc,
     fetch_all_policy_sources,
@@ -45,10 +45,10 @@ from app.datapipeline.src.db import (
     insert_questions,
     load_local_policy_sources,
 )
-from app.datapipeline.src.evaluator import QuestionExtractor
-from app.datapipeline.src.sharepoint import SharePointClient
-from app.datapipeline.src.sync import get_sync_record, is_changed, upsert_sync_record
-from app.datapipeline.src.utils import page_name_from_url
+from evaluator import QuestionExtractor
+from sharepoint import SharePointClient
+from sync import get_sync_record, is_changed, upsert_sync_record
+from utils import page_name_from_url
 
 logging.basicConfig(
     level=logging.INFO,
@@ -123,10 +123,10 @@ def _write_debug_file(
 
 
 def _get_db_connection() -> psycopg2.extensions.connection:
-    schema = os.environ.get("DB_SCHEMA", "data_pipeline")
+    schema = os.environ["DB_SCHEMA"]
     conn = psycopg2.connect(
         host=os.environ["DB_HOST"],
-        port=int(os.environ.get("DB_PORT", "5432")),
+        port=int(os.environ["DB_PORT"]),
         dbname=os.environ["DB_NAME"],
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
