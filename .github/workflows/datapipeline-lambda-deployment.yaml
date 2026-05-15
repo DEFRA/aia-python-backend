@@ -46,12 +46,15 @@ jobs:
           # by relative imports inside src/entrypoints/main.py.
           cp -r src package/app/datapipeline/
 
+          # Copy data folder (policy_sources.json, etc.) for local source feature flag
+          cp -r data package/app/datapipeline/
+
           # Create deployment zip from package root
           cd package && zip -r ../datapipeline-lambda.zip . && cd ..
           
           # Verify structure
           echo "=== Package structure ===" 
-          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/src/(entrypoints|adapters|domain|prompts|utils_pkg)|__init__" | head -20
+          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/(src|data)/" | head -25
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
