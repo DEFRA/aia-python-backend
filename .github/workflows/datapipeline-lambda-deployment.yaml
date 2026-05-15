@@ -49,12 +49,20 @@ jobs:
           # Copy data folder (policy_sources.json, etc.) for local source feature flag
           cp -r data package/app/datapipeline/
 
+          # Copy CA bundle for outbound HTTPS trust chain validation
+          if [ -d "certs" ]; then
+            cp -r certs package/app/datapipeline/
+          else
+            echo "ERROR: certs directory not found (expected app/datapipeline/certs)"
+            exit 1
+          fi
+
           # Create deployment zip from package root
           cd package && zip -r ../datapipeline-lambda.zip . && cd ..
           
           # Verify structure
           echo "=== Package structure ===" 
-          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/(src|data)/" | head -25
+          unzip -l datapipeline-lambda.zip | grep -E "app/datapipeline/(src|data|certs)/" | head -30
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -96,7 +104,10 @@ jobs:
               SHAREPOINT_TENANT_ID=${{ secrets.SHAREPOINT_TENANT_ID }},
               SHAREPOINT_CLIENT_ID=${{ secrets.SHAREPOINT_CLIENT_ID }},
               SHAREPOINT_CLIENT_SECRET=${{ secrets.SHAREPOINT_CLIENT_SECRET }},
-              MODEL_ID=${{ secrets.DATAPIPELINE_MODEL_ID }}
+              MODEL_ID=${{ secrets.DATAPIPELINE_MODEL_ID }},
+              REQUESTS_CA_BUNDLE=/var/task/app/datapipeline/certs/global-bundle.pem,
+              SSL_CERT_FILE=/var/task/app/datapipeline/certs/global-bundle.pem,
+              SHAREPOINT_SSL_VERIFY=true
             }" \
             --region "$AWS_REGION"
 
