@@ -35,7 +35,9 @@ class UploadService:
         max_file_size = config.max_file_upload * 1024 * 1024  # Convert MB to bytes
         if file_size > max_file_size:
             raise ValueError(
-                AppMessages.FILE_SIZE_EXCEEDS_LIMIT.format(max_size=max_file_size // (1024 * 1024))
+                AppMessages.FILE_SIZE_EXCEEDS_LIMIT.format(
+                    max_size=max_file_size // (1024 * 1024)
+                )
             )
 
         is_duplicate = await self.repo.check_duplicate(user_id, request.fileName)

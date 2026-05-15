@@ -33,6 +33,7 @@ class AuthService:
 
             # Verify 'iat' (issued at) claim exists and is not in the future
             import time
+
             iat = payload.get("iat")
             if iat is None:
                 logger.error("JWT payload missing 'iat' claim (token issuance time)")
@@ -40,11 +41,13 @@ class AuthService:
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=messages.TOKEN_MISSING_IAT,
                 )
-            
+
             current_time = int(time.time())
             if iat > current_time:
                 logger.error(
-                    "JWT 'iat' claim is in the future: iat=%d, current_time=%d", iat, current_time
+                    "JWT 'iat' claim is in the future: iat=%d, current_time=%d",
+                    iat,
+                    current_time,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,

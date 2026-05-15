@@ -13,9 +13,7 @@ class AppMessages:
     INTERNAL_AUTH_ERROR = "Internal authentication error"
 
     # Documents
-    FILE_ALREADY_UPLOADED = (
-        "A file named '{file_name}' has already been uploaded. Please rename the file and try again"
-    )
+    FILE_ALREADY_UPLOADED = "A file named '{file_name}' has already been uploaded. Please rename the file and try again"
     DOC_METADATA_SAVE_FAILED = "Failed to record document metadata."
     DOC_NOT_FOUND = "Document '{doc_id}' not found."
     USER_NOT_FOUND = "User not found."

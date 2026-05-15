@@ -72,9 +72,7 @@ def _parse_task_message(body: str) -> TaskMessage:
     be deleted immediately instead of retried forever.
     """
     if len(body.encode("utf-8")) > _MAX_SQS_MESSAGE_BYTES:
-        raise NonRetriableTaskMessageError(
-            "Task message exceeds SQS payload limit"
-        )
+        raise NonRetriableTaskMessageError("Task message exceeds SQS payload limit")
 
     try:
         task = TaskMessage.model_validate_json(body)

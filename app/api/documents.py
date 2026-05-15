@@ -23,7 +23,10 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 logger = get_logger(__name__)
 
 _MAX_HISTORY_LIMIT = 100
-_MAX_FILE_UPLOAD = int(getenv("MAX_FILE_UPLOAD", 50)) * 1024 * 1024  # Convert MB to bytes
+_MAX_FILE_UPLOAD = (
+    int(getenv("MAX_FILE_UPLOAD", 50)) * 1024 * 1024
+)  # Convert MB to bytes
+
 
 @router.post(
     "/upload",
@@ -50,7 +53,9 @@ async def upload_document(
     await file.seek(0)  # Reset file pointer after reading
 
     try:
-        doc_id = await service.process_upload_request(upload_request, user_id, file_size)
+        doc_id = await service.process_upload_request(
+            upload_request, user_id, file_size
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
