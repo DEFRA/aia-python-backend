@@ -1,6 +1,7 @@
 name: Deploy Datapipeline Lambda Function
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
     paths:
@@ -52,7 +53,7 @@ jobs:
       - name: Deploy Lambda function code
         run: |
           aws lambda update-function-code \
-            --function-name aia-datapipeline \
+            --function-name pocldnaia-KB \
             --zip-file fileb://app/datapipeline/datapipeline-lambda.zip \
             --architectures x86_64 \
             --region eu-west-2
@@ -60,17 +61,17 @@ jobs:
       - name: Wait for code update to complete
         run: |
           aws lambda wait function-updated \
-            --function-name aia-datapipeline \
+            --function-name pocldnaia-KB \
             --region eu-west-2
 
       - name: Update Lambda configuration
         run: |
           aws lambda update-function-configuration \
-            --function-name aia-datapipeline \
+            --function-name pocldnaia-KB \
             --handler entrypoints.lambda_function.lambda_handler \
             --runtime python3.12 \
-            --timeout 600 \
-            --memory-size 512 \
+            --timeout 900 \
+            --memory-size 2048 \
             --environment "Variables={
               DB_HOST=${{ secrets.DATAPIPELINE_DB_HOST }},
               DB_PORT=${{ secrets.DATAPIPELINE_DB_PORT }},
@@ -93,5 +94,5 @@ jobs:
         run: |
           echo "=== Lambda function updated ==="
           aws lambda get-function-configuration \
-            --function-name aia-datapipeline \
+            --function-name pocldnaia-KB \
             --region eu-west-2 | jq '.Handler, .Runtime, .MemorySize, .Timeout'
