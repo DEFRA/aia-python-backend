@@ -342,10 +342,10 @@ fi
 banner "Step 6 — run data pipeline"
 
 echo ""
-echo "  $ .venv/bin/python -m app.datapipeline.src.main"
+echo "  $ .venv/bin/python -m app.datapipeline.src.entrypoints.main"
 echo ""
 
-"$VENV_PYTHON" -m app.datapipeline.src.main
+"$VENV_PYTHON" -m app.datapipeline.src.entrypoints.main
 PIPELINE_EXIT=$?
 
 echo ""

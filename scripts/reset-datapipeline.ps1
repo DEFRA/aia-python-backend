@@ -84,10 +84,6 @@ foreach ($prop in $Parsed.PSObject.Properties) {
 }
 
 # -- Resolve DB variables (with safe defaults) ----------------------------------
-$DbHost = if ($env:DB_HOST)     { $env:DB_HOST }     else { "localhost" }
-$DbPort = if ($env:DB_PORT)     { $env:DB_PORT }     else { "5432" }
-$DbName = if ($env:DB_NAME)     { $env:DB_NAME }     else { "aiadocuments" }
-$DbUser = if ($env:DB_USER)     { $env:DB_USER }     else { "aiauser" }
 
 # Python SQL runner is written to a temp file to avoid multiline -c quoting issues.
 $SqlRunnerPath = Join-Path $env:TEMP "aia_sql_runner.py"
@@ -101,11 +97,11 @@ scalar = os.environ.get("AIA_SQL_SCALAR", "0") == "1"
 
 try:
     conn = psycopg2.connect(
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=int(os.environ.get("DB_PORT", "5432")),
-        dbname=os.environ.get("DB_NAME", "aiadocuments"),
-        user=os.environ.get("DB_USER", "aiauser"),
-        password=os.environ.get("DB_PASSWORD", ""),
+        host=os.environ["DB_HOST"],
+        port=int(os.environ["DB_PORT"]),
+        dbname=os.environ["DB_NAME"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
     )
     if not scalar:
         conn.autocommit = True
@@ -164,7 +160,7 @@ if ($connTest -ne 1) {
     fail "PostgreSQL" "cannot connect - check DB_* vars in .env"
     exit 1
 }
-ok "PostgreSQL" "${DbUser}@${DbHost}:${DbPort}/${DbName}"
+ok "PostgreSQL" "$($env:DB_USER)@$($env:DB_HOST):$($env:DB_PORT)/$($env:DB_NAME)"
 
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 2 - truncate mutable tables (CASCADE)"
@@ -222,14 +218,14 @@ if ($failCount -gt 0) {
 banner "Step 4 - run data pipeline"
 
 Write-Host ""
-Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.main"
+Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.entrypoints.main"
 Write-Host ""
 
 # Temporarily relax error handling — Python logging writes to stderr, which
 # PowerShell treats as errors under $ErrorActionPreference='Stop'.
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$pipelineOutput = & $VenvPython -m app.datapipeline.src.main 2>&1
+$pipelineOutput = & $VenvPython -m app.datapipeline.src.entrypoints.main 2>&1
 $pipelineExit = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
 

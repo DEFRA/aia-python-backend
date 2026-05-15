@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 
 
-from app.datapipeline.src.utils import page_name_from_url, url_to_hash
+from app.datapipeline.src.utils_pkg.utils import page_name_from_url, url_to_hash
 
 
 class TestUrlToHash:

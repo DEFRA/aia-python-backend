@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.datapipeline.src.schemas import ExtractedQuestion, PolicySource
+from app.datapipeline.src.domain.schemas import ExtractedQuestion, PolicySource
 
 _URL = "https://defra.sharepoint.com/teams/T1/SitePages/Policy.aspx"
 _TS = datetime(2024, 6, 1, tzinfo=timezone.utc)
@@ -28,6 +28,7 @@ _QUESTIONS = [
 _ENV = {
     "DB_HOST": "localhost",
     "DB_NAME": "testdb",
+    "DB_SCHEMA": "data_pipeline",
     "DB_USER": "user",
     "DB_PASSWORD": "pass",
     "SHAREPOINT_TENANT_ID": "tid",
@@ -49,30 +50,40 @@ def _patch_pipeline(
     questions = questions if questions is not None else _QUESTIONS
 
     patches = {
-        "app.datapipeline.src.main._get_db_connection": MagicMock(
+        "app.datapipeline.src.entrypoints.main._get_db_connection": MagicMock(
             return_value=MagicMock()
         ),
-        "app.datapipeline.src.main._build_sharepoint_client": MagicMock(),
-        "app.datapipeline.src.main._build_extractor": MagicMock(),
-        "app.datapipeline.src.main.fetch_policy_sources": MagicMock(
+        "app.datapipeline.src.entrypoints.main._build_sharepoint_client": MagicMock(),
+        "app.datapipeline.src.entrypoints.main._build_extractor": MagicMock(),
+        "app.datapipeline.src.entrypoints.main.fetch_policy_sources": MagicMock(
             return_value=sources
         ),
-        "app.datapipeline.src.main.get_sync_record": MagicMock(return_value=None),
-        "app.datapipeline.src.main.is_changed": MagicMock(return_value=sync_changed),
-        "app.datapipeline.src.main.insert_policy_document": MagicMock(
+        "app.datapipeline.src.entrypoints.main.get_sync_record": MagicMock(
+            return_value=None
+        ),
+        "app.datapipeline.src.entrypoints.main.is_changed": MagicMock(
+            return_value=sync_changed
+        ),
+        "app.datapipeline.src.entrypoints.main.insert_policy_document": MagicMock(
             return_value="doc-uuid"
         ),
-        "app.datapipeline.src.main.delete_questions_for_doc": MagicMock(return_value=0),
-        "app.datapipeline.src.main.insert_questions": MagicMock(
+        "app.datapipeline.src.entrypoints.main.delete_questions_for_doc": MagicMock(
+            return_value=0
+        ),
+        "app.datapipeline.src.entrypoints.main.insert_questions": MagicMock(
             return_value=len(questions)
         ),
-        "app.datapipeline.src.main.upsert_sync_record": MagicMock(),
+        "app.datapipeline.src.entrypoints.main.upsert_sync_record": MagicMock(),
     }
 
-    sp_mock = patches["app.datapipeline.src.main._build_sharepoint_client"].return_value
+    sp_mock = patches[
+        "app.datapipeline.src.entrypoints.main._build_sharepoint_client"
+    ].return_value
     sp_mock.return_value.read_page_content.return_value = (content, last_modified)
 
-    extractor_mock = patches["app.datapipeline.src.main._build_extractor"].return_value
+    extractor_mock = patches[
+        "app.datapipeline.src.entrypoints.main._build_extractor"
+    ].return_value
     extractor_mock.return_value.extract.return_value = (
         questions,
         {
@@ -94,9 +105,9 @@ def set_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestRunSummary:
     def test_processed_count(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
-        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **_build_mocks()):
             summary = run()
 
         assert summary["processed"] == 1
@@ -104,61 +115,61 @@ class TestRunSummary:
         assert summary["skipped"] == 0
 
     def test_skipped_when_content_unchanged(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sync_changed=False)
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["skipped"] == 1
         assert summary["processed"] == 0
 
     def test_failed_when_sharepoint_raises(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         mocks[
             "_build_sharepoint_client"
         ].return_value.read_page_content.side_effect = RuntimeError("SP down")
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["failed"] == 1
         assert summary["processed"] == 0
 
     def test_failed_when_llm_raises(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         mocks["_build_extractor"].return_value.extract.side_effect = ValueError(
             "Bad JSON"
         )
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["failed"] == 1
 
     def test_failed_when_llm_returns_empty(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(questions=[])
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["failed"] == 1
 
     def test_returns_all_zeros_when_no_sources(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sources=[])
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary == {"processed": 0, "skipped": 0, "failed": 0, "cleaned": 0}
 
     def test_raises_when_env_var_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MODEL_ID")
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         with pytest.raises(
             RuntimeError, match="Missing required environment variable: MODEL_ID"
@@ -166,7 +177,7 @@ class TestRunSummary:
             run()
 
     def test_delete_called_before_insert_on_changed_page(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         call_order: list[str] = []
         mocks = _build_mocks()
@@ -176,17 +187,17 @@ class TestRunSummary:
         mocks["insert_questions"].side_effect = lambda *_: (
             call_order.append("insert") or 1
         )
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             run()
 
         assert call_order == ["delete", "insert"]
 
     def test_db_rollback_on_write_failure(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         mocks["insert_policy_document"].side_effect = Exception("DB connection lost")
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         mocks["_get_db_connection"].return_value.rollback.assert_called_once()
@@ -205,21 +216,21 @@ _INACTIVE_SOURCE = PolicySource(
 
 class TestInactiveSourceCleanup:
     def test_inactive_source_increments_skipped(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["skipped"] == 1
         assert summary["processed"] == 0
 
     def test_inactive_source_calls_delete_when_data_exists(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
         mocks["delete_policy_document_by_url"] = MagicMock(return_value=1)
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         mocks["delete_policy_document_by_url"].assert_called_once_with(
@@ -228,21 +239,21 @@ class TestInactiveSourceCleanup:
         assert summary["cleaned"] == 1
 
     def test_inactive_source_does_not_increment_cleaned_when_no_data(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
         mocks["delete_policy_document_by_url"] = MagicMock(return_value=0)
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["cleaned"] == 0
         assert summary["skipped"] == 1
 
     def test_inactive_source_does_not_fetch_sharepoint(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sources=[_INACTIVE_SOURCE])
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             run()
 
         mocks[
@@ -250,11 +261,11 @@ class TestInactiveSourceCleanup:
         ].return_value.read_page_content.assert_not_called()
 
     def test_mixed_sources_processed_and_cleaned(self) -> None:
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks(sources=[_SOURCE, _INACTIVE_SOURCE])
         mocks["delete_policy_document_by_url"] = MagicMock(return_value=1)
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             summary = run()
 
         assert summary["processed"] == 1
@@ -267,12 +278,12 @@ class TestLocalSourcesFeatureFlag:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("USE_LOCAL_POLICY_SOURCES", "true")
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         local_mock = MagicMock(return_value=[_SOURCE])
         mocks["load_local_policy_sources"] = local_mock
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             run()
 
         local_mock.assert_called_once()
@@ -282,12 +293,12 @@ class TestLocalSourcesFeatureFlag:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("USE_LOCAL_POLICY_SOURCES", "false")
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         local_mock = MagicMock(return_value=[_SOURCE])
         mocks["load_local_policy_sources"] = local_mock
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             run()
 
         mocks["fetch_all_policy_sources"].assert_called_once()
@@ -297,12 +308,12 @@ class TestLocalSourcesFeatureFlag:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("USE_LOCAL_POLICY_SOURCES", raising=False)
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         local_mock = MagicMock(return_value=[_SOURCE])
         mocks["load_local_policy_sources"] = local_mock
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             run()
 
         mocks["fetch_all_policy_sources"].assert_called_once()
@@ -313,12 +324,12 @@ class TestLocalSourcesFeatureFlag:
     ) -> None:
         monkeypatch.setenv("USE_LOCAL_POLICY_SOURCES", "true")
         monkeypatch.setenv("LOCAL_POLICY_SOURCES_PATH", "/custom/path/sources.json")
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
         mocks = _build_mocks()
         local_mock = MagicMock(return_value=[_SOURCE])
         mocks["load_local_policy_sources"] = local_mock
-        with patch.multiple("app.datapipeline.src.main", **mocks):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **mocks):
             run()
 
         local_mock.assert_called_once_with("/custom/path/sources.json")
@@ -330,9 +341,9 @@ class TestDebugOutput:
     ) -> None:
         monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "true")
         monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
-        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **_build_mocks()):
             run()
 
         files = list(tmp_path.iterdir())
@@ -344,9 +355,9 @@ class TestDebugOutput:
     ) -> None:
         monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "true")
         monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
-        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **_build_mocks()):
             run()
 
         text = list(tmp_path.iterdir())[0].read_text(encoding="utf-8")
@@ -360,9 +371,9 @@ class TestDebugOutput:
     ) -> None:
         monkeypatch.setenv("SAVE_DEBUG_OUTPUT", "false")
         monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
-        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **_build_mocks()):
             run()
 
         assert list(tmp_path.iterdir()) == []
@@ -372,9 +383,9 @@ class TestDebugOutput:
     ) -> None:
         monkeypatch.delenv("SAVE_DEBUG_OUTPUT", raising=False)
         monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(tmp_path))
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
-        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **_build_mocks()):
             run()
 
         assert list(tmp_path.iterdir()) == []
@@ -387,9 +398,9 @@ class TestDebugOutput:
         bad_dir = tmp_path / "blocked.txt"
         bad_dir.write_text("I am a file, not a dir")
         monkeypatch.setenv("DEBUG_OUTPUT_DIR", str(bad_dir / "subdir"))
-        from app.datapipeline.src.main import run
+        from app.datapipeline.src.entrypoints.main import run
 
-        with patch.multiple("app.datapipeline.src.main", **_build_mocks()):
+        with patch.multiple("app.datapipeline.src.entrypoints.main", **_build_mocks()):
             summary = run()
 
         assert summary["processed"] == 1  # pipeline completed despite write error

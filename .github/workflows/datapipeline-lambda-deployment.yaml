@@ -1,0 +1,118 @@
+name: Deploy Datapipeline Lambda Function
+
+on:
+  workflow_dispatch:
+    inputs:
+      function_name:
+        description: "Lambda function name to deploy"
+        required: false
+        default: "pocldnaia-KB"
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/datapipeline/**'
+      - '.github/workflows/datapipeline-lambda-deployment.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'app/datapipeline/**'
+      - '.github/workflows/datapipeline-lambda-deployment.yaml'
+
+jobs:
+  deploy:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: eu-west-2
+      LAMBDA_FUNCTION_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.function_name || 'pocldnaia-KB' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build deployment package
+        run: |
+          cd app/datapipeline
+          
+          # Install runtime dependencies with Lambda-compatible wheels
+          pip install -r requirements.txt \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --implementation cp \
+            --only-binary=:all: \
+            --target package/
+
+          # Copy application source (preserves package structure)
+          cp -r src/* package/
+
+          # Create deployment zip from package root
+          cd package && zip -r ../datapipeline-lambda.zip . && cd ..
+          
+          # Verify structure
+          echo "=== Package structure ===" 
+          unzip -l datapipeline-lambda.zip | grep -E "entrypoints|adapters|domain|prompts|utils_pkg|__init__" | head -20
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda function code
+        run: |
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --zip-file fileb://app/datapipeline/datapipeline-lambda.zip \
+            --architectures x86_64 \
+            --region "$AWS_REGION"
+
+      - name: Wait for code update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Update Lambda configuration
+        run: |
+          aws lambda update-function-configuration \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --handler entrypoints.lambda_function.lambda_handler \
+            --runtime python3.12 \
+            --timeout 900 \
+            --memory-size 2048 \
+            --environment "Variables={
+              DB_HOST=${{ secrets.DATAPIPELINE_DB_HOST }},
+              DB_PORT=${{ secrets.DATAPIPELINE_DB_PORT }},
+              DB_NAME=${{ secrets.DATAPIPELINE_DB_NAME }},
+              DB_USER=${{ secrets.DATAPIPELINE_DB_USER }},
+              DB_PASSWORD=${{ secrets.DATAPIPELINE_DB_PASSWORD }},
+              DB_SCHEMA=${{ secrets.DATAPIPELINE_DB_SCHEMA }},
+              SHAREPOINT_TENANT_ID=${{ secrets.SHAREPOINT_TENANT_ID }},
+              SHAREPOINT_CLIENT_ID=${{ secrets.SHAREPOINT_CLIENT_ID }},
+              SHAREPOINT_CLIENT_SECRET=${{ secrets.SHAREPOINT_CLIENT_SECRET }},
+              AWS_DEFAULT_REGION=${{ env.AWS_REGION }},
+              MODEL_ID=${{ secrets.DATAPIPELINE_MODEL_ID }}
+            }" \
+            --region "$AWS_REGION"
+
+      - name: Verify deployment target and code hash
+        run: |
+          echo "=== AWS target identity ==="
+          aws sts get-caller-identity | jq '{Account, Arn}'
+          echo "=== Lambda code/config summary ==="
+          aws lambda get-function-configuration \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION" | jq '{FunctionName, FunctionArn, LastModified, Version, CodeSha256, Handler, Runtime, MemorySize, Timeout}'
+
+      - name: Verify deployment
+        run: |
+          echo "=== Lambda function updated ==="
+          aws lambda get-function-configuration \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION" | jq '.Handler, .Runtime, .MemorySize, .Timeout'

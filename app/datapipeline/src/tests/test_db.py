@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 
-from app.datapipeline.src.db import (
+from app.datapipeline.src.adapters.db import (
     delete_policy_document_by_url,
     delete_questions_for_doc,
     fetch_all_policy_sources,
@@ -18,7 +18,7 @@ from app.datapipeline.src.db import (
     insert_questions,
     load_local_policy_sources,
 )
-from app.datapipeline.src.schemas import ExtractedQuestion, PolicySource
+from app.datapipeline.src.domain.schemas import ExtractedQuestion, PolicySource
 
 
 def _make_cursor(rows: list[dict] | dict | None = None) -> MagicMock:
