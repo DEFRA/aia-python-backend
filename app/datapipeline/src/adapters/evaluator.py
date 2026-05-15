@@ -4,14 +4,13 @@ import json
 import logging
 from pathlib import Path
 
-import anthropic
 from anthropic import Anthropic, AnthropicBedrock
 
-from schemas import ExtractedQuestion
+from ..domain.schemas import ExtractedQuestion
 
 logger = logging.getLogger(__name__)
 
-_PROMPTS_DIR = Path(__file__).resolve().parent
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
 def _load_prompt(name: str) -> str:
@@ -83,11 +82,11 @@ class QuestionExtractor:
         # Bedrock model IDs
         "anthropic.claude-3-7-sonnet-20250219-v1:0": {"input": 3.00, "output": 15.00},
         "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00, "output": 15.00},
-        "anthropic.claude-3-5-haiku-20241022-v1:0":  {"input": 0.80, "output":  4.00},
+        "anthropic.claude-3-5-haiku-20241022-v1:0": {"input": 0.80, "output": 4.00},
         # Direct Anthropic API model IDs
-        "claude-3-7-sonnet-20250219":  {"input": 3.00, "output": 15.00},
-        "claude-3-5-sonnet-20241022":  {"input": 3.00, "output": 15.00},
-        "claude-3-5-haiku-20241022":   {"input": 0.80, "output":  4.00},
+        "claude-3-7-sonnet-20250219": {"input": 3.00, "output": 15.00},
+        "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+        "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
     }
 
     def _log_usage(self, policy_url: str, usage: object) -> None:
@@ -95,7 +94,9 @@ class QuestionExtractor:
         input_tokens: int = getattr(usage, "input_tokens", 0)
         output_tokens: int = getattr(usage, "output_tokens", 0)
         rates = self._PRICING.get(self._model_id, {"input": 0.0, "output": 0.0})
-        cost = (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
+        cost = (
+            input_tokens * rates["input"] + output_tokens * rates["output"]
+        ) / 1_000_000
         logger.info(
             "LLM usage  url=%s  input_tokens=%d  output_tokens=%d  "
             "total_tokens=%d  estimated_cost=$%.6f",
@@ -150,7 +151,9 @@ class QuestionExtractor:
         input_tokens: int = getattr(response.usage, "input_tokens", 0)
         output_tokens: int = getattr(response.usage, "output_tokens", 0)
         rates = self._PRICING.get(self._model_id, {"input": 0.0, "output": 0.0})
-        cost = (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
+        cost = (
+            input_tokens * rates["input"] + output_tokens * rates["output"]
+        ) / 1_000_000
         usage = {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

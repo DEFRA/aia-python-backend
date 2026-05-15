@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.datapipeline.src.evaluator import QuestionExtractor, _strip_fences
-from app.datapipeline.src.schemas import ExtractedQuestion
+from app.datapipeline.src.adapters.evaluator import QuestionExtractor, _strip_fences
+from app.datapipeline.src.domain.schemas import ExtractedQuestion
 
 _VALID_JSON = json.dumps(
     [
@@ -59,7 +59,7 @@ def _make_llm_response(text: str) -> MagicMock:
 
 
 class TestQuestionExtractorExtract:
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_returns_extracted_questions(self, mock_bedrock_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_bedrock_cls.return_value = mock_client
@@ -88,7 +88,7 @@ class TestQuestionExtractorExtract:
         assert usage["output_tokens"] == 5
         assert usage["total_tokens"] == 15
 
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_handles_json_fences_in_response(self, mock_bedrock_cls: MagicMock) -> None:
         fenced = f"```json\n{_VALID_JSON}\n```"
         mock_client = MagicMock()
@@ -100,7 +100,7 @@ class TestQuestionExtractorExtract:
 
         assert len(questions) == 1
 
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_raises_on_invalid_json(self, mock_bedrock_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_bedrock_cls.return_value = mock_client
@@ -110,7 +110,7 @@ class TestQuestionExtractorExtract:
         with pytest.raises(ValueError, match="invalid JSON"):
             extractor.extract(_POLICY_URL, "content", "security")
 
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_raises_when_response_is_object_not_array(
         self, mock_bedrock_cls: MagicMock
     ) -> None:
@@ -124,7 +124,7 @@ class TestQuestionExtractorExtract:
         with pytest.raises(ValueError, match="Expected a JSON array"):
             extractor.extract(_POLICY_URL, "content", "security")
 
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_calls_llm_with_temperature_zero(self, mock_bedrock_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_bedrock_cls.return_value = mock_client
@@ -136,7 +136,7 @@ class TestQuestionExtractorExtract:
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["temperature"] == 0.0
 
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_content_truncated_to_8000_chars(self, mock_bedrock_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_bedrock_cls.return_value = mock_client
@@ -151,7 +151,7 @@ class TestQuestionExtractorExtract:
         assert "x" * 8001 not in user_message
         assert "x" * 8000 in user_message
 
-    @patch("app.datapipeline.src.evaluator.AnthropicBedrock")
+    @patch("app.datapipeline.src.adapters.evaluator.AnthropicBedrock")
     def test_category_hint_included_in_prompt(
         self, mock_bedrock_cls: MagicMock
     ) -> None:

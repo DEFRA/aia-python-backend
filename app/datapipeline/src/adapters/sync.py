@@ -5,7 +5,7 @@ import psycopg2
 import psycopg2.extensions
 from datetime import datetime
 from psycopg2.extras import RealDictCursor
-from utils import url_to_hash
+from ..utils_pkg.utils import url_to_hash
 
 logger = logging.getLogger(__name__)
 

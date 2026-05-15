@@ -37,31 +37,63 @@ app/datapipeline/
 │   └── policy_sources.json          # Local policy source list (feature-flag mode)
 ├── debug/                           # Debug output files (git-ignored, SAVE_DEBUG_OUTPUT=true)
 │   └── .gitignore
-├── prompts/
-│   └── policy_evaluation_prompt.md  # LLM system prompt (edit without touching Python)
+├── db/
+│   └── init.sql                     # Database schema DDL
 ├── src/
 │   ├── __init__.py
-│   ├── db.py                        # fetch_policy_sources, load_local_policy_sources,
-│   │                                #   insert_policy_document, delete_questions_for_doc,
-│   │                                #   insert_questions
-│   ├── evaluator.py                 # QuestionExtractor — calls Anthropic Bedrock
-│   ├── main.py                      # Pipeline orchestrator (run entry point)
-│   ├── schemas.py                   # PolicySource, ExtractedQuestion, SyncRecord
-│   ├── sharepoint.py                # SharePointClient — Microsoft Graph API
-│   ├── sync.py                      # Change detection (get/upsert policy_document_sync)
-│   ├── utils.py                     # url_to_hash, page_name_from_url, new_uuid
-│   ├── lambda_function.py           # Lambda handler — thin wrapper around main.run()
+│   ├── connection_test.py           # Connection validation script
+│   │
+│   ├── entrypoints/                 # Lambda handler & CLI orchestrator
+│   │   ├── __init__.py
+│   │   ├── main.py                  # Pipeline orchestrator (run entry point)
+│   │   └── lambda_function.py       # Lambda handler — delegates to main.run()
+│   │
+│   ├── adapters/                    # External system integrations
+│   │   ├── __init__.py
+│   │   ├── db.py                    # PostgreSQL data access (fetch, insert, delete)
+│   │   ├── sharepoint.py            # Microsoft Graph API (SharePoint client)
+│   │   ├── evaluator.py             # LLM question extraction (Bedrock/Anthropic)
+│   │   └── sync.py                  # Change detection (last_modified, content_size)
+│   │
+│   ├── domain/                      # Pure Pydantic data models
+│   │   ├── __init__.py
+│   │   └── schemas.py               # PolicySource, ExtractedQuestion, SyncRecord
+│   │
+│   ├── prompts/                     # Centralized LLM system prompts
+│   │   ├── __init__.py
+│   │   └── policy_evaluation_prompt.md  # LLM instructions (edit without Python)
+│   │
+│   ├── utils_pkg/                   # Shared utility functions
+│   │   ├── __init__.py
+│   │   └── utils.py                 # url_to_hash, page_name_from_url, new_uuid, now_utc
+│   │
+│   ├── services/                    # Reserved for business logic (currently empty)
+│   │   └── __init__.py
+│   │
 │   └── tests/
+│       ├── __init__.py
 │       ├── test_db.py
 │       ├── test_evaluator.py
 │       ├── test_main.py
 │       ├── test_sharepoint.py
 │       ├── test_sync.py
 │       └── test_utils.py
-├── requirements.txt                     # Runtime dependencies (bundled into Lambda zip)
-├── requirements-dev.txt                 # Dev/test dependencies (not bundled)
-└── Readme.md
+│
+├── requirements.txt                 # Runtime dependencies (bundled into Lambda zip)
+├── requirements-dev.txt             # Dev/test dependencies (not bundled)
+├── .github/
+│   └── workflows/                   # CI/CD pipelines
+│       └── (at repo root — not in this directory)
+└── README.md
 ```
+
+**Architecture Pattern:** Layered hexagonal design separating concerns:
+- **entrypoints** — orchestration boundary (Lambda, CLI)
+- **adapters** — external systems (PostgreSQL, SharePoint, Bedrock, sync state)
+- **domain** — pure data models
+- **prompts** — LLM configuration (externalized for editability)
+- **utils_pkg** — reusable utilities
+- **services** — business logic layer (reserved for future use)
 
 ---
 
@@ -151,7 +183,7 @@ For each LLM call, DataPipeline captures:
 - `total_tokens`
 - `estimated_cost_usd`
 
-Pricing is model-aware and defined in `app/datapipeline/src/evaluator.py` (`QuestionExtractor._PRICING`) as USD per 1M tokens.
+Pricing is model-aware and defined in `adapters/evaluator.py` (`QuestionExtractor._PRICING`) as USD per 1M tokens.
 
 Cost formula used in DataPipeline:
 
@@ -318,6 +350,7 @@ policy_documents ─────────────────────
 | `DB_NAME` | Database name |
 | `DB_USER` | Database user |
 | `DB_PASSWORD` | Database password |
+| `DB_SCHEMA` | PostgreSQL schema name (default: `data_pipeline`) |
 | `SHAREPOINT_TENANT_ID` | Azure AD tenant ID |
 | `SHAREPOINT_CLIENT_ID` | Azure AD app client ID |
 | `SHAREPOINT_CLIENT_SECRET` | Azure AD app client secret |
@@ -328,13 +361,15 @@ policy_documents ─────────────────────
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `LLM_PROVIDER` | `bedrock` | LLM provider (`bedrock` or `anthropic` direct API) |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key (used only when `LLM_PROVIDER=anthropic`) |
 | `AWS_ACCESS_KEY_ID` | — | AWS access key (not needed when using IAM role) |
 | `AWS_SECRET_ACCESS_KEY` | — | AWS secret key (not needed when using IAM role) |
 | `AWS_SESSION_TOKEN` | — | AWS session token (temporary credentials) |
 | `USE_LOCAL_POLICY_SOURCES` | `false` | Set to `true` to load policy URLs from the bundled JSON file instead of the database |
-| `LOCAL_POLICY_SOURCES_PATH` | `data/policy_sources.json` | Override the local sources file path (used when `USE_LOCAL_POLICY_SOURCES=true`) |
+| `LOCAL_POLICY_SOURCES_PATH` | `../../data/policy_sources.json` | Override the local sources file path (used when `USE_LOCAL_POLICY_SOURCES=true`) |
 | `SAVE_DEBUG_OUTPUT` | `false` | Set to `true` to write a per-URL debug file containing the source URL, raw content, and extracted questions |
-| `DEBUG_OUTPUT_DIR` | `app/datapipeline/debug/` | Directory for debug files (used when `SAVE_DEBUG_OUTPUT=true`) |
+| `DEBUG_OUTPUT_DIR` | `../../debug/` | Directory for debug files (used when `SAVE_DEBUG_OUTPUT=true`) |
 
 ---
 
@@ -371,16 +406,16 @@ cp .env.example .env
 ./scripts/start-datapipeline-dev.sh
 
 # Run with database sources (default — requires Podman DB running)
-python -m app.datapipeline.src.main
+python -m app.datapipeline.src.entrypoints.main
 
 # Run with local sources file (no DB read for source list)
-USE_LOCAL_POLICY_SOURCES=true python -m app.datapipeline.src.main
+USE_LOCAL_POLICY_SOURCES=true python -m app.datapipeline.src.entrypoints.main
 
 # Run with debug output enabled — writes one .txt file per URL to app/datapipeline/debug/
-SAVE_DEBUG_OUTPUT=true python -m app.datapipeline.src.main
+SAVE_DEBUG_OUTPUT=true python -m app.datapipeline.src.entrypoints.main
 
 # Combine both flags (useful for local inspection without a live DB)
-USE_LOCAL_POLICY_SOURCES=true SAVE_DEBUG_OUTPUT=true python -m app.datapipeline.src.main
+USE_LOCAL_POLICY_SOURCES=true SAVE_DEBUG_OUTPUT=true python -m app.datapipeline.src.entrypoints.main
 
 # Stop / remove the container when done
 # Default container name is 'aiadocuments' (set DATAPIPELINE_CONTAINER to override)
@@ -391,33 +426,38 @@ podman rm   aiadocuments
 ## Running Tests
 
 ```bash
+# Run from repository root (aia-backend)
+cd /path/to/aia-backend
+
 pip install -r app/datapipeline/requirements-dev.txt
 
-pytest app/datapipeline/src/tests/ -v
-pytest app/datapipeline/src/tests/ --cov=app/datapipeline/src --cov-report=term-missing
+PYTHONPATH=. pytest app/datapipeline/src/tests/ -v
+PYTHONPATH=. pytest app/datapipeline/src/tests/ --cov=app.datapipeline.src --cov-report=term-missing
 ```
 
 ---
 
 ## Deploying to AWS Lambda
 
-The pipeline runs as a single Lambda function invoked by EventBridge Scheduler. The handler is `app.datapipeline.src.lambda_function.lambda_handler`, which delegates entirely to `main.run()` and returns `{"statusCode": 200, "body": {"processed": N, "skipped": N, "failed": N}}`.
+The pipeline runs as a single Lambda function invoked by EventBridge Scheduler. The handler is `entrypoints.lambda_function.lambda_handler`, which delegates entirely to `main.run()` and returns `{"statusCode": 200, "body": {"processed": N, "skipped": N, "failed": N}}`.
 
 ### Step 1 — Build the deployment zip
 
 The zip must contain both the application code and all runtime dependencies. Build on a Linux x86_64 environment (or use the `--platform` flag on macOS) so that `psycopg2-binary` ships the correct native library for Lambda's Amazon Linux runtime.
 
 ```bash
-# From the repo root
+# From the app/datapipeline directory
 
 # Install runtime deps into a staging directory
-pip install -r app/datapipeline/requirements.txt \
+pip install -r requirements.txt \
     --platform manylinux2014_x86_64 \
+    --python-version 3.12 \
+    --implementation cp \
     --only-binary=:all: \
     --target package/
 
-# Copy application source
-cp -r app/ package/app/
+# Copy application source (preserves package structure with __init__.py files)
+cp -r src/* package/
 
 # Zip everything
 cd package && zip -r ../datapipeline-lambda.zip . && cd ..
@@ -434,7 +474,7 @@ Upload `datapipeline-lambda.zip` to S3 or directly via the Lambda console / AWS 
 | Setting | Value |
 |---------|-------|
 | **Runtime** | Python 3.12 |
-| **Handler** | `app.datapipeline.src.lambda_function.lambda_handler` |
+| **Handler** | `entrypoints.lambda_function.lambda_handler` |
 | **Timeout** | `600` seconds (10 minutes) |
 | **Memory** | `512` MB |
 | **Architecture** | `x86_64` |
@@ -443,9 +483,10 @@ Upload `datapipeline-lambda.zip` to S3 or directly via the Lambda console / AWS 
 aws lambda create-function \
   --function-name aia-datapipeline \
   --runtime python3.12 \
-  --handler app.datapipeline.src.lambda_function.lambda_handler \
+  --handler entrypoints.lambda_function.lambda_handler \
   --timeout 600 \
   --memory-size 512 \
+  --architectures x86_64 \
   --role arn:aws:iam::<ACCOUNT_ID>:role/aia-datapipeline-role \
   --zip-file fileb://datapipeline-lambda.zip
 ```
@@ -463,6 +504,7 @@ Configure all required variables in the Lambda environment (console → Configur
 | `DB_NAME` | Database name |
 | `DB_USER` | Database user |
 | `DB_PASSWORD` | RDS password — store in Secrets Manager (see note below) |
+| `DB_SCHEMA` | Schema name (default: `data_pipeline`) |
 | `SHAREPOINT_TENANT_ID` | Azure AD → App registrations |
 | `SHAREPOINT_CLIENT_ID` | Azure AD → App registrations |
 | `SHAREPOINT_CLIENT_SECRET` | Azure AD → App registrations → Certificates & secrets |
@@ -563,6 +605,45 @@ Check CloudWatch Logs (`/aws/lambda/aia-datapipeline`) for per-URL progress and 
 
 ---
 
+## GitHub Actions CI/CD
+
+The datapipeline includes a GitHub Actions workflow for automated Lambda deployment on every push to `main` (only when datapipeline files change).
+
+**Workflow location:** `.github/workflows/datapipeline-lambda-deployment.yaml` (repo root)
+
+**What it does:**
+1. Installs Python 3.12 and all runtime dependencies
+2. Packages application code + dependencies into a zip file
+3. Verifies package structure includes all `__init__.py` files
+4. Uploads the zip to AWS Lambda
+5. Updates Lambda configuration (handler, timeout, memory, environment variables)
+6. Verifies deployment success
+
+**Triggered by:**
+- Push to `main` branch
+- Changes to `app/datapipeline/**` (any file in datapipeline directory)
+- Changes to `.github/workflows/datapipeline-lambda-deployment.yaml` (the workflow itself)
+
+**Secrets required (set in GitHub repository settings):**
+- `AWS_ACCESS_KEY_ID` — AWS access key
+- `AWS_SECRET_ACCESS_KEY` — AWS secret key
+- `AWS_SESSION_TOKEN` — Optional STS session token for temporary credentials
+- `DATAPIPELINE_DB_*` — Database credentials (HOST, PORT, NAME, USER, PASSWORD, SCHEMA)
+- `SHAREPOINT_*` — SharePoint credentials (TENANT_ID, CLIENT_ID, CLIENT_SECRET)
+- `DATAPIPELINE_MODEL_ID` — Model ID for Bedrock
+
+### Workflow Hardening (planned)
+
+To align CI/CD with the runtime guidance above ("Do not set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` in Lambda"), harden `.github/workflows/datapipeline-lambda-deployment.yaml` as follows:
+
+1. Keep AWS credentials only for the **GitHub runner** step (`aws-actions/configure-aws-credentials`) so the workflow can call AWS APIs.
+2. Stop injecting `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` into Lambda function environment variables during `update-function-configuration`.
+3. Let Lambda use its execution role for Bedrock and other AWS service access.
+
+This avoids expired session-token issues in runtime and reduces credential exposure in function configuration.
+
+---
+
 ## Key Design Decisions
 
 - **Category at document level** — category is a property of the policy source URL, not of individual questions. It is stored in `source_policy_docs.category`, denormalised into `policy_documents.category` at write time, and used to route assessment queries. There is no per-question category junction table.
@@ -575,4 +656,12 @@ Check CloudWatch Logs (`/aws/lambda/aia-datapipeline`) for per-URL progress and 
 - **Prompt in Markdown** — the LLM system prompt lives in `prompts/policy_evaluation_prompt.md` and is loaded at cold-start via `Path`, keeping it reviewable and editable outside Python code.
 - **Feature flag for source list** — `USE_LOCAL_POLICY_SOURCES=true` allows the pipeline to run in development or test environments without a populated `source_policy_docs` table.
 - **Debug output flag** — `SAVE_DEBUG_OUTPUT=true` writes a plain-text file per URL (source URL + raw content + questions JSON) to `app/datapipeline/debug/`. The write is best-effort and never blocks the pipeline. Files are git-ignored. Intended for local inspection and troubleshooting only — never enable in production.
+- **Layered hexagonal architecture** — code is organized by concern (adapters, domain, services, entrypoints) rather than by type (controllers, models, views). This enables easier testing, swapping implementations, and adding new LLM providers or data sources without touching core logic.
+- **Relative imports (Lambda-safe)** — all imports use Python relative imports (`from ..adapters import ...`), not repo-rooted paths. This ensures the code works both in local development and in Lambda's `/var/task` filesystem without needing environment-specific path manipulation.
 - **psycopg2 (sync)** — the Lambda uses synchronous psycopg2, appropriate for a single-threaded Lambda handler. The evaluation pipeline (ECS) uses asyncpg.
+
+---
+
+## Migration & Architecture Documentation
+
+For details on the code reorganization and layered architecture pattern, see [datapipeline-reorganization-summary.md](../docs/datapipeline-reorganization-summary.md) and [aws_event_driven_orchestration.md](../docs/aws_event_driven_orchestration.md).
