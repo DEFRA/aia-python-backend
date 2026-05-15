@@ -12,9 +12,15 @@ on:
     paths:
       - 'app/datapipeline/**'
       - '.github/workflows/datapipeline-lambda-deployment.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'app/datapipeline/**'
+      - '.github/workflows/datapipeline-lambda-deployment.yaml'
 
 jobs:
   deploy:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     env:
       AWS_REGION: eu-west-2
