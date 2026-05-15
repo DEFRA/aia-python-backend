@@ -96,7 +96,6 @@ jobs:
               SHAREPOINT_TENANT_ID=${{ secrets.SHAREPOINT_TENANT_ID }},
               SHAREPOINT_CLIENT_ID=${{ secrets.SHAREPOINT_CLIENT_ID }},
               SHAREPOINT_CLIENT_SECRET=${{ secrets.SHAREPOINT_CLIENT_SECRET }},
-              AWS_DEFAULT_REGION=${{ env.AWS_REGION }},
               MODEL_ID=${{ secrets.DATAPIPELINE_MODEL_ID }}
             }" \
             --region "$AWS_REGION"
