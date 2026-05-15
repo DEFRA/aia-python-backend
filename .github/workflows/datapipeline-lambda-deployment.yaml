@@ -60,6 +60,7 @@ jobs:
         run: |
           cd app/datapipeline
           # Publish new Lambda Layer with all requirements.txt dependencies
+          # Get the latest layer version if it exists
           LAYER_VERSION=$(aws lambda list-layer-versions \
             --layer-name "$LAYER_NAME" \
             --region "$AWS_REGION" \
