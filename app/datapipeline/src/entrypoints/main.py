@@ -140,10 +140,12 @@ def _get_db_connection() -> psycopg2.extensions.connection:
 
 
 def _build_sharepoint_client() -> SharePointClient:
+    ssl_verify = os.environ.get("SHAREPOINT_SSL_VERIFY", "true").lower() != "false"
     return SharePointClient(
         tenant_id=os.environ["SHAREPOINT_TENANT_ID"],
         client_id=os.environ["SHAREPOINT_CLIENT_ID"],
         client_secret=os.environ["SHAREPOINT_CLIENT_SECRET"],
+        ssl_verify=ssl_verify,
     )
 
 
