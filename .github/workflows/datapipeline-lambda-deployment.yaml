@@ -35,6 +35,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Build Lambda Layer with certifi
         run: |
           cd app/datapipeline
@@ -55,14 +63,12 @@ jobs:
       - name: Publish Lambda Layer
         run: |
           cd app/datapipeline
-          
           # Get the latest layer version if it exists
           LAYER_VERSION=$(aws lambda list-layer-versions \
             --layer-name "$LAYER_NAME" \
             --region "$AWS_REGION" \
             --query 'LayerVersions[0].Version' \
             --output text 2>/dev/null || echo "0")
-          
           # Publish new layer version
           LAYER_ARN=$(aws lambda publish-layer-version \
             --layer-name "$LAYER_NAME" \
@@ -71,7 +77,6 @@ jobs:
             --region "$AWS_REGION" \
             --query 'LayerVersionArn' \
             --output text)
-          
           echo "Published layer: $LAYER_ARN"
           echo "LAYER_ARN=$LAYER_ARN" >> $GITHUB_ENV
 
