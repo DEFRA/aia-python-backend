@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 
 import msal
 import requests
+import urllib3
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
@@ -127,11 +128,19 @@ class SharePointClient:
         tenant_id: str,
         client_id: str,
         client_secret: str,
+        ssl_verify: bool = True,
     ) -> None:
         self._tenant_id = tenant_id
         self._client_id = client_id
         self._client_secret = client_secret
         self._authority = f"https://login.microsoftonline.com/{tenant_id}"
+        self._ssl_verify = ssl_verify
+        if not ssl_verify:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            logger.warning(
+                "SSL verification disabled for SharePoint redirect requests "
+                "(SHAREPOINT_SSL_VERIFY=false). Graph API calls remain verified."
+            )
 
     def _get_access_token(self) -> str:
         app = msal.ConfidentialClientApplication(
@@ -148,7 +157,7 @@ class SharePointClient:
 
     def _get(self, url: str, headers: dict, label: str) -> dict:
         logger.info("Graph API: %s", label)
-        response = requests.get(url, headers=headers, timeout=60)
+        response = requests.get(url, headers=headers, timeout=60, verify=True)
         if response.status_code != 200:
             raise requests.exceptions.RequestException(
                 f"Graph API error {response.status_code} [{label}]: {response.text}"
@@ -156,8 +165,28 @@ class SharePointClient:
         return response.json()
 
     def _get_bytes(self, url: str, headers: dict, label: str) -> bytes:
+        """Fetch binary content and apply ssl_verify only to redirect targets.
+
+        Graph /content endpoints typically return a redirect to the SharePoint
+        download URL. Keep strict TLS verification for Graph, and apply
+        SHAREPOINT_SSL_VERIFY only on the redirected hop.
+        """
         logger.info("Graph API: %s", label)
-        response = requests.get(url, headers=headers, timeout=60)
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=60,
+            verify=True,
+            allow_redirects=False,
+        )
+        if response.status_code in (301, 302, 303, 307, 308):
+            redirect_url = response.headers.get("Location", "")
+            response = requests.get(
+                redirect_url,
+                headers=headers,
+                timeout=60,
+                verify=self._ssl_verify,
+            )
         if response.status_code != 200:
             raise requests.exceptions.RequestException(
                 f"Graph API error {response.status_code} [{label}]: {response.text}"
