@@ -3,9 +3,13 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.core.config import config
 from app.core.messages import messages
+from app.repositories.cost_usage_repository import CostUsageRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.policy_document_repository import PolicyDocumentRepository
 from app.repositories.user_repository import UserRepository
+from app.services.cost_usage_service import CostUsageService
 from app.services.orchestrator_service import OrchestratorService
+from app.services.policy_document_service import PolicyDocumentService
 from app.services.s3_service import S3Service
 from app.services.sqs_service import SQSService
 from app.services.upload_service import UploadService
@@ -17,7 +21,26 @@ from app.utils.postgres import get_db_pool
 logger = get_logger(__name__)
 
 
-async def verify_auth(request: Request) -> dict:
+def get_app_context() -> AppContext:
+    return AppContext()
+
+
+def get_document_repository(
+    pool: asyncpg.Pool = Depends(get_db_pool),
+    context: AppContext = Depends(get_app_context),
+) -> DocumentRepository:
+    return DocumentRepository(pool, context)
+
+
+def get_user_repository(
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> UserRepository:
+    return UserRepository(pool)
+
+
+async def verify_auth(
+    request: Request, user_repo: UserRepository = Depends(get_user_repository)
+) -> dict:
     auth_header = request.headers.get("Authorization", "")
     sso_token = None
     if auth_header.lower().startswith("bearer "):
@@ -43,28 +66,44 @@ async def verify_auth(request: Request) -> dict:
             "Identity mismatch: header=%s token=%s", claimed_user_id, verified_user_id
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail=messages.AUTH_IDENTITY_MISMATCH,
+        )
+
+    # Verify user exists in database
+    user = await user_repo.get_user_by_id(verified_user_id)
+    if user is None:
+        logger.warning("Unauthorized: User %s not found in database", verified_user_id)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=messages.AUTH_USER_NOT_FOUND,
         )
 
     return {"user_id": verified_user_id}
 
 
-def get_app_context() -> AppContext:
-    return AppContext()
-
-
-def get_document_repository(
+def get_cost_usage_repository(
     pool: asyncpg.Pool = Depends(get_db_pool),
-    context: AppContext = Depends(get_app_context),
-) -> DocumentRepository:
-    return DocumentRepository(pool, context)
+) -> CostUsageRepository:
+    return CostUsageRepository(pool)
 
 
-def get_user_repository(
+def get_cost_usage_service(
+    repo: CostUsageRepository = Depends(get_cost_usage_repository),
+) -> CostUsageService:
+    return CostUsageService(repo)
+
+
+def get_policy_document_repository(
     pool: asyncpg.Pool = Depends(get_db_pool),
-) -> UserRepository:
-    return UserRepository(pool)
+) -> PolicyDocumentRepository:
+    return PolicyDocumentRepository(pool)
+
+
+def get_policy_document_service(
+    repo: PolicyDocumentRepository = Depends(get_policy_document_repository),
+) -> PolicyDocumentService:
+    return PolicyDocumentService(repo)
 
 
 def get_s3_service() -> S3Service:

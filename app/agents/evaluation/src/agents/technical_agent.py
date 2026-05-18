@@ -21,7 +21,7 @@ from src.agents.schemas import (
     Summary,
 )
 from src.config import TechnicalAgentConfig
-from src.utils.helpers import strip_code_fences
+from src.utils.helpers import parse_llm_json
 from src.utils.retry import agent_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -91,8 +91,7 @@ class TechnicalAgent:
         raw_text: str = cast(TextBlock, response.content[0]).text
 
         try:
-            cleaned: str = strip_code_fences(raw_text)
-            payload: dict[str, object] = json.loads(cleaned)
+            payload: dict[str, object] = parse_llm_json(raw_text)
         except json.JSONDecodeError:
             # Transient: tenacity will retry. Log raw response for debugging.
             logger.error("Failed to parse LLM response as JSON. raw_text=%.200s", raw_text)
@@ -114,4 +113,4 @@ class TechnicalAgent:
             meta.output_tokens,
         )
 
-        return AgentLLMOutput(rows=raw_rows, summary=summary_obj)
+        return AgentLLMOutput(rows=raw_rows, summary=summary_obj, llm_meta=meta)

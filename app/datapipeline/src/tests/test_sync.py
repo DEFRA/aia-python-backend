@@ -4,8 +4,12 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 
-from app.datapipeline.src.sync import get_sync_record, is_changed, upsert_sync_record
-from app.datapipeline.src.utils import url_to_hash
+from app.datapipeline.src.adapters.sync import (
+    get_sync_record,
+    is_changed,
+    upsert_sync_record,
+)
+from app.datapipeline.src.utils_pkg.utils import url_to_hash
 
 _URL = "https://defra.sharepoint.com/teams/T1/SitePages/Policy.aspx"
 _TS = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)

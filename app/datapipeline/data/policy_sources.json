@@ -4,63 +4,71 @@
     "url": "https://defra.sharepoint.com/teams/Team3221/SitePages/Strategic-Architecture-Principles.aspx",
     "filename": "Strategic Architecture Principles",
     "category": "technical",
-    "type": "page",
-    "isactive": true
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-01T12:00:00Z"
   },
   {
     "url_id": 2,
     "url": "https://defra.sharepoint.com/teams/Team3221/Published%20Architecture%20Documentation/Forms/AllItems.aspx",
     "filename": "Defra Architecture - Published Guardrails - All Documents",
     "category": "technical",
-    "type": "page",
-    "isactive": true
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-02T15:30:00Z"
   },
   {
-    "url_id": 3,
-    "url": "https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/Tools%20Authority/Tools%20Radar/20260217%20DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf",
+    "url_id": 3,     
+    "url": "https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/Tools%20Authority/Tools%20Radar/DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf",
     "filename": "DDTS Tools Authority Supplier Radar",
     "category": "technical",
-    "type": "pdf",
-    "isactive": false
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-03T09:45:00Z"
   },
   {
     "url_id": 4,
     "url": "https://defra.sharepoint.com/sites/def-ddts-portfoliohub/SitePages/Secure-by-Design.aspx",
     "filename": "Secure by Design",
     "category": "security",
-    "type": "page",
-    "isactive": true
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-04T14:20:00Z"
   },
   {
     "url_id": 5,
-    "url": "https://defra.sharepoint.com/teams/Team3221/Soln%20and%20App%20Architecture/Forms/AllItems.aspx",
+    "url": "https://defra.sharepoint.com/:f:/r/teams/Team3221/Soln%20and%20App%20Architecture/Solution%20Design%20Authority",
     "filename": "Defra Architecture - Delivery Architecture Team - Solution Design Authority",
     "category": "technical",
-    "type": "page",
-    "isactive": false
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-05T11:10:00Z"
   },
   {
     "url_id": 6,
     "url": "https://defra.sharepoint.com/sites/Community3868/SitePages/Integration.aspx",
     "filename": "GIO Integration",
     "category": "technical",
-    "type": "page",
-    "isactive": true
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-06T16:00:00Z"
   },
   {
     "url_id": 7,
     "url": "https://defra.sharepoint.com/sites/Community448/SitePages/CDAP-The-Common-Data-Analytics-Platform.aspx",
     "filename": "The Data Analytics and Science Hub (DASH) Platform",
     "category": "technical",
-    "type": "page",
-    "isactive": true
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-07T10:30:00Z"
   },
   {
     "url_id": 8,
     "url": "https://defra.sharepoint.com/sites/Community3868/SitePages/Reporting.aspx",
     "filename": "GIO Data Platform",
     "category": "technical",
-    "type": "page",
-    "isactive": true
+    "source": "SharePoint",
+    "isactive": true,
+    "updatedAt": "2026-05-08T13:15:00Z"
   }
 ]

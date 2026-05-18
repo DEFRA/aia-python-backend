@@ -1,7 +1,7 @@
 import json
 import logging
 
-from app.datapipeline.src.main import run
+from .main import run
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

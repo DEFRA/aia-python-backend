@@ -3,16 +3,21 @@ from __future__ import annotations
 import logging
 import re
 import time
+from base64 import urlsafe_b64encode
 from datetime import datetime, timezone
+from io import BytesIO
 from urllib.parse import unquote, urlparse
 
 import msal
 import requests
+import urllib3
+from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
+_PDF_SHARE_PATH_RE = re.compile(r"^/:b:/r/", re.IGNORECASE)
 _HTML_ENTITIES = {
     "&nbsp;": " ",
     "&amp;": "&",
@@ -64,6 +69,22 @@ def _extract_page_name(url: str) -> str | None:
     return None
 
 
+def _is_pdf_share_url(url: str) -> bool:
+    """Return True when URL looks like a SharePoint shared PDF link (/:b:/r/...pdf)."""
+    parsed = urlparse(url)
+    return bool(
+        _PDF_SHARE_PATH_RE.match(parsed.path or "")
+        and parsed.path.lower().endswith(".pdf")
+    )
+
+
+def _to_graph_share_id(url: str) -> str:
+    """Convert a share URL to Graph share id token (`u!<base64url>`)."""
+    raw = url.encode("utf-8")
+    encoded = urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return f"u!{encoded}"
+
+
 def _html_to_text(html: str) -> str:
     """Strip HTML tags and decode common entities to plain text."""
     html = re.sub(
@@ -107,11 +128,19 @@ class SharePointClient:
         tenant_id: str,
         client_id: str,
         client_secret: str,
+        ssl_verify: bool = True,
     ) -> None:
         self._tenant_id = tenant_id
         self._client_id = client_id
         self._client_secret = client_secret
         self._authority = f"https://login.microsoftonline.com/{tenant_id}"
+        self._ssl_verify = ssl_verify
+        if not ssl_verify:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            logger.warning(
+                "SSL verification disabled for SharePoint redirect requests "
+                "(SHAREPOINT_SSL_VERIFY=false). Graph API calls remain verified."
+            )
 
     def _get_access_token(self) -> str:
         app = msal.ConfidentialClientApplication(
@@ -128,12 +157,41 @@ class SharePointClient:
 
     def _get(self, url: str, headers: dict, label: str) -> dict:
         logger.info("Graph API: %s", label)
-        response = requests.get(url, headers=headers, timeout=60)
+        response = requests.get(url, headers=headers, timeout=60, verify=True)
         if response.status_code != 200:
             raise requests.exceptions.RequestException(
                 f"Graph API error {response.status_code} [{label}]: {response.text}"
             )
         return response.json()
+
+    def _get_bytes(self, url: str, headers: dict, label: str) -> bytes:
+        """Fetch binary content and apply ssl_verify only to redirect targets.
+
+        Graph /content endpoints typically return a redirect to the SharePoint
+        download URL. Keep strict TLS verification for Graph, and apply
+        SHAREPOINT_SSL_VERIFY only on the redirected hop.
+        """
+        logger.info("Graph API: %s", label)
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=60,
+            verify=True,
+            allow_redirects=False,
+        )
+        if response.status_code in (301, 302, 303, 307, 308):
+            redirect_url = response.headers.get("Location", "")
+            response = requests.get(
+                redirect_url,
+                headers=headers,
+                timeout=60,
+                verify=self._ssl_verify,
+            )
+        if response.status_code != 200:
+            raise requests.exceptions.RequestException(
+                f"Graph API error {response.status_code} [{label}]: {response.text}"
+            )
+        return response.content
 
     @staticmethod
     def _is_client_error(exc: requests.exceptions.RequestException) -> bool:
@@ -238,6 +296,12 @@ class SharePointClient:
         )
         site_id = site_data["id"]
 
+        # Shared PDF URL path (/:b:/r/...pdf) — fetch file bytes and extract text.
+        if _is_pdf_share_url(url):
+            text_content, last_modified = self._fetch_pdf_share_content(url, headers)
+            if text_content:
+                return text_content, last_modified
+
         # Step 2 — fetch actual page content for SitePages URLs
         page_name = _extract_page_name(url)
         if page_name:
@@ -264,6 +328,45 @@ class SharePointClient:
             "Fetched site metadata (fallback) length=%d last_modified=%s",
             len(text_content),
             last_modified,
+        )
+        return text_content, last_modified
+
+    def _fetch_pdf_share_content(
+        self, url: str, headers: dict
+    ) -> tuple[str, datetime | None]:
+        """Fetch and extract text from SharePoint shared PDF URL."""
+        share_id = _to_graph_share_id(url)
+        item_url = f"https://graph.microsoft.com/v1.0/shares/{share_id}/driveItem"
+        content_url = f"{item_url}/content"
+
+        try:
+            item = self._get(item_url, headers, f"driveItem metadata {url}")
+            pdf_bytes = self._get_bytes(
+                content_url, headers, f"driveItem content {url}"
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning("PDF share fetch failed url=%s: %s", url, exc)
+            return "", None
+
+        text_parts: list[str] = []
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            for page in reader.pages:
+                text = page.extract_text() or ""
+                text = _WHITESPACE_RE.sub(" ", text).strip()
+                if text:
+                    text_parts.append(text)
+        except Exception as exc:  # pragma: no cover - parser/library exceptions vary
+            logger.warning("PDF parse failed url=%s: %s", url, exc)
+            return "", _parse_timestamp(item.get("lastModifiedDateTime"))
+
+        text_content = "\n\n".join(text_parts).strip()
+        last_modified = _parse_timestamp(item.get("lastModifiedDateTime"))
+        logger.info(
+            "Fetched PDF content length=%d last_modified=%s url=%s",
+            len(text_content),
+            last_modified,
+            url,
         )
         return text_content, last_modified
 

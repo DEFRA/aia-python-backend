@@ -1,7 +1,7 @@
 # AIA CoreBackend — API Reference
 
-**Version:** 1.0 (POC)  
-**Last Updated:** 2026-04-27  
+**Version:** 1.1 (POC)  
+**Last Updated:** 2026-05-12  
 **Audience:** Frontend Development Team
 
 ---
@@ -51,12 +51,14 @@ All error responses follow FastAPI's standard format:
 
 | Code | When used |
 |------|-----------|
+| `204` | Successful DELETE (no content) |
 | `200` | Successful GET |
 | `202` | Upload accepted — processing started asynchronously |
 | `400` | Bad request (duplicate file, missing field) |
 | `401` | Missing or invalid token |
 | `403` | Token valid but `x-user-id` does not match token `sub` |
 | `404` | Document not found, or not owned by this user |
+| `422` | Validation error — query/path parameter out of range |
 | `500` | Unexpected server error |
 
 ---
@@ -261,7 +263,109 @@ Returns the full document record including the AI assessment result. Call this a
 
 ---
 
-### 6. Get Current User
+### 6. Get Cost Usage (paginated)
+
+```
+GET /api/v1/cost-usage?page=1&limit=10
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Returns paginated per-document token consumption and cost for every document the user has uploaded that has at least one cost-usage row recorded. Pagination is applied at the **document** level — each entry in `costUsage[]` is one document, and its `agents[]` array is never split across pages. The `summary` block aggregates totals across the user's entire result set, not just the current page.
+
+**Query parameters:**
+
+| Param | Type | Default | Range | Description |
+|-------|------|---------|-------|-------------|
+| `page` | int | `1` | `≥ 1` | 1-based page number |
+| `limit` | int | `10` | `1`–`100` | Documents per page |
+
+`page=0` or `limit > 100` returns `422 Unprocessable Entity`.
+
+**Response `200`:**
+```json
+{
+  "costUsage": [
+    {
+      "doc_id": "11111111-1111-1111-1111-111111111111",
+      "file_name": "Architecture_Review_Q1_2026.docx",
+      "uploadedAt": "2026-05-01T10:30:00Z",
+      "agents": [
+        { "name": "Security",     "inputTokens": 12500, "outputTokens": 8200 },
+        { "name": "Technology",   "inputTokens":  9800, "outputTokens": 6400 },
+        { "name": "Architecture", "inputTokens": 11200, "outputTokens": 7800 }
+      ],
+      "totalCost": 0.4365,
+      "currency": "USD"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 4,
+    "totalPages": 1,
+    "hasNext": false,
+    "hasPrevious": false,
+    "nextPage": null,
+    "previousPage": null
+  },
+  "summary": {
+    "totalCost": 1.2345,
+    "currency": "USD",
+    "totalDocuments": 4,
+    "totalInputTokens": 109000,
+    "totalOutputTokens": 72500,
+    "totalTokens": 181500
+  }
+}
+```
+
+**Field notes:**
+- `totalCost` per document is the sum of `total_cost_usd` across that document's agent rows in the database.
+- `currency` is currently fixed to `USD`; promoted to a column when multi-currency is introduced.
+- `summary.totalDocuments` counts only documents that have at least one cost-usage row.
+
+---
+
+### 7. Get Cost Usage for a Single Document
+
+```
+GET /api/v1/cost-usage/{documentId}
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+**Path parameter:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `documentId` | UUID string | Document identifier |
+
+**Response `200`:**
+```json
+{
+  "doc_id": "11111111-1111-1111-1111-111111111111",
+  "file_name": "Architecture_Review_Q1_2026.docx",
+  "uploadedAt": "2026-05-01T10:30:00Z",
+  "agents": [
+    { "name": "Security",     "inputTokens": 12500, "outputTokens": 8200 },
+    { "name": "Technology",   "inputTokens":  9800, "outputTokens": 6400 },
+    { "name": "Architecture", "inputTokens": 11200, "outputTokens": 7800 }
+  ],
+  "totalCost": 0.4365,
+  "currency": "USD"
+}
+```
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| Document not found / not owned by user / no cost-usage rows | `404` | `"Document '...' not found."` |
+
+---
+
+### 8. Get Current User
 
 ```
 GET /api/v1/users/me
@@ -284,6 +388,224 @@ Returns the authenticated user's profile.
 
 ---
 
+### 9. Get Policy Document Options
+
+```
+GET /api/v1/policy-documents/options
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Returns the allowed values for `source` and `category` fields. Call this once on page load to populate dropdowns/filters before rendering the policy-documents list or the edit form.
+
+**Response `200`:**
+```json
+{
+  "sources": ["SharePoint", "Confluence", "GitHub"],
+  "categories": ["technical", "security"]
+}
+```
+
+`categories` is driven by active rows in the `policy_source_categories` reference table — values may grow without a frontend change.
+
+---
+
+### 10. List Policy Documents
+
+```
+GET /api/v1/policy-documents?page=1&limit=20
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Returns a paginated list of all policy documents, ordered by `url_id` ascending.
+
+**Query parameters:**
+
+| Param | Type | Default | Range | Description |
+|-------|------|---------|-------|-------------|
+| `page` | integer | `1` | `≥ 1` | 1-based page number |
+| `limit` | integer | `20` | `1`–`200` | Records per page |
+
+**Response `200`:**
+```json
+{
+  "documents": [
+    {
+      "urlId": 1,
+      "filename": "Security Policy v3.docx",
+      "category": "security",
+      "source": "SharePoint",
+      "url": "https://company.sharepoint.com/sites/policies/Security_Policy_v3.docx",
+      "isActive": true,
+      "updatedAt": "2026-05-01T09:00:00Z"
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "limit": 20
+}
+```
+
+**Field notes:**
+- All fields are camelCase in the JSON response.
+- `source` is one of `"SharePoint"`, `"Confluence"`, `"GitHub"`.
+- `updatedAt` is ISO 8601 UTC or `null` if the row has never been updated.
+
+---
+
+### 11. Get a Policy Document
+
+```
+GET /api/v1/policy-documents/{urlId}
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+**Path parameter:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `urlId` | integer | `url_id` of the policy document (must be > 0) |
+
+**Response `200`:**
+```json
+{
+  "urlId": 1,
+  "filename": "Security Policy v3.docx",
+  "category": "security",
+  "source": "SharePoint",
+  "url": "https://company.sharepoint.com/sites/policies/Security_Policy_v3.docx",
+  "isActive": true,
+  "updatedAt": "2026-05-01T09:00:00Z"
+}
+```
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| `urlId` not found | `404` | `"Policy document '1' not found."` |
+
+---
+
+### 12. Create a Policy Document
+
+```
+POST /api/v1/policy-documents
+Content-Type: application/json
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Creates a new row in `data_pipeline.source_policy_docs`.
+
+**Request body:**
+```json
+{
+  "filename": "Security Policy v4.docx",
+  "category": "security",
+  "source": "SharePoint",
+  "url": "https://company.sharepoint.com/sites/policies/Security_Policy_v4.docx",
+  "isActive": true
+}
+```
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `filename` | string | 1-500 chars | Display name of the document |
+| `category` | string | 1-100 chars; must exist in reference table | Document category |
+| `source` | string | `"SharePoint"` \| `"Confluence"` \| `"GitHub"` | Source system |
+| `url` | string | 1-4000 chars | Full URL to the document |
+| `isActive` | boolean | — | Whether the document is active |
+
+**Response `201`:** Same shape as **Get a Policy Document** (`PolicyDocumentRecord`), including generated `urlId`.
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| `category` value not in reference table | `400` | `"Unsupported category: <value>"` |
+| `url` already exists | `400` | `"Policy document with URL already exists: <url>"` |
+| `source` value not in allowed set | `422` | Pydantic validation error |
+
+---
+
+### 13. Delete a Policy Document
+
+```
+DELETE /api/v1/policy-documents/{urlId}
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Permanently deletes the record from `data_pipeline.source_policy_docs`.
+
+**Path parameter:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `urlId` | integer | `url_id` of the policy document |
+
+**Response `204`:** No response body.
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| `urlId` not found | `404` | `"Policy document '1' not found."` |
+
+---
+
+### 14. Update a Policy Document
+
+```
+PUT /api/v1/policy-documents/{urlId}
+Content-Type: application/json
+Authorization: Bearer <jwt>
+x-user-id: <userId>
+```
+
+Replaces all mutable fields on a policy document. All fields in the request body are required.
+
+**Path parameter:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `urlId` | integer | `url_id` of the policy document |
+
+**Request body:**
+```json
+{
+  "filename": "Security Policy v4.docx",
+  "category": "security",
+  "source": "SharePoint",
+  "url": "https://company.sharepoint.com/sites/policies/Security_Policy_v4.docx",
+  "isActive": true
+}
+```
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `filename` | string | 1–500 chars | Display name of the document |
+| `category` | string | 1–100 chars; must exist in reference table | Document category |
+| `source` | string | `"SharePoint"` \| `"Confluence"` \| `"GitHub"` | Source system |
+| `url` | string | 1–4000 chars | Full URL to the document |
+| `isActive` | boolean | — | Whether the document is active |
+
+**Response `200`:** Same shape as **Get a Policy Document** (`PolicyDocumentRecord`), reflecting the updated values.
+
+**Error responses:**
+
+| Scenario | Code | `detail` value |
+|----------|------|----------------|
+| `urlId` not found | `404` | `"Policy document '1' not found."` |
+| `category` value not in reference table | `400` | `"Unsupported category: <value>"` |
+| `url` already exists | `400` | `"Policy document with URL already exists: <url>"` |
+| `source` value not in allowed set | `422` | Pydantic validation error |
+
+---
+
 ## Endpoint Summary
 
 | Method | Path | Auth | Returns |
@@ -293,7 +615,15 @@ Returns the authenticated user's profile.
 | `GET` | `/api/v1/documents/status` | Required | `{ processingDocumentIds }` |
 | `GET` | `/api/v1/documents` | Required | Paginated `HistoryRecord` list |
 | `GET` | `/api/v1/documents/{documentId}` | Required | `ResultRecord` |
+| `GET` | `/api/v1/cost-usage` | Required | Paginated `CostUsageResponse` |
+| `GET` | `/api/v1/cost-usage/{documentId}` | Required | `CostUsageDocument` |
 | `GET` | `/api/v1/users/me` | Required | `UserRecord` |
+| `GET` | `/api/v1/policy-documents/options` | Required | `PolicyDocumentOptionsResponse` |
+| `POST` | `/api/v1/policy-documents` | Required | `PolicyDocumentRecord` (created) |
+| `GET` | `/api/v1/policy-documents` | Required | Paginated `PolicyDocumentListResponse` |
+| `GET` | `/api/v1/policy-documents/{urlId}` | Required | `PolicyDocumentRecord` |
+| `DELETE` | `/api/v1/policy-documents/{urlId}` | Required | No content (`204`) |
+| `PUT` | `/api/v1/policy-documents/{urlId}` | Required | `PolicyDocumentRecord` (updated) |
 
 ---
 
@@ -346,8 +676,89 @@ export interface UserRecord {
   name: string
 }
 
+export interface AgentTokenUsage {
+  name: string          // e.g. "Security", "Technology", "Architecture", "Governance"
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface CostUsageDocument {
+  doc_id: string
+  file_name: string
+  uploadedAt: string    // ISO 8601 UTC
+  agents: AgentTokenUsage[]
+  totalCost: number     // SUM(total_cost_usd) across the doc's agent rows
+  currency: string      // currently always "USD"
+}
+
+export interface Pagination {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+  hasNext: boolean
+  hasPrevious: boolean
+  nextPage: number | null
+  previousPage: number | null
+}
+
+export interface CostUsageSummary {
+  totalCost: number
+  currency: string
+  totalDocuments: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalTokens: number
+}
+
+export interface CostUsageResponse {
+  costUsage: CostUsageDocument[]
+  pagination: Pagination
+  summary: CostUsageSummary   // aggregated across the full result set, not just the current page
+}
+
 export interface ApiError {
   detail: string
+}
+
+export type PolicyDocumentSource = 'SharePoint' | 'Confluence' | 'GitHub'
+
+export interface PolicyDocumentRecord {
+  urlId: number
+  filename: string
+  category: string
+  source: PolicyDocumentSource
+  url: string
+  isActive: boolean
+  updatedAt: string | null   // ISO 8601 UTC, or null if never updated
+}
+
+export interface PolicyDocumentListResponse {
+  documents: PolicyDocumentRecord[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface PolicyDocumentOptionsResponse {
+  sources: PolicyDocumentSource[]
+  categories: string[]
+}
+
+export interface PolicyDocumentCreateRequest {
+  filename: string        // 1-500 chars
+  category: string        // 1-100 chars; must exist in reference table
+  source: PolicyDocumentSource
+  url: string             // 1-4000 chars
+  isActive: boolean
+}
+
+export interface PolicyDocumentUpdateRequest {
+  filename: string        // 1-500 chars
+  category: string        // 1-100 chars; must exist in reference table
+  source: PolicyDocumentSource
+  url: string             // 1-4000 chars
+  isActive: boolean
 }
 ```
 

@@ -14,6 +14,8 @@ The service exposes the following API endpoints under the base path `/api/v1`:
 | GET | `/api/v1/documents` | Paginated upload history |
 | GET | `/api/v1/documents/{documentId}` | Full result including `resultMd` |
 | GET | `/api/v1/users/me` | Authenticated user profile |
+| GET | `/api/v1/cost-usage` | Paginated per-document token / cost usage with summary totals |
+| GET | `/api/v1/cost-usage/{documentId}` | Token / cost usage for a single document |
 
 Full request/response contracts are documented in [docs/corebackend-api.md](docs/corebackend-api.md).
 
@@ -69,6 +71,7 @@ app/
 │   ├── main.py               # FastAPI app, router registration, lifespan
 │   ├── documents.py          # /documents/* endpoints
 │   ├── users.py              # /users/me endpoint
+│   ├── cost_usage.py         # /cost-usage list + per-document endpoints
 │   └── health.py             # /health endpoint
 ├── core/
 │   ├── config.py             # Pydantic settings (env vars → typed config) + TEMPLATE_AGENTS mapping
@@ -81,17 +84,20 @@ app/
 │   ├── history_record.py     # { documentId, originalFilename, templateType, status, ... }
 │   ├── result_record.py      # { ..., resultMd, errorMessage }
 │   ├── user_record.py        # { userId, email, name }
+│   ├── cost_usage_record.py  # CostUsageDocument, CostUsageResponse, Pagination, CostUsageSummary
 │   ├── task_message.py       # SQS message published to aia-tasks (s3_bucket/s3_key optional — None for inline)
 │   ├── status_message.py     # SQS message received from aia-status
 │   ├── orchestrate_request.py# Payload for POST /orchestrate
 │   └── document_record.py
 ├── repositories/
 │   ├── document_repository.py  # document_uploads table queries
-│   └── user_repository.py      # users table queries + guest fallback
+│   ├── user_repository.py      # users table queries + guest fallback
+│   └── cost_usage_repository.py# Per-user / per-document cost_usage joins
 ├── services/
 │   ├── upload_service.py       # Upload, status, history, result
 │   ├── orchestrator_service.py # Fire-and-forget HTTP client → Orchestrator
 │   ├── ingestor_service.py     # DOCX text extraction
+│   ├── cost_usage_service.py   # Group rows → documents, build summary + pagination
 │   ├── s3_service.py           # S3 upload/download
 │   └── sqs_service.py          # send_task, receive_messages, delete_message
 ├── orchestrator/
@@ -107,6 +113,8 @@ app/
     ├── auth.py       # JWT validation (HS256)
     ├── app_context.py
     └── logger.py
+app/scripts/
+└── seed_cost_usage.sql       # Seed four sample documents + cost-usage rows for /cost-usage testing
 scripts/
 ├── start-aia.sh              # Connectivity checks + start all three services
 ├── start-datapipeline-dev.sh # Start Podman PostgreSQL container
@@ -125,6 +133,9 @@ tests/
 ├── test_ingestor_service.py            # DOCX text extraction
 ├── test_sqs_service.py                 # SQS send/receive/delete
 ├── test_upload_router.py               # CoreBackend upload/history/result endpoints
+├── test_cost_usage_repository.py       # CostUsageRepository — JOIN query shape
+├── test_cost_usage_service.py          # Grouping, per-doc totalCost, summary, pagination
+├── test_cost_usage_router.py           # /cost-usage endpoints — auth, validation, 404
 ├── test_orchestrator_session.py        # SessionStore — create, record, remove, events
 ├── test_orchestrator_summary.py        # MarkdownReportGenerator — all result formats
 └── test_orchestrator_processing.py     # POST /orchestrate + _process_document pipeline
@@ -177,6 +188,34 @@ Key environment variables:
 | `AWS_SESSION_TOKEN` | STS session token (required for temporary credentials) | — |
 | `AWS_DEFAULT_REGION` | AWS region for S3, SQS, and Bedrock | `eu-west-2` |
 
+### Token Pricing Configuration (Orchestrator)
+
+The Orchestrator calculates `total_cost_usd` from token usage using model-specific pricing in USD per 1M tokens.
+
+Source of truth in code:
+- `app/core/config.py` → `DEFAULT_LLM_PRICING_USD_PER_MTOKENS`
+- `app/orchestrator/main.py` → `_calculate_total_cost_usd(...)`
+
+You can override pricing via `.env` using `LLM_PRICING_USD_PER_MTOKENS` as JSON:
+
+```env
+LLM_PRICING_USD_PER_MTOKENS={"anthropic.claude-3-5-sonnet-20241022-v2:0":{"input":3.0,"output":15.0},"anthropic.claude-3-5-haiku-20241022-v1:0":{"input":0.8,"output":4.0}}
+```
+
+Example with Anthropic direct model IDs:
+
+```env
+LLM_PRICING_USD_PER_MTOKENS={"claude-3-5-sonnet-20241022":{"input":3.0,"output":15.0},"claude-3-5-haiku-20241022":{"input":0.8,"output":4.0}}
+```
+
+Cost formula used by Orchestrator:
+
+```text
+total_cost_usd = round((input_tokens * input_rate + output_tokens * output_rate) / 1_000_000, 6)
+```
+
+If a status message includes an unknown model ID, Orchestrator logs a warning and persists `total_cost_usd = 0.0` for that record.
+
 The evaluation pipeline also reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (individual vars) in addition to `POSTGRES_URI`.
 
 ## Running in Development
@@ -215,6 +254,16 @@ Other modes:
 ```
 
 > **STS credentials** expire every few hours. Refresh `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` in `.env`, then re-run `./scripts/start-aia.sh --check` to confirm before starting services.
+
+### Seed sample cost-usage data
+
+For exercising `/api/v1/cost-usage` from Postman or the frontend without running full assessments, an idempotent seed loads four sample documents (Security / Technology / Architecture / Governance agent breakdowns) under the guest user:
+
+```bash
+podman exec -i aiadocuments psql -U aiauser -d aiadocuments < app/scripts/seed_cost_usage.sql
+```
+
+The script clears any existing cost rows for these four file names before re-insertion, so repeated runs leave a clean fixture.
 
 ### Swagger UI
 
@@ -261,6 +310,9 @@ PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
 | `test_ingestor_service.py` | DOCX text extraction | No |
 | `test_sqs_service.py` | SQS send/receive/delete | No (mocked) |
 | `test_agent_service.py` | Agent Service `_process_message()`, `_get_document()`, concurrent `run_worker()` loop | No (mocked) |
+| `test_cost_usage_repository.py` | `CostUsageRepository` JOIN query shape and parameter binding | No (mocked) |
+| `test_cost_usage_service.py` | Document grouping, per-doc `totalCost = SUM(total_cost_usd)`, summary aggregation, document-level pagination | No |
+| `test_cost_usage_router.py` | `/cost-usage` and `/cost-usage/{id}` — auth, query-param validation, 404 path | No (mocked) |
 
 > Orchestrator and Agent Service tests use `pytest-asyncio`. This is included in `requirements-dev.txt`.
 

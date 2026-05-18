@@ -84,10 +84,6 @@ foreach ($prop in $Parsed.PSObject.Properties) {
 }
 
 # -- Resolve DB variables (with safe defaults) ----------------------------------
-$DbHost = if ($env:DB_HOST)     { $env:DB_HOST }     else { "localhost" }
-$DbPort = if ($env:DB_PORT)     { $env:DB_PORT }     else { "5432" }
-$DbName = if ($env:DB_NAME)     { $env:DB_NAME }     else { "aiadocuments" }
-$DbUser = if ($env:DB_USER)     { $env:DB_USER }     else { "aiauser" }
 
 # Python SQL runner is written to a temp file to avoid multiline -c quoting issues.
 $SqlRunnerPath = Join-Path $env:TEMP "aia_sql_runner.py"
@@ -101,11 +97,11 @@ scalar = os.environ.get("AIA_SQL_SCALAR", "0") == "1"
 
 try:
     conn = psycopg2.connect(
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=int(os.environ.get("DB_PORT", "5432")),
-        dbname=os.environ.get("DB_NAME", "aiadocuments"),
-        user=os.environ.get("DB_USER", "aiauser"),
-        password=os.environ.get("DB_PASSWORD", ""),
+        host=os.environ["DB_HOST"],
+        port=int(os.environ["DB_PORT"]),
+        dbname=os.environ["DB_NAME"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
     )
     if not scalar:
         conn.autocommit = True
@@ -164,16 +160,18 @@ if ($connTest -ne 1) {
     fail "PostgreSQL" "cannot connect - check DB_* vars in .env"
     exit 1
 }
-ok "PostgreSQL" "${DbUser}@${DbHost}:${DbPort}/${DbName}"
+ok "PostgreSQL" "$($env:DB_USER)@$($env:DB_HOST):$($env:DB_PORT)/$($env:DB_NAME)"
 
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 2 - truncate mutable tables (CASCADE)"
 
+$DbSchema = if ($env:DB_SCHEMA) { $env:DB_SCHEMA } else { "data_pipeline" }
+
 $TruncateSql = @"
 TRUNCATE TABLE
-    data_pipeline.policy_document_sync,
-    data_pipeline.questions,
-    data_pipeline.policy_documents
+    $DbSchema.policy_document_sync,
+    $DbSchema.questions,
+    $DbSchema.policy_documents
 CASCADE;
 "@
 
@@ -199,15 +197,15 @@ function Assert-Empty($Table) {
     }
 }
 
-Assert-Empty "data_pipeline.policy_document_sync"
-Assert-Empty "data_pipeline.questions"
-Assert-Empty "data_pipeline.policy_documents"
+Assert-Empty "$DbSchema.policy_document_sync"
+Assert-Empty "$DbSchema.questions"
+Assert-Empty "$DbSchema.policy_documents"
 
-$seedCount = Get-RowCount "data_pipeline.source_policy_docs"
+$seedCount = Get-RowCount "$DbSchema.source_policy_docs"
 if ($seedCount -gt 0) {
-    ok "data_pipeline.source_policy_docs" "$seedCount rows (seed intact)"
+    ok "$DbSchema.source_policy_docs" "$seedCount rows (seed intact)"
 } else {
-    warn "data_pipeline.source_policy_docs" "0 rows - seed table is empty; pipeline will produce no output"
+    warn "$DbSchema.source_policy_docs" "0 rows - seed table is empty; pipeline will produce no output"
 }
 
 if ($failCount -gt 0) {
@@ -220,11 +218,26 @@ if ($failCount -gt 0) {
 banner "Step 4 - run data pipeline"
 
 Write-Host ""
-Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.main"
+Write-Host "  `$ .venv\Scripts\python -m app.datapipeline.src.entrypoints.main"
 Write-Host ""
 
-& $VenvPython -m app.datapipeline.src.main
+# Temporarily relax error handling — Python logging writes to stderr, which
+# PowerShell treats as errors under $ErrorActionPreference='Stop'.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$pipelineOutput = & $VenvPython -m app.datapipeline.src.entrypoints.main 2>&1
 $pipelineExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+
+# Pass all output through to the console and extract the PIPELINE_USAGE line.
+$pipelineOutput | ForEach-Object { Write-Host $_ }
+$usageLine = $pipelineOutput | Where-Object { $_ -match '^PIPELINE_USAGE: ' } | Select-Object -Last 1
+$pipelineUsage = $null
+if ($usageLine) {
+    try {
+        $pipelineUsage = ($usageLine -replace '^PIPELINE_USAGE: ', '') | ConvertFrom-Json
+    } catch { $pipelineUsage = $null }
+}
 
 Write-Host ""
 if ($pipelineExit -eq 0) {
@@ -236,9 +249,9 @@ if ($pipelineExit -eq 0) {
 # ──────────────────────────────────────────────────────────────────────────────
 banner "Step 5 - final row counts"
 
-$pdCount   = Get-RowCount "data_pipeline.policy_documents"
-$qCount    = Get-RowCount "data_pipeline.questions"
-$syncCount = Get-RowCount "data_pipeline.policy_document_sync"
+$pdCount   = Get-RowCount "$DbSchema.policy_documents"
+$qCount    = Get-RowCount "$DbSchema.questions"
+$syncCount = Get-RowCount "$DbSchema.policy_document_sync"
 
 if ($pdCount -gt 0) {
     ok "policy_documents" "$pdCount rows"
@@ -254,6 +267,17 @@ if ($qCount -gt 0) {
 
 ok "policy_document_sync" "$syncCount rows"
 ok "source_policy_docs"   "$seedCount rows (unchanged)"
+
+# -- Token usage summary -------------------------------------------------------
+if ($pipelineUsage) {
+    Write-Host ""
+    Write-Host "  Token Usage Summary" -ForegroundColor White
+    Write-Host ("  " + "-" * 44)
+    Write-Host ("  {0,-22} {1,10}" -f "Input tokens",  ("{0:N0}" -f $pipelineUsage.total_input_tokens))
+    Write-Host ("  {0,-22} {1,10}" -f "Output tokens", ("{0:N0}" -f $pipelineUsage.total_output_tokens))
+    Write-Host ("  {0,-22} {1,10}" -f "Total tokens",  ("{0:N0}" -f $pipelineUsage.total_tokens))
+    Write-Host ("  {0,-22} {1,10}" -f "Estimated cost", ("`$" + ("{0:F6}" -f $pipelineUsage.total_cost_usd)))
+}
 
 Write-Host ""
 if ($pipelineExit -eq 0) {

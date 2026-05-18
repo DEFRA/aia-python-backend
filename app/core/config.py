@@ -1,4 +1,5 @@
 from typing import Optional
+from urllib.parse import quote_plus
 
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,6 +14,21 @@ from app.core.enums import LogLevel
 TEMPLATE_AGENTS: dict[str, list[str]] = {
     "SDA": ["security", "technical"],
     # "CHEDP": ["security", "data", "risk", "ea", "solution"],
+}
+
+# Pricing per million tokens (USD). Can be overridden via env var
+# LLM_PRICING_USD_PER_MTOKENS as JSON.
+DEFAULT_LLM_PRICING_USD_PER_MTOKENS: dict[str, dict[str, float]] = {
+    # Bedrock model IDs
+    "anthropic.claude-3-7-sonnet-20250219-v1:0": {"input": 3.00, "output": 15.00},
+    "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00, "output": 15.00},
+    "anthropic.claude-3-5-haiku-20241022-v1:0": {"input": 0.80, "output": 4.00},
+    "anthropic.claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    # Anthropic direct model IDs
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-3-7-sonnet-20250219": {"input": 3.00, "output": 15.00},
+    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
 }
 
 
@@ -98,6 +114,11 @@ class AppConfig(BaseSettings):
 
     # DB
     db_uri: Optional[str] = Field(None, alias="POSTGRES_URI")
+    db_host: Optional[str] = Field(None, alias="DB_HOST")
+    db_port: int = Field(5432, alias="DB_PORT")
+    db_name: Optional[str] = Field(None, alias="DB_NAME")
+    db_user: Optional[str] = Field(None, alias="DB_USER")
+    db_password: Optional[str] = Field(None, alias="DB_PASSWORD")
 
     # Auth
     jwt_secret: str = Field("test_secret", alias="JWT_SECRET")
@@ -109,6 +130,11 @@ class AppConfig(BaseSettings):
     orchestrator_agent_timeout: int = Field(480, alias="AGENT_TIMEOUT_SECONDS")
     orchestrator_default_agent_type: str = Field(
         "general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE"
+    )
+    max_file_upload: int = Field(50, alias="MAX_FILE_UPLOAD")
+    llm_pricing_usd_per_mtokens: dict[str, dict[str, float]] = Field(
+        default_factory=lambda: DEFAULT_LLM_PRICING_USD_PER_MTOKENS.copy(),
+        alias="LLM_PRICING_USD_PER_MTOKENS",
     )
 
     model_config = SettingsConfigDict(
@@ -154,7 +180,18 @@ class AppConfig(BaseSettings):
 
     @property
     def db(self) -> DBConfig:
-        return DBConfig(uri=self.db_uri)
+        if self.db_uri:
+            return DBConfig(uri=self.db_uri)
+
+        if all([self.db_host, self.db_name, self.db_user, self.db_password]):
+            user = quote_plus(self.db_user)
+            password = quote_plus(self.db_password)
+            uri = (
+                f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
+            )
+            return DBConfig(uri=uri)
+
+        return DBConfig(uri=None)
 
     @property
     def auth(self) -> AuthConfig:
