@@ -372,7 +372,7 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 doc_id,
                 DocumentStatus.PARTIAL_COMPLETE.value,
                 result_md=result_md,
-                error_message=f"Agents did not respond within timeout: {missing_types}",
+                error_message=f"Agents that did not respond within the timeout: {missing_types}",
             )
             logger.warning(
                 "Document partially completed doc_id=%s missing=%s",
