@@ -1,4 +1,5 @@
 from typing import Optional
+from urllib.parse import quote_plus
 
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -113,6 +114,11 @@ class AppConfig(BaseSettings):
 
     # DB
     db_uri: Optional[str] = Field(None, alias="POSTGRES_URI")
+    db_host: Optional[str] = Field(None, alias="DB_HOST")
+    db_port: int = Field(5432, alias="DB_PORT")
+    db_name: Optional[str] = Field(None, alias="DB_NAME")
+    db_user: Optional[str] = Field(None, alias="DB_USER")
+    db_password: Optional[str] = Field(None, alias="DB_PASSWORD")
 
     # Auth
     jwt_secret: str = Field("test_secret", alias="JWT_SECRET")
@@ -174,7 +180,18 @@ class AppConfig(BaseSettings):
 
     @property
     def db(self) -> DBConfig:
-        return DBConfig(uri=self.db_uri)
+        if self.db_uri:
+            return DBConfig(uri=self.db_uri)
+
+        if all([self.db_host, self.db_name, self.db_user, self.db_password]):
+            user = quote_plus(self.db_user)
+            password = quote_plus(self.db_password)
+            uri = (
+                f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
+            )
+            return DBConfig(uri=uri)
+
+        return DBConfig(uri=None)
 
     @property
     def auth(self) -> AuthConfig:
