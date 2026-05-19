@@ -76,7 +76,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: app/core_backend/
-          target: production
           build-args: |
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
@@ -94,7 +93,6 @@ jobs:
             AWS_DEFAULT_REGION=${{ vars.AWS_DEFAULT_REGION }}            
             S3_BUCKET_NAME=${{ vars.S3_BUCKET_NAME }}
             S3_UPLOAD_PREFIX=${{ vars.S3_UPLOAD_PREFIX }}
-            TASK_QUEUE_URL=${{ vars.TASK_QUEUE_URL }}
             ORCHESTRATOR_URL=${{ vars.ORCHESTRATOR_URL }}
             MAX_FILE_UPLOAD=${{ vars.MAX_FILE_UPLOAD }}
           push: true
