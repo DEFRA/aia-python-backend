@@ -12,7 +12,7 @@ if str(_EVAL_ROOT) not in sys.path:
 
 from src.agents.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary  # noqa: E402
 
-from app.core.enums import DocumentStatus  # noqa: E402
+from app.orchestrator.enums import DocumentStatus  # noqa: E402
 from app.orchestrator.main import _process_document, app  # noqa: E402
 from app.orchestrator.session import DocumentSession  # noqa: E402
 
