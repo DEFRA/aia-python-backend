@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 
@@ -20,6 +21,7 @@ from app.core.enums import DocumentStatus  # noqa: E402
 from app.models.orchestrate_request import OrchestrateRequest  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
+from app.repositories.cost_usage_repository import CostUsageRepository  # noqa: E402
 from app.orchestrator.session import SessionStore  # noqa: E402
 from app.orchestrator.summary import MarkdownReportGenerator  # noqa: E402
 from app.repositories.document_repository import DocumentRepository  # noqa: E402
@@ -31,9 +33,159 @@ from app.utils.postgres import close_postgres_pool, get_postgres_pool, init_db  
 
 logger = get_logger("app.orchestrator")
 
+# References: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html
+_MAX_SQS_MESSAGE_BYTES = 1024 * 1024
+_POSTGRES_INT_MAX = 2_147_483_647
+
 _session_store = SessionStore()
 _summary_generator = MarkdownReportGenerator()
 _poller_task: asyncio.Task | None = None
+
+
+class NonRetriableStatusMessageError(ValueError):
+    """Raised when a status payload is malformed or violates invariants."""
+
+
+def _known_agent_types() -> set[str]:
+    known = {config.orchestrator.default_agent_type}
+    for agent_types in config.templates.values():
+        known.update(agent_types)
+    return known
+
+
+def _parse_status_message(body: str) -> StatusMessage:
+    """Parse and validate a raw status queue payload.
+
+    Raises NonRetriableStatusMessageError for malformed or poison messages so they can
+    be deleted immediately instead of retried forever.
+    """
+    if len(body.encode("utf-8")) > _MAX_SQS_MESSAGE_BYTES:
+        raise NonRetriableStatusMessageError("Status message exceeds SQS payload limit")
+
+    try:
+        status_msg = StatusMessage.model_validate_json(body)
+    except ValidationError as exc:
+        raise NonRetriableStatusMessageError(
+            "Status payload validation failed"
+        ) from exc
+
+    expected_task_id = f"{status_msg.document_id}_{status_msg.agent_type}"
+    if status_msg.task_id != expected_task_id:
+        raise NonRetriableStatusMessageError(
+            "task_id must match {document_id}_{agent_type}"
+        )
+
+    if status_msg.agent_type not in _known_agent_types():
+        raise NonRetriableStatusMessageError("Unknown agent_type in status payload")
+
+    if (
+        status_msg.input_tokens is not None
+        and status_msg.input_tokens > _POSTGRES_INT_MAX
+    ):
+        raise NonRetriableStatusMessageError("input_tokens exceeds DB integer limit")
+
+    if (
+        status_msg.output_tokens is not None
+        and status_msg.output_tokens > _POSTGRES_INT_MAX
+    ):
+        raise NonRetriableStatusMessageError("output_tokens exceeds DB integer limit")
+
+    return status_msg
+
+
+def _pricing_map() -> dict[str, dict[str, float]]:
+    return config.llm_pricing_usd_per_mtokens
+
+
+def _calculate_total_cost_usd(
+    model_id: str | None, input_tokens: int, output_tokens: int
+) -> float:
+    if not model_id:
+        return 0.0
+    rates = _pricing_map().get(model_id)
+    if rates is None or "input" not in rates or "output" not in rates:
+        return 0.0
+    return round(
+        (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000,
+        6,
+    )
+
+
+async def _persist_status_tokens(
+    status_msg: StatusMessage,
+    cost_usage_repo: CostUsageRepository | None,
+) -> None:
+    """Persist token usage for one status message when token data is present."""
+    if cost_usage_repo is None:
+        logger.warning(
+            "[TOKEN] Cost usage persistence skipped — DB unavailable task_id=%s doc_id=%s",
+            status_msg.task_id,
+            status_msg.document_id,
+        )
+        return
+
+    if status_msg.input_tokens is None and status_msg.output_tokens is None:
+        logger.info(
+            "[TOKEN] No token payload to persist task_id=%s doc_id=%s agent_type=%s",
+            status_msg.task_id,
+            status_msg.document_id,
+            status_msg.agent_type,
+        )
+        return
+
+    raw_input_tokens = int(status_msg.input_tokens or 0)
+    raw_output_tokens = int(status_msg.output_tokens or 0)
+    if raw_input_tokens < 0 or raw_output_tokens < 0:
+        logger.warning(
+            "[TOKEN] Negative token values detected task_id=%s doc_id=%s input_tokens=%d output_tokens=%d",
+            status_msg.task_id,
+            status_msg.document_id,
+            raw_input_tokens,
+            raw_output_tokens,
+        )
+
+    input_tokens = max(raw_input_tokens, 0)
+    output_tokens = max(raw_output_tokens, 0)
+
+    total_cost_usd = _calculate_total_cost_usd(
+        status_msg.model_id,
+        input_tokens,
+        output_tokens,
+    )
+    if status_msg.model_id and status_msg.model_id not in _pricing_map():
+        logger.warning(
+            "[TOKEN] No pricing configured for model_id=%s task_id=%s doc_id=%s; defaulting total_cost_usd=0.0",
+            status_msg.model_id,
+            status_msg.task_id,
+            status_msg.document_id,
+        )
+
+    try:
+        await cost_usage_repo.upsert_cost_usage(
+            doc_id=status_msg.document_id,
+            agent_name=status_msg.agent_type,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_cost_usd=total_cost_usd,
+        )
+        logger.info(
+            "[TOKEN] Persisted cost usage task_id=%s doc_id=%s agent_type=%s model_id=%s input_tokens=%d output_tokens=%d total_cost_usd=%.6f",
+            status_msg.task_id,
+            status_msg.document_id,
+            status_msg.agent_type,
+            status_msg.model_id,
+            input_tokens,
+            output_tokens,
+            total_cost_usd,
+        )
+    except Exception as exc:
+        logger.error(
+            "[TOKEN] Failed to persist cost usage task_id=%s doc_id=%s agent_type=%s: %s",
+            status_msg.task_id,
+            status_msg.document_id,
+            status_msg.agent_type,
+            exc,
+        )
 
 
 @asynccontextmanager
@@ -220,7 +372,7 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
                 doc_id,
                 DocumentStatus.PARTIAL_COMPLETE.value,
                 result_md=result_md,
-                error_message=f"Agents did not respond within timeout: {missing_types}",
+                error_message=f"Agents that did not respond within the timeout: {missing_types}",
             )
             logger.warning(
                 "Document partially completed doc_id=%s missing=%s",
@@ -243,6 +395,10 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
 async def _status_queue_poller() -> None:
     """Continuously polls aia-status for agent results and routes them to the correct session."""
     sqs = SQSService()
+    cost_usage_repo: CostUsageRepository | None = None
+    if config.db.uri:
+        pool = await get_postgres_pool()
+        cost_usage_repo = CostUsageRepository(pool)
     queue_url = config.sqs.status_queue_url
     logger.info("Status queue poller started — polling %s", queue_url)
 
@@ -253,39 +409,86 @@ async def _status_queue_poller() -> None:
             )
             for msg in messages:
                 receipt = msg["receipt_handle"]
+                body = msg.get("body", "")
                 try:
-                    status_msg = StatusMessage.model_validate_json(msg["body"])
+                    status_msg = _parse_status_message(body)
+                    logger.info(
+                        "[TOKEN] Status message received task_id=%s doc_id=%s agent_type=%s model_id=%s inputTokens=%s outputTokens=%s",
+                        status_msg.task_id,
+                        status_msg.document_id,
+                        status_msg.agent_type,
+                        status_msg.model_id,
+                        status_msg.input_tokens,
+                        status_msg.output_tokens,
+                    )
                     if status_msg.error:
                         agent_result = None
                     else:
                         agent_result = AgentResult.model_validate(status_msg.result)
+
+                    # Pre-check session/task state so we can distinguish:
+                    # - new valid result (persist tokens),
+                    # - stale/unknown session (discard),
+                    # - duplicate delivery (discard without double-counting).
+                    session = _session_store.get(status_msg.document_id)
+                    task_expected = (
+                        session is not None
+                        and status_msg.task_id in session.expected_task_ids
+                    )
+                    task_already_recorded = (
+                        session is not None
+                        and status_msg.task_id in session.collected_results
+                    )
+
                     all_received = await _session_store.record_result(
                         status_msg.document_id,
                         status_msg.task_id,
                         agent_result,
                     )
+
+                    if task_expected and not task_already_recorded:
+                        await _persist_status_tokens(status_msg, cost_usage_repo)
+
                     await sqs.delete_message(queue_url, receipt)
                     if all_received is False:
-                        # Session already completed/timed-out, or task_id not
-                        # expected (e.g. stale retry after orchestrator restart).
-                        # Message is deleted to prevent queue build-up.
-                        logger.warning(
-                            "Discarded status message for unknown/expired session "
-                            "task_id=%s doc_id=%s",
-                            status_msg.task_id,
-                            status_msg.document_id,
-                        )
+                        # False means either unknown/expired session, unexpected
+                        # task_id, or duplicate delivery; message is deleted to
+                        # prevent queue build-up.
+                        if task_already_recorded:
+                            logger.warning(
+                                "Discarded duplicate status message task_id=%s doc_id=%s",
+                                status_msg.task_id,
+                                status_msg.document_id,
+                            )
+                        else:
+                            logger.warning(
+                                "Discarded status message for unknown/expired session "
+                                "task_id=%s doc_id=%s",
+                                status_msg.task_id,
+                                status_msg.document_id,
+                            )
                     else:
                         logger.info(
                             "Result recorded task_id=%s all_received=%s",
                             status_msg.task_id,
                             all_received,
                         )
+                except NonRetriableStatusMessageError as exc:
+                    preview = body[:200].replace("\n", "\\n")
+                    logger.warning(
+                        "Discarding poison status message and deleting from queue: %s | body_preview=%s",
+                        exc,
+                        preview,
+                    )
+                    try:
+                        await sqs.delete_message(queue_url, receipt)
+                    except Exception:
+                        logger.exception("Failed to delete poison status message")
                 except Exception as exc:
                     logger.exception(
                         "Failed to process status message: %s — body=%s",
                         exc,
-                        msg["body"],
+                        body,
                     )
         except asyncio.CancelledError:
             logger.info("Status queue poller stopped")

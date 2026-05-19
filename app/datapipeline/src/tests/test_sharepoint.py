@@ -6,11 +6,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests as req_lib
 
-from app.datapipeline.src.sharepoint import (
+from app.datapipeline.src.adapters.sharepoint import (
     SharePointClient,
     _extract_canvas_text,
     _extract_page_name,
     _html_to_text,
+    _is_pdf_share_url,
+    _to_graph_share_id,
     extract_sharepoint_parts,
 )
 
@@ -18,6 +20,10 @@ _TEAMS_URL = "https://defra.sharepoint.com/teams/Team3221/SitePages/DataPolicy.a
 _SITES_URL = "https://defra.sharepoint.com/sites/environment/SitePages/Policy.aspx"
 _LIBRARY_URL = (
     "https://defra.sharepoint.com/teams/Team3221/Published%20Docs/Forms/AllItems.aspx"
+)
+_PDF_SHARE_URL = (
+    "https://defra.sharepoint.com/:b:/r/teams/Team3182/Tech%20Gov%20Docs/"
+    "Tools%20Authority/Tools%20Radar/DDTS_Tools_Authority_-%C2%A0_Supplier_Radar.pdf"
 )
 _TS_STR = "2024-06-01T12:00:00Z"
 _TS = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -68,6 +74,19 @@ class TestExtractPageName:
     def test_returns_none_for_pdf_url(self) -> None:
         url = "https://defra.sharepoint.com/:b:/r/teams/T1/Docs/file.pdf"
         assert _extract_page_name(url) is None
+
+
+class TestPdfShareHelpers:
+    def test_detects_pdf_share_url(self) -> None:
+        assert _is_pdf_share_url(_PDF_SHARE_URL) is True
+
+    def test_rejects_non_pdf_share_url(self) -> None:
+        assert _is_pdf_share_url(_TEAMS_URL) is False
+
+    def test_builds_graph_share_id(self) -> None:
+        share_id = _to_graph_share_id(_PDF_SHARE_URL)
+        assert share_id.startswith("u!")
+        assert "/" not in share_id
 
     def test_returns_none_for_root_site(self) -> None:
         url = "https://defra.sharepoint.com/teams/Team3221"
@@ -189,8 +208,10 @@ def _mock_get(responses: list[dict]) -> MagicMock:
 
 
 class TestReadPageContent:
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_returns_page_content_and_timestamp(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -208,8 +229,10 @@ class TestReadPageContent:
         assert "Data Policy" in text
         assert last_modified == _TS
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_page_last_modified_used_over_site(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -230,8 +253,10 @@ class TestReadPageContent:
 
         assert last_modified == _TS  # page timestamp, not site timestamp
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_falls_back_to_site_metadata_for_library_url(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -249,8 +274,10 @@ class TestReadPageContent:
         assert last_modified == _TS
         assert mock_get.call_count == 1  # only site call — no pages API call
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_falls_back_when_pages_api_returns_empty(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -267,8 +294,10 @@ class TestReadPageContent:
         assert "Site Title" in text
         assert last_modified == _TS
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_falls_back_when_pages_api_fails(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -290,8 +319,10 @@ class TestReadPageContent:
         assert "Site Title" in text  # fallback content
         assert last_modified == _TS
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_raises_when_site_call_fails(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -307,7 +338,9 @@ class TestReadPageContent:
         with pytest.raises(req_lib.exceptions.RequestException, match="403"):
             client.read_page_content(_TEAMS_URL)
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
     def test_raises_when_token_fails(self, mock_msal: MagicMock) -> None:
         mock_msal.return_value.acquire_token_for_client.return_value = {
             "error": "invalid_client",
@@ -317,8 +350,10 @@ class TestReadPageContent:
         with pytest.raises(RuntimeError, match="MSAL token acquisition failed"):
             client.read_page_content(_TEAMS_URL)
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_site_graph_url_built_correctly(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -338,8 +373,10 @@ class TestReadPageContent:
             in first_call_url
         )
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_pages_api_url_contains_page_name_and_expand(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -358,6 +395,54 @@ class TestReadPageContent:
         assert "DataPolicy.aspx" in second_call_url
         assert "canvasLayout" in second_call_url
 
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.PdfReader")
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
+    def test_extracts_pdf_share_content(
+        self,
+        mock_get: MagicMock,
+        mock_pdf_reader: MagicMock,
+        mock_msal: MagicMock,
+    ) -> None:
+        mock_msal.return_value.acquire_token_for_client.return_value = {
+            "access_token": "tok"
+        }
+
+        site_resp = MagicMock()
+        site_resp.status_code = 200
+        site_resp.json.return_value = _site_response(
+            last_modified="2020-01-01T00:00:00Z"
+        )
+
+        item_resp = MagicMock()
+        item_resp.status_code = 200
+        item_resp.json.return_value = {
+            "name": "DDTS_Tools_Authority.pdf",
+            "lastModifiedDateTime": _TS_STR,
+        }
+
+        content_resp = MagicMock()
+        content_resp.status_code = 200
+        content_resp.content = b"%PDF-1.7 bytes"
+
+        mock_get.side_effect = [site_resp, item_resp, content_resp]
+
+        page1 = MagicMock()
+        page1.extract_text.return_value = "First page text"
+        page2 = MagicMock()
+        page2.extract_text.return_value = "Second page text"
+        mock_pdf_reader.return_value.pages = [page1, page2]
+
+        client = _make_client()
+        text, last_modified = client.read_page_content(_PDF_SHARE_URL)
+
+        assert "First page text" in text
+        assert "Second page text" in text
+        assert last_modified == _TS
+        assert mock_get.call_count == 3
+
 
 # ---------------------------------------------------------------------------
 # SharePointClient._get_with_retry
@@ -374,9 +459,11 @@ class TestGetWithRetry:
         r.json.return_value = _site_response(last_modified=last_modified or _TS_STR)
         return r
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
-    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
+    @patch("app.datapipeline.src.adapters.sharepoint.time.sleep")
     def test_succeeds_on_first_attempt_without_sleep(
         self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -392,9 +479,11 @@ class TestGetWithRetry:
 
         mock_sleep.assert_not_called()
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
-    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
+    @patch("app.datapipeline.src.adapters.sharepoint.time.sleep")
     def test_retries_once_on_pages_timeout_then_succeeds(
         self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -415,9 +504,11 @@ class TestGetWithRetry:
         mock_sleep.assert_called_once()
         assert mock_get.call_count == 3  # site + timeout + retry
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
-    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
+    @patch("app.datapipeline.src.adapters.sharepoint.time.sleep")
     def test_falls_back_after_all_retries_exhausted(
         self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -437,9 +528,11 @@ class TestGetWithRetry:
         assert last_modified == _TS
         mock_sleep.assert_called_once()  # one sleep between the two page attempts
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
-    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
+    @patch("app.datapipeline.src.adapters.sharepoint.time.sleep")
     def test_backoff_delay_is_two_seconds(
         self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -457,9 +550,11 @@ class TestGetWithRetry:
 
         mock_sleep.assert_called_once_with(2.0)
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
-    @patch("app.datapipeline.src.sharepoint.time.sleep")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
+    @patch("app.datapipeline.src.adapters.sharepoint.time.sleep")
     def test_4xx_not_retried(
         self, mock_sleep: MagicMock, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -490,8 +585,10 @@ def _list_response(
 
 
 class TestFetchPageContentFallback:
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_400_triggers_list_and_match_fallback(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -520,8 +617,10 @@ class TestFetchPageContentFallback:
         assert "CDAP content" in text
         assert mock_get.call_count == 4  # site + 400 filter + list + detail
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_400_list_finds_no_match_falls_back_to_site_metadata(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:
@@ -546,8 +645,10 @@ class TestFetchPageContentFallback:
         assert "Site Title" in text
         assert last_modified == _TS
 
-    @patch("app.datapipeline.src.sharepoint.msal.ConfidentialClientApplication")
-    @patch("app.datapipeline.src.sharepoint.requests.get")
+    @patch(
+        "app.datapipeline.src.adapters.sharepoint.msal.ConfidentialClientApplication"
+    )
+    @patch("app.datapipeline.src.adapters.sharepoint.requests.get")
     def test_400_list_also_fails_falls_back_to_site_metadata(
         self, mock_get: MagicMock, mock_msal: MagicMock
     ) -> None:

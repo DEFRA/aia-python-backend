@@ -5,8 +5,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+from pydantic import ValidationError
 
-from app.datapipeline.src.db import (
+
+from app.datapipeline.src.adapters.db import (
     delete_policy_document_by_url,
     delete_questions_for_doc,
     fetch_all_policy_sources,
@@ -15,7 +18,7 @@ from app.datapipeline.src.db import (
     insert_questions,
     load_local_policy_sources,
 )
-from app.datapipeline.src.schemas import ExtractedQuestion, PolicySource
+from app.datapipeline.src.domain.schemas import ExtractedQuestion, PolicySource
 
 
 def _make_cursor(rows: list[dict] | dict | None = None) -> MagicMock:
@@ -43,7 +46,7 @@ class TestFetchPolicySources:
                 "url": "https://sp.com/teams/T1/SitePages/P.aspx",
                 "filename": "Data Policy",
                 "category": "security",
-                "type": "page",
+                "source": "SharePoint",
                 "isactive": True,
             }
         ]
@@ -145,7 +148,9 @@ class TestInsertQuestions:
 
         execute_calls = cursor.execute.call_args_list
         question_inserts = [
-            c for c in execute_calls if "data_pipeline.questions" in str(c)
+            c
+            for c in execute_calls
+            if "INSERT INTO" in str(c) and "questions" in str(c)
         ]
         assert len(question_inserts) == 2
 
@@ -167,7 +172,7 @@ class TestFetchAllPolicySources:
                 "url": "https://sp.com/active",
                 "filename": "Active",
                 "category": "security",
-                "type": "page",
+                "source": "SharePoint",
                 "isactive": True,
             },
             {
@@ -175,7 +180,7 @@ class TestFetchAllPolicySources:
                 "url": "https://sp.com/inactive",
                 "filename": "Inactive",
                 "category": "technical",
-                "type": "page",
+                "source": "SharePoint",
                 "isactive": False,
             },
         ]
@@ -235,7 +240,7 @@ class TestDeletePolicyDocumentByUrl:
         delete_policy_document_by_url(conn, "https://sp.com/page")
 
         sql, params = cursor.execute.call_args[0]
-        assert "policy_documents" in sql
+        assert "data_pipeline.policy_documents" in sql
         assert "source_url" in sql
         assert params == ("https://sp.com/page",)
 
@@ -259,7 +264,8 @@ class TestDeleteQuestionsForDoc:
         delete_questions_for_doc(conn, "doc-uuid-abc")
 
         sql = cursor.execute.call_args[0][0]
-        assert "data_pipeline.questions" in sql
+        assert "DELETE FROM" in sql
+        assert "questions" in sql
         assert "policy_doc_id" in sql
 
     def test_returns_zero_when_no_questions_exist(self) -> None:
@@ -278,7 +284,7 @@ _SAMPLE_SOURCES = [
         "url": "https://defra.sharepoint.com/teams/T1/SitePages/Policy.aspx",
         "filename": "Policy Page",
         "category": "security",
-        "type": "page",
+        "source": "SharePoint",
         "isactive": True,
     },
     {
@@ -286,7 +292,7 @@ _SAMPLE_SOURCES = [
         "url": "https://defra.sharepoint.com/teams/T1/SitePages/Inactive.aspx",
         "filename": "Inactive Page",
         "category": "technical",
-        "type": "page",
+        "source": "SharePoint",
         "isactive": False,
     },
 ]
@@ -335,3 +341,18 @@ class TestLoadLocalPolicySources:
         sources = load_local_policy_sources(bundled)
         assert len(sources) > 0
         assert all(isinstance(s, PolicySource) for s in sources)
+
+    def test_raises_for_invalid_source_value(self) -> None:
+        invalid = [
+            {
+                "url_id": 9,
+                "url": "https://defra.sharepoint.com/teams/T1/SitePages/Invalid.aspx",
+                "filename": "Invalid Source",
+                "category": "technical",
+                "source": "UnknownSource",
+                "isactive": True,
+            }
+        ]
+        path = self._write_file(invalid)
+        with pytest.raises(ValidationError):
+            load_local_policy_sources(path)

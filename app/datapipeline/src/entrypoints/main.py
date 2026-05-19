@@ -5,7 +5,6 @@ fetches each SharePoint page, extracts evaluation questions via LLM,
 and writes the results to the Phase 1 normalised tables:
   data_pipeline.policy_documents
   data_pipeline.questions
-  data_pipeline.question_categories
   data_pipeline.policy_document_sync  (housekeeping / change-detection)
 
 Feature flag — local source list:
@@ -22,7 +21,7 @@ Feature flag — debug output:
   Intended for local inspection only — debug/ is git-ignored.
 
 Run locally:
-    python -m app.datapipeline.src.main
+    python -m app.datapipeline.src.entrypoints.main
 
 Deployed as an AWS Lambda (see lambda_function.py for the handler wrapper).
 """
@@ -38,18 +37,19 @@ from pathlib import Path
 import psycopg2
 from dotenv import load_dotenv
 
-from app.datapipeline.src.db import (
+from ..adapters.db import (
     delete_policy_document_by_url,
     delete_questions_for_doc,
     fetch_all_policy_sources,
+    insert_cost_usage,
     insert_policy_document,
     insert_questions,
     load_local_policy_sources,
 )
-from app.datapipeline.src.evaluator import QuestionExtractor
-from app.datapipeline.src.sharepoint import SharePointClient
-from app.datapipeline.src.sync import get_sync_record, is_changed, upsert_sync_record
-from app.datapipeline.src.utils import page_name_from_url
+from ..adapters.evaluator import QuestionExtractor
+from ..adapters.sharepoint import SharePointClient
+from ..adapters.sync import get_sync_record, is_changed, upsert_sync_record
+from ..utils_pkg.utils import page_name_from_url
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +64,7 @@ _REQUIRED_ENV = [
     "DB_NAME",
     "DB_USER",
     "DB_PASSWORD",
+    "DB_SCHEMA",
     "SHAREPOINT_TENANT_ID",
     "SHAREPOINT_CLIENT_ID",
     "SHAREPOINT_CLIENT_SECRET",
@@ -72,9 +73,9 @@ _REQUIRED_ENV = [
 ]
 
 _DEFAULT_LOCAL_SOURCES_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "policy_sources.json"
+    Path(__file__).resolve().parent.parent.parent / "data" / "policy_sources.json"
 )
-_DEFAULT_DEBUG_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "debug"
+_DEFAULT_DEBUG_OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "debug"
 
 
 def _load_sources(conn: psycopg2.extensions.connection) -> list:
@@ -124,30 +125,48 @@ def _write_debug_file(
 
 
 def _get_db_connection() -> psycopg2.extensions.connection:
-    return psycopg2.connect(
+    schema = os.environ["DB_SCHEMA"]
+    conn = psycopg2.connect(
         host=os.environ["DB_HOST"],
-        port=int(os.environ.get("DB_PORT", "5432")),
+        port=int(os.environ["DB_PORT"]),
         dbname=os.environ["DB_NAME"],
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
+        # Set search_path at connection level so it survives rollbacks.
+        options=f"-c search_path={schema},public",
     )
+    logger.info("DB search_path set to schema: %s", schema)
+    return conn
 
 
 def _build_sharepoint_client() -> SharePointClient:
+    ssl_verify = os.environ.get("SHAREPOINT_SSL_VERIFY", "true").lower() != "false"
     return SharePointClient(
         tenant_id=os.environ["SHAREPOINT_TENANT_ID"],
         client_id=os.environ["SHAREPOINT_CLIENT_ID"],
         client_secret=os.environ["SHAREPOINT_CLIENT_SECRET"],
+        ssl_verify=ssl_verify,
     )
 
 
 def _build_extractor() -> QuestionExtractor:
+    # Pass explicit credentials only when all three are present and non-empty.
+    # When AWS_SESSION_TOKEN is absent or blank the SDK uses its standard
+    # credential chain (env vars, ~/.aws/credentials, instance profile, etc.)
+    # which avoids 403s caused by expired STS tokens left in .env.
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+    session_token = os.environ.get("AWS_SESSION_TOKEN", "").strip() or None
+    provider = os.environ.get("LLM_PROVIDER", "bedrock").strip().lower()
+
     return QuestionExtractor(
-        aws_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
-        aws_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        provider=provider,
+        aws_access_key=access_key or None,
+        aws_secret_key=secret_key or None,
+        aws_session_token=session_token,
         aws_region=os.environ["AWS_DEFAULT_REGION"],
         model_id=os.environ["MODEL_ID"],
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
     )
 
 
@@ -177,6 +196,8 @@ def run() -> dict[str, int]:
         return {"processed": 0, "skipped": 0, "failed": 0, "cleaned": 0}
 
     processed = skipped = failed = cleaned = 0
+    total_input_tokens = total_output_tokens = 0
+    total_cost_usd = 0.0
 
     for source in sources:
         url = source.url
@@ -215,11 +236,22 @@ def run() -> dict[str, int]:
 
         # 3. Extract questions via LLM
         try:
-            questions = extractor.extract(url, content, source.category)
+            questions, llm_usage = extractor.extract(url, content, source.category)
         except Exception as exc:
             logger.error("Question extraction failed url=%s: %s", url, exc)
             failed += 1
             continue
+
+        print(
+            f"  {'URL':<12} {url}\n"
+            f"  {'Input tokens':<12} {llm_usage['input_tokens']:,}\n"
+            f"  {'Output tokens':<12} {llm_usage['output_tokens']:,}\n"
+            f"  {'Total tokens':<12} {llm_usage['total_tokens']:,}\n"
+            f"  {'Cost (USD)':<12} ${llm_usage['estimated_cost_usd']:.6f}\n"
+        )
+        total_input_tokens += llm_usage["input_tokens"]
+        total_output_tokens += llm_usage["output_tokens"]
+        total_cost_usd += llm_usage["estimated_cost_usd"]
 
         if not questions:
             logger.warning(
@@ -243,6 +275,17 @@ def run() -> dict[str, int]:
             delete_questions_for_doc(conn, policy_doc_id)
             insert_questions(conn, policy_doc_id, questions)
             upsert_sync_record(conn, url, last_modified, content_size, policy_doc_id)
+            insert_cost_usage(
+                conn,
+                policy_doc_id,
+                input_tokens=llm_usage["input_tokens"],
+                output_tokens=llm_usage["output_tokens"],
+                amount=round(llm_usage["estimated_cost_usd"], 4),
+            )
+            print(
+                f"  {'Saved to DB':<12} {os.environ.get('DB_SCHEMA', 'data_pipeline')}.policydoc_costusage  "
+                f"policy_doc_id={policy_doc_id}"
+            )
         except Exception as exc:
             logger.error("DB write failed url=%s: %s", url, exc)
             conn.rollback()
@@ -263,8 +306,15 @@ def run() -> dict[str, int]:
         "skipped": skipped,
         "failed": failed,
         "cleaned": cleaned,
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
+        "total_tokens": total_input_tokens + total_output_tokens,
+        "total_cost_usd": round(total_cost_usd, 6),
     }
     logger.info("Pipeline complete: %s", summary)
+    # Emit a machine-readable line so callers (e.g. reset-datapipeline.ps1) can
+    # parse token usage without screen-scraping log lines.
+    print(f"PIPELINE_USAGE: {json.dumps(summary)}")
     return summary
 
 
@@ -273,7 +323,9 @@ def main() -> None:
         summary = run()
         # Non-zero failed count should fail the process so callers can detect partial errors.
         if summary.get("failed", 0) > 0:
-            logger.error("Pipeline completed with %d failed source(s)", summary["failed"])
+            logger.error(
+                "Pipeline completed with %d failed source(s)", summary["failed"]
+            )
             sys.exit(1)
     except Exception as exc:
         logger.critical("Pipeline failed: %s", exc, exc_info=True)

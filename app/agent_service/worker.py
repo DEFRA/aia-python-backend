@@ -12,6 +12,8 @@ import os
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 # ---------------------------------------------------------------------------
 # Evaluation module path injection — must precede 'src.*' imports below.
 # The evaluation sub-package uses bare 'src.*' imports because its Lambda
@@ -54,6 +56,39 @@ from app.services.sqs_service import SQSService  # noqa: E402
 from app.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger("app.agent_service")
+
+# References: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html
+_MAX_SQS_MESSAGE_BYTES = 1024 * 1024
+
+
+class NonRetriableTaskMessageError(ValueError):
+    """Raised when a task payload is malformed or violates invariants."""
+
+
+def _parse_task_message(body: str) -> TaskMessage:
+    """Parse and validate a raw task queue payload.
+
+    Raises NonRetriableTaskMessageError for malformed or poison messages so they can
+    be deleted immediately instead of retried forever.
+    """
+    if len(body.encode("utf-8")) > _MAX_SQS_MESSAGE_BYTES:
+        raise NonRetriableTaskMessageError("Task message exceeds SQS payload limit")
+
+    try:
+        task = TaskMessage.model_validate_json(body)
+    except ValidationError as exc:
+        raise NonRetriableTaskMessageError("Task payload validation failed") from exc
+
+    expected_task_id = f"{task.document_id}_{task.agent_type}"
+    if task.task_id != expected_task_id:
+        raise NonRetriableTaskMessageError(
+            "task_id must match {document_id}_{agent_type}"
+        )
+
+    if task.agent_type not in AGENT_REGISTRY:
+        raise NonRetriableTaskMessageError("Unknown agent_type in task payload")
+
+    return task
 
 
 def _on_task_done(task: asyncio.Task) -> None:  # type: ignore[type-arg]
@@ -163,13 +198,42 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
 
     async def _assess_one(
         policy_doc_id: str, policy_doc_url: str, policy_doc_filename: str
-    ) -> PolicyDocResult | None:
+    ) -> tuple[PolicyDocResult | None, dict[str, int]]:
+        """Assess one policy doc and return (result, token_counts).
+
+        token_counts = {"input_tokens": int, "output_tokens": int} or empty dict on failure.
+        """
+        tokens = {"input_tokens": 0, "output_tokens": 0}
         try:
             questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
             llm_output: AgentLLMOutput = await asyncio.wait_for(
                 agent.assess(document=document, questions=questions),
                 timeout=_AGENT_TIMEOUT_SECONDS,
             )
+
+            # Extract token counts from LLM response metadata.
+            if llm_output.llm_meta is not None:
+                try:
+                    tokens["input_tokens"] = llm_output.llm_meta.input_tokens
+                    tokens["output_tokens"] = llm_output.llm_meta.output_tokens
+                except AttributeError as exc:
+                    logger.error(
+                        "[TOKEN] Missing token attributes in llm_meta task_id=%s agent_type=%s doc=%s: %s",
+                        task.task_id,
+                        agent_type,
+                        policy_doc_filename,
+                        exc,
+                    )
+
+            logger.info(
+                "[TOKEN] Agent assessment complete — task_id=%s agent_type=%s doc=%s | input_tokens=%d output_tokens=%d",
+                task.task_id,
+                agent_type,
+                policy_doc_filename,
+                tokens["input_tokens"],
+                tokens["output_tokens"],
+            )
+
             question_map = {q.id: q for q in questions}
             assessments: list[AssessmentRow] = []
             for row in llm_output.rows:
@@ -186,52 +250,96 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
                         Comments=row.Comments,
                     )
                 )
-            return PolicyDocResult(
+            result = PolicyDocResult(
                 policy_doc_filename=policy_doc_filename,
                 policy_doc_url=policy_doc_url,
                 assessments=assessments,
                 summary=llm_output.summary,
             )
+            return (result, tokens)
         except asyncio.TimeoutError:
             logger.error(
-                "Agent timed out after %ds — skipping doc task_id=%s policy_doc=%s",
+                "[TOKEN] Agent timed out after %ds — skipping doc task_id=%s policy_doc=%s",
                 _AGENT_TIMEOUT_SECONDS,
                 task.task_id,
                 policy_doc_filename,
             )
-            return None
+            return (None, tokens)
         except Exception as exc:
             logger.error(
-                "Agent assessment failed — skipping doc task_id=%s policy_doc=%s: %s",
+                "[TOKEN] Agent assessment failed — skipping doc task_id=%s policy_doc=%s: %s",
                 task.task_id,
                 policy_doc_filename,
                 exc,
             )
-            return None
+            return (None, tokens)
 
     raw_results = await asyncio.gather(
         *[_assess_one(pid, url, fname) for pid, url, fname in policy_docs]
     )
-    docs = [r for r in raw_results if r is not None]
+
+    # Aggregate results and token counts
+    docs = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    for result_tuple in raw_results:
+        doc_result, tokens = result_tuple
+        if doc_result is not None:
+            docs.append(doc_result)
+            total_input_tokens += tokens.get("input_tokens", 0)
+            total_output_tokens += tokens.get("output_tokens", 0)
+
+    logger.info(
+        "[TOKEN] Aggregated tokens for all docs — task_id=%s agent_type=%s model_id=%s | total_input_tokens=%d total_output_tokens=%d docs_assessed=%d",
+        task.task_id,
+        agent_type,
+        agent_config.model,
+        total_input_tokens,
+        total_output_tokens,
+        len(docs),
+    )
 
     if not docs:
+        logger.warning(
+            "[TOKEN] All policy document assessments failed — task_id=%s agent_type=%s",
+            task.task_id,
+            agent_type,
+        )
         return StatusMessage(
             task_id=task.task_id,
             document_id=task.document_id,
             agent_type=agent_type,
             result={},
             error="All policy document assessments failed",
+            model_id=agent_config.model,
+            input_tokens=None,
+            output_tokens=None,
         )
 
     result = AgentResult(agent_type=agent_type, docs=docs)
     # TO DO: Handle scenario where result is too large for SQS message body limit (1 MiB)
     # potentially by uploading to S3 and including a link in the StatusMessage instead.
-    return StatusMessage(
+    status_msg = StatusMessage(
         task_id=task.task_id,
         document_id=task.document_id,
         agent_type=agent_type,
         result=result.model_dump(),
+        model_id=agent_config.model,
+        input_tokens=total_input_tokens,
+        output_tokens=total_output_tokens,
     )
+
+    logger.info(
+        "[TOKEN] StatusMessage published — task_id=%s agent_type=%s model_id=%s | inputTokens=%d outputTokens=%d",
+        task.task_id,
+        agent_type,
+        agent_config.model,
+        total_input_tokens,
+        total_output_tokens,
+    )
+
+    return status_msg
 
 
 async def run_worker() -> None:
@@ -274,8 +382,9 @@ async def _process_message(
 ) -> None:
     async with semaphore:
         receipt = msg["receipt_handle"]
+        body = msg.get("body", "")
         try:
-            task = TaskMessage.model_validate_json(msg["body"])
+            task = _parse_task_message(body)
             logger.info(
                 "Received task_id=%s agent_type=%s doc_id=%s policy_doc_id=%s",
                 task.task_id,
@@ -291,6 +400,22 @@ async def _process_message(
                 task.task_id,
                 status.error,
             )
+        except NonRetriableTaskMessageError as exc:
+            preview = body[:200].replace("\n", "\\n")
+            logger.warning(
+                "Discarding poison task message and deleting from queue: %s | body_preview=%s",
+                exc,
+                preview,
+            )
+            try:
+                await _delete_with_retry(
+                    sqs,
+                    task_url,
+                    receipt,
+                    task_id="invalid_task_message",
+                )
+            except Exception:
+                logger.exception("Failed to delete poison task message")
         except Exception as exc:
             logger.exception(
                 "Unhandled task error — message not deleted (will retry): %s",

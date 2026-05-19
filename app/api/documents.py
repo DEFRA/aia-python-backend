@@ -17,11 +17,15 @@ from app.services.upload_service import UploadService
 from app.core.dependencies import get_upload_service, verify_auth
 from app.core.messages import messages
 from app.utils.logger import get_logger
+from os import getenv
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = get_logger(__name__)
 
 _MAX_HISTORY_LIMIT = 100
+_MAX_FILE_UPLOAD = (
+    int(getenv("MAX_FILE_UPLOAD", 50)) * 1024 * 1024
+)  # Convert MB to bytes
 
 
 @router.post(
@@ -43,8 +47,20 @@ async def upload_document(
 
     upload_request = UploadRequest(templateType=templateType, fileName=fileName)
 
+    # Read file size
+    file_bytes = await file.read()
+    file_size = len(file_bytes)
+    await file.seek(0)  # Reset file pointer after reading
+
     try:
-        doc_id = await service.process_upload_request(upload_request, user_id)
+        doc_id = await service.process_upload_request(
+            upload_request, user_id, file_size
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        )
     except Exception as exc:
         logger.exception("DB insert failed: %s", exc)
         raise HTTPException(
@@ -61,7 +77,6 @@ async def upload_document(
         )
 
     s3_key = service.get_s3_key(doc_id, fileName)
-    file_bytes = await file.read()
     background_tasks.add_task(
         service.process_background_upload, file_bytes, s3_key, doc_id, templateType
     )
