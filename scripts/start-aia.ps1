@@ -14,7 +14,7 @@
 #     POSTGRES_URI (or DB_* vars), and LLM_PROVIDER=bedrock
 #   * .venv built from requirements.txt
 #   * Podman PostgreSQL container running with schemas pre-initialized
-#     (Database schema is now deployed via CI/CD pipeline; see app/core/src/db/init.sql)
+#     (Database schema is now deployed via CI/CD pipeline; see app/core_backend/src/db/init.sql)
 #   * Enums have been moved to app/core/src/app/utils/enums.py and app/orchestrator/enums.py
 #
 # STS credentials expire every few hours. Re-run after refreshing .env.
@@ -163,7 +163,7 @@ banner "Connectivity checks"
 $checksOk = $true
 
 # ── PostgreSQL ─────────────────────────────────────────────────────────────────
-# Note: Database schema is now deployed via CI/CD pipeline (app/core/src/db/init.sql)
+# Note: Database schema is now deployed via CI/CD pipeline (app/core_backend/src/db/init.sql)
 # This check verifies basic connectivity, initializes schemas if missing, and validates readiness.
 $pgScript = @'
 import asyncio, asyncpg, os, sys
@@ -197,12 +197,12 @@ async def main():
     # Initialize backend schema if missing
     if not backend_exists:
         try:
-            backend_sql_path = r"app\core\src\db\init.sql"
+            backend_sql_path = r"app\core_backend\src\db\init.sql"
             if os.path.exists(backend_sql_path):
                 with open(backend_sql_path, "r") as f:
                     sql = f.read()
                 await conn.execute(sql)
-                print("INIT: Backend schema initialized from app/core/src/db/init.sql")
+                print("INIT: Backend schema initialized from app/core_backend/src/db/init.sql")
             else:
                 print(f"WARN: Backend schema missing and {backend_sql_path} not found", file=sys.stderr)
         except Exception as exc:
