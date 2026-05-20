@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 import aiobotocore.session
 
-from app.core.config import config
+from app.config import config
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)

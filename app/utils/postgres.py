@@ -4,7 +4,7 @@ from typing import Optional
 import asyncpg
 from fastapi import Depends
 
-from app.core.config import config
+from app.config import config
 
 logger = get_logger(__name__)
 

@@ -13,6 +13,7 @@ if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
 from app.agents.evaluation.src.agents.schemas import AgentResult  # noqa: E402
+from app.agents.evaluation.src.config import PipelineConfig  # noqa: E402
 from app.config import config  # noqa: E402
 from app.agents.evaluation.src.utils.document_parser import _parse_bytes  # noqa: E402
 

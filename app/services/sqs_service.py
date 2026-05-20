@@ -3,7 +3,7 @@ from typing import Any
 
 import aiobotocore.session
 
-from app.core.config import config
+from app.config import config
 from app.models.task_message import TaskMessage
 from app.utils.logger import get_logger
 
