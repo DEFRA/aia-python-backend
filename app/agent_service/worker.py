@@ -33,19 +33,19 @@ _load_dotenv(
     _EVAL_ROOT / ".env", override=False
 )  # override=False: root .env values take precedence
 
-from app.agents.evaluation.src.agents.schemas import (  # noqa: E402
+from src.agents.schemas import (  # noqa: E402
     AgentResult,
     AssessmentRow,
     PolicyDocResult,
 )
-from app.agents.evaluation.src.config import DatabaseConfig  # noqa: E402
-from app.agents.evaluation.src.utils.document_parser import _parse_bytes  # noqa: E402
-from app.agents.evaluation.src.db.questions_repo import (  # noqa: E402
+from src.config import DatabaseConfig  # noqa: E402
+from src.utils.document_parser import _parse_bytes  # noqa: E402
+from src.db.questions_repo import (  # noqa: E402
     fetch_all_policy_docs_by_category,
     fetch_questions_by_policy_doc_id,
 )
-from app.agents.evaluation.src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
-from app.agents.evaluation.src.utils.llm_client import make_llm_client  # noqa: E402
+from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
+from src.utils.llm_client import make_llm_client  # noqa: E402
 
 from app.config import config as app_config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
