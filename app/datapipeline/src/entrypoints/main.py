@@ -159,6 +159,23 @@ def _build_extractor() -> QuestionExtractor:
     session_token = os.environ.get("AWS_SESSION_TOKEN", "").strip() or None
     provider = os.environ.get("LLM_PROVIDER", "bedrock").strip().lower()
 
+    # Retry configuration for LLM question extraction.
+    # LLM_MAX_RETRIES       — total attempts per URL (default: 3).
+    # LLM_RETRY_WAIT_SECONDS — initial/minimum backoff wait in seconds (default: 2);
+    #                          the wait doubles each retry up to 16× the initial value.
+    try:
+        max_retries = int(os.environ.get("LLM_MAX_RETRIES", "3"))
+    except ValueError:
+        logger.warning("LLM_MAX_RETRIES is not a valid integer — defaulting to 3")
+        max_retries = 3
+    try:
+        retry_wait_seconds = float(os.environ.get("LLM_RETRY_WAIT_SECONDS", "2.0"))
+    except ValueError:
+        logger.warning(
+            "LLM_RETRY_WAIT_SECONDS is not a valid number — defaulting to 2.0"
+        )
+        retry_wait_seconds = 2.0
+
     return QuestionExtractor(
         provider=provider,
         aws_access_key=access_key or None,
@@ -167,6 +184,8 @@ def _build_extractor() -> QuestionExtractor:
         aws_region=os.environ["AWS_DEFAULT_REGION"],
         model_id=os.environ["MODEL_ID"],
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
+        max_retries=max_retries,
+        retry_wait_seconds=retry_wait_seconds,
     )
 
 
@@ -238,7 +257,7 @@ def run() -> dict[str, int]:
         try:
             questions, llm_usage = extractor.extract(url, content, source.category)
         except Exception as exc:
-            logger.error("Question extraction failed url=%s: %s", url, exc)
+            logger.exception("Question extraction failed url=%s: %s", url, exc)
             failed += 1
             continue
 
@@ -287,7 +306,7 @@ def run() -> dict[str, int]:
                 f"policy_doc_id={policy_doc_id}"
             )
         except Exception as exc:
-            logger.error("DB write failed url=%s: %s", url, exc)
+            logger.exception("DB write failed url=%s: %s", url, exc)
             conn.rollback()
             failed += 1
             continue
