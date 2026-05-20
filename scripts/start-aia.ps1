@@ -415,7 +415,7 @@ if (-not (Test-Path $LogDir)) {
 }
 
 # Kill any stale processes from a previous run
-@("app.api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
+@("api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
     Get-WmiObject Win32_Process -Filter "CommandLine LIKE '%$_%'" -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }

@@ -50,7 +50,7 @@ def main() -> None:  # pragma: no cover
         os.environ.pop("HTTPS_PROXY", None)
 
     server_kwargs = {
-        "app": "app.api.main:app",
+        "app": "api.main:app",
         "host": config.app.host,
         "port": config.app.port,
         "reload": config.app.env == "development",

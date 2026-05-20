@@ -12,11 +12,10 @@ _EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
-from src.agents.schemas import AgentResult  # noqa: E402
-from src.config import PipelineConfig  # noqa: E402
-from src.utils.document_parser import _parse_bytes  # noqa: E402
+from app.agents.evaluation.src.agents.schemas import AgentResult  # noqa: E402
+from app.config import config  # noqa: E402
+from app.agents.evaluation.src.utils.document_parser import _parse_bytes  # noqa: E402
 
-from app.core.config import config  # noqa: E402
 from app.orchestrator.enums import DocumentStatus  # noqa: E402
 from app.models.orchestrate_request import OrchestrateRequest  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
