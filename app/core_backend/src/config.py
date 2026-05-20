@@ -37,8 +37,8 @@ DEFAULT_LLM_PRICING_USD_PER_MTOKENS: dict[str, dict[str, float]] = {
 
 class AWSConfig(BaseModel):
     region: str = "eu-west-2"
-    access_key_id: str = "test"
-    secret_access_key: str = "test"
+    access_key_id: Optional[str] = None
+    secret_access_key: Optional[str] = None
     session_token: Optional[str] = None
     endpoint_url: Optional[str] = None
 
@@ -162,11 +162,12 @@ class AppConfig(BaseSettings):
 
     @property
     def aws(self) -> AWSConfig:
+        use_static_credentials = self.env.lower() != "production"
         return AWSConfig(
             region=self.aws_region,
-            access_key_id=self.aws_access_key,
-            secret_access_key=self.aws_secret_key,
-            session_token=self.aws_session_token,
+            access_key_id=self.aws_access_key if use_static_credentials else None,
+            secret_access_key=self.aws_secret_key if use_static_credentials else None,
+            session_token=self.aws_session_token if use_static_credentials else None,
             endpoint_url=self.aws_endpoint,
         )
 

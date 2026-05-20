@@ -16,9 +16,10 @@ class S3Service:
         client_kwargs: dict = {
             "service_name": "s3",
             "region_name": config.aws.region,
-            "aws_access_key_id": config.aws.access_key_id,
-            "aws_secret_access_key": config.aws.secret_access_key,
         }
+        if config.aws.access_key_id and config.aws.secret_access_key:
+            client_kwargs["aws_access_key_id"] = config.aws.access_key_id
+            client_kwargs["aws_secret_access_key"] = config.aws.secret_access_key
         if config.aws.session_token:
             client_kwargs["aws_session_token"] = config.aws.session_token
         if config.aws.endpoint_url:
