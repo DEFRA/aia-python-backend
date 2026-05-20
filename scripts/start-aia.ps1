@@ -463,9 +463,9 @@ function Start-Service {
     info $Name "port=$Port  PID=$($proc.Id)  log=logs\$logName"
 }
 
-$CoreSrcPath = Join-Path $RepoRoot "app\core\src"
+$CoreSrcPath = Join-Path $RepoRoot "app\core_backend\src"
 
-Start-Service "core-backend"  "app.api.main:app"           8086 (Join-Path $LogDir "core-backend.log") $CoreSrcPath
+Start-Service "core-backend"  "api.main:app"           8086 (Join-Path $LogDir "core-backend.log") $CoreSrcPath
 Start-Service "orchestrator"  "app.orchestrator.main:app"  8001 (Join-Path $LogDir "orchestrator.log")
 Start-Service "agent-service" "app.agent_service.main:app" 8002 (Join-Path $LogDir "agent-service.log")
 
