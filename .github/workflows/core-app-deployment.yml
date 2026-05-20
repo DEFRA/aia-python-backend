@@ -1,0 +1,135 @@
+name: Core-app-deployment
+
+on:
+  push:
+    branches:
+      - main
+      - development
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - dev
+          - tst
+          - pre
+          - production
+
+env:
+  REPOSITORY: aia/backend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_ENV_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ENV_ACCOUNT }}:role/${{ secrets.AWS_ENV_ROLE }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate raw tag
+        id: raw-tag
+        run: |
+          echo "raw_tag=$(git describe --always --tags)" >> $GITHUB_OUTPUT
+
+      - name: Generate semantic version tag for main
+        id: semver-main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "semver=0.${GITHUB_RUN_NUMBER}.0" >> $GITHUB_OUTPUT
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          flavor: |
+            latest=false
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.REPOSITORY }}
+          tags: |
+            type=semver,event=tag,priority=900,pattern={{version}},value=${{ steps.raw-tag.outputs.raw_tag }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,priority=800,value=${{ steps.semver-main.outputs.semver }},enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,priority=800,value=${{ steps.raw-tag.outputs.raw_tag }},enable=${{ github.ref == format('refs/heads/{0}', 'development') }}
+            type=raw,event=branch,value={{branch}}-{{sha}},enable=${{ startsWith(github.ref, 'refs/heads/F') }}
+          labels: |
+            org.opencontainers.image.licenses=OGL-UK-3.0
+
+      - name: Prepare Docker build args
+        id: build-args
+        env:
+          PYTHON_ENV: ${{ vars.PYTHON_ENV || 'production' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          PY_ENV_NORMALIZED=$(echo "${PYTHON_ENV}" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "build_args<<EOF"
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
+            echo "PYTHON_ENV=${{ vars.PYTHON_ENV || 'production' }}"
+            echo "HOST=${{ vars.HOST }}"
+            echo "PORT=${{ vars.PORT }}"
+            echo "LOG_LEVEL=${{ vars.LOG_LEVEL }}"
+            echo "USER_ID_HEADER=${{ vars.USER_ID_HEADER }}"
+            echo "DB_HOST=${{ secrets.DB_HOST }}"
+            echo "DB_PORT=${{ vars.DB_PORT }}"
+            echo "DB_NAME=${{ secrets.DB_NAME }}"
+            echo "DB_USER=${{ secrets.DB_USER }}"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}"
+            echo "AWS_DEFAULT_REGION=${{ vars.AWS_DEFAULT_REGION }}"
+            echo "S3_BUCKET_NAME=${{ vars.S3_BUCKET_NAME }}"
+            echo "S3_UPLOAD_PREFIX=${{ vars.S3_UPLOAD_PREFIX }}"
+            echo "ORCHESTRATOR_URL=${{ vars.ORCHESTRATOR_URL }}"
+            echo "MAX_FILE_UPLOAD=${{ vars.MAX_FILE_UPLOAD }}"
+            if [ "${PY_ENV_NORMALIZED}" != "production" ]; then
+              echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
+              echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+              echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: app/core_backend/
+          build-args: ${{ steps.build-args.outputs.build_args }}
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Generate job summary
+        id: summary
+        run: |
+          {
+            echo "### Docker Image details"
+            echo "The tag is **${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}**"
+            echo "| Label      | Value |"
+            echo "| ---------- | ----- |"
+            echo "| created    | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }} |"
+            echo "| description| ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.description'] }} |"
+            echo "| licenses   | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.licenses'] }} |"
+            echo "| revision   | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }} |"
+            echo "| source     | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.source'] }} |"
+            echo "| title      | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.title'] }} |"
+            echo "| url        | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.url'] }} |"
+            echo "| version    | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }} |"
+          } >> $GITHUB_STEP_SUMMARY

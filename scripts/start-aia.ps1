@@ -13,7 +13,9 @@
 #   * .env in the repo root with AWS_*, S3_BUCKET_NAME, TASK/STATUS_QUEUE_URL,
 #     POSTGRES_URI (or DB_* vars), and LLM_PROVIDER=bedrock
 #   * .venv built from requirements.txt
-#   * Podman PostgreSQL container running
+#   * Podman PostgreSQL container running with schemas pre-initialized
+#     (Database schema is now deployed via CI/CD pipeline; see app/core_backend/src/db/init.sql)
+#   * Enums have been moved to app/core/src/app/utils/enums.py and app/orchestrator/enums.py
 #
 # STS credentials expire every few hours. Re-run after refreshing .env.
 
@@ -161,6 +163,8 @@ banner "Connectivity checks"
 $checksOk = $true
 
 # ── PostgreSQL ─────────────────────────────────────────────────────────────────
+# Note: Database schema is now deployed via CI/CD pipeline (app/core_backend/src/db/init.sql)
+# This check verifies basic connectivity, initializes schemas if missing, and validates readiness.
 $pgScript = @'
 import asyncio, asyncpg, os, sys
 
@@ -179,17 +183,66 @@ async def main():
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         sys.exit(1)
-    row = await conn.fetchrow(
-        "SELECT COUNT(*) AS n FROM data_pipeline.questions WHERE isactive = TRUE"
+    
+    # Check if backend schema exists
+    backend_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = '\''backend'\'')"
     )
-    await conn.close()
-    print(f"connected — {row['n']} active questions in data_pipeline.questions")
+    
+    # Check if data_pipeline schema exists
+    data_pipeline_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = '\''data_pipeline'\'')"
+    )
+    
+    # Initialize backend schema if missing
+    if not backend_exists:
+        try:
+            backend_sql_path = r"app\core_backend\src\db\init.sql"
+            if os.path.exists(backend_sql_path):
+                with open(backend_sql_path, "r") as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                print("INIT: Backend schema initialized from app/core_backend/src/db/init.sql")
+            else:
+                print(f"WARN: Backend schema missing and {backend_sql_path} not found", file=sys.stderr)
+        except Exception as exc:
+            print(f"WARN: Could not initialize backend schema: {exc}", file=sys.stderr)
+    
+    # Initialize data_pipeline schema if missing
+    if not data_pipeline_exists:
+        try:
+            data_sql_path = r"app\datapipeline\db\init.sql"
+            if os.path.exists(data_sql_path):
+                with open(data_sql_path, "r") as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                print("INIT: Data pipeline schema initialized from app/datapipeline/db/init.sql")
+            else:
+                print(f"WARN: Data pipeline schema missing and {data_sql_path} not found", file=sys.stderr)
+        except Exception as exc:
+            print(f"WARN: Could not initialize data pipeline schema: {exc}", file=sys.stderr)
+    
+    # Validate schemas are ready
+    try:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM data_pipeline.questions WHERE isactive = TRUE"
+        )
+        backend_check = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM backend.users"
+        )
+        await conn.close()
+        print(f"OK: Connected — {row['n']} active questions, backend schema ready")
+    except Exception as exc:
+        print(f"FAIL (schema validation failed): {exc}", file=sys.stderr)
+        sys.exit(1)
 
 asyncio.run(main())
 '@
 $pgOut = Invoke-PythonCheck $pgScript
-if ($pgOut -match "^connected") {
+if ($pgOut -match "^OK") {
     ok "PostgreSQL" ($pgOut -join " ")
+} elseif ($pgOut -match "^INIT") {
+    warn "PostgreSQL" ($pgOut -join " ")
 } else {
     fail "PostgreSQL" ($pgOut -join " ")
     info "" "Start container:  .\scripts\start-datapipeline-dev.ps1"
@@ -362,7 +415,7 @@ if (-not (Test-Path $LogDir)) {
 }
 
 # Kill any stale processes from a previous run
-@("app.api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
+@("api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
     Get-WmiObject Win32_Process -Filter "CommandLine LIKE '%$_%'" -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
@@ -376,27 +429,43 @@ function Start-Service {
         [string]$Name,
         [string]$Module,
         [int]   $Port,
-        [string]$LogFile
+        [string]$LogFile,
+        [string]$ExtraPythonPath
     )
     $ErrFile = $LogFile -replace '\.log$', '.err'
     Set-Content $LogFile ""
     Set-Content $ErrFile ""
 
-    $proc = Start-Process `
-        -FilePath $VenvUvicorn `
-        -ArgumentList $Module, "--host", "127.0.0.1", "--port", $Port `
-        -WorkingDirectory $RepoRoot `
-        -RedirectStandardOutput $LogFile `
-        -RedirectStandardError  $ErrFile `
-        -NoNewWindow `
-        -PassThru
+    $prevPythonPath = $env:PYTHONPATH
+    if ($ExtraPythonPath) {
+        if ($env:PYTHONPATH) {
+            $env:PYTHONPATH = "$ExtraPythonPath;$env:PYTHONPATH"
+        } else {
+            $env:PYTHONPATH = $ExtraPythonPath
+        }
+    }
+
+    try {
+        $proc = Start-Process `
+            -FilePath $VenvUvicorn `
+            -ArgumentList $Module, "--host", "127.0.0.1", "--port", $Port `
+            -WorkingDirectory $RepoRoot `
+            -RedirectStandardOutput $LogFile `
+            -RedirectStandardError  $ErrFile `
+            -NoNewWindow `
+            -PassThru
+    } finally {
+        $env:PYTHONPATH = $prevPythonPath
+    }
 
     Add-Content $PidFile "${Name}:$($proc.Id)"
     $logName = Split-Path $LogFile -Leaf
     info $Name "port=$Port  PID=$($proc.Id)  log=logs\$logName"
 }
 
-Start-Service "core-backend"  "app.api.main:app"           8086 (Join-Path $LogDir "core-backend.log")
+$CoreSrcPath = Join-Path $RepoRoot "app\core_backend\src"
+
+Start-Service "core-backend"  "api.main:app"           8086 (Join-Path $LogDir "core-backend.log") $CoreSrcPath
 Start-Service "orchestrator"  "app.orchestrator.main:app"  8001 (Join-Path $LogDir "orchestrator.log")
 Start-Service "agent-service" "app.agent_service.main:app" 8002 (Join-Path $LogDir "agent-service.log")
 

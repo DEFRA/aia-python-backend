@@ -10,7 +10,7 @@ def get_logger(name: str) -> logging.Logger:
     if not logging.getLogger().hasHandlers():
         # Late import to avoid circular dependency with app.config
         try:
-            from app.config import config
+            from config import config
 
             level_name = config.app.log_level.value.upper()
         except (ImportError, AttributeError):
@@ -25,3 +25,5 @@ def get_logger(name: str) -> logging.Logger:
         )
 
     return logging.getLogger(name)
+
+

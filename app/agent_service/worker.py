@@ -34,7 +34,6 @@ _load_dotenv(
 )  # override=False: root .env values take precedence
 
 from src.agents.schemas import (  # noqa: E402
-    AgentLLMOutput,
     AgentResult,
     AssessmentRow,
     PolicyDocResult,
@@ -48,7 +47,7 @@ from src.db.questions_repo import (  # noqa: E402
 from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
 from src.utils.llm_client import make_llm_client  # noqa: E402
 
-from app.core.config import config as app_config  # noqa: E402
+from app.config import config as app_config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
 from app.services.s3_service import S3Service  # noqa: E402
@@ -206,7 +205,7 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
         tokens = {"input_tokens": 0, "output_tokens": 0}
         try:
             questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
-            llm_output: AgentLLMOutput = await asyncio.wait_for(
+            llm_output = await asyncio.wait_for(
                 agent.assess(document=document, questions=questions),
                 timeout=_AGENT_TIMEOUT_SECONDS,
             )

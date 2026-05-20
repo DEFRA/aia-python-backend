@@ -3,9 +3,9 @@ from typing import Any
 
 import aiobotocore.session
 
-from app.config import config
-from app.models.task_message import TaskMessage
-from app.utils.logger import get_logger
+from config import config
+from models.task_message import TaskMessage
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -17,9 +17,10 @@ class SQSService:
         client_kwargs: dict[str, Any] = {
             "service_name": "sqs",
             "region_name": config.aws.region,
-            "aws_access_key_id": config.aws.access_key_id,
-            "aws_secret_access_key": config.aws.secret_access_key,
         }
+        if config.aws.access_key_id and config.aws.secret_access_key:
+            client_kwargs["aws_access_key_id"] = config.aws.access_key_id
+            client_kwargs["aws_secret_access_key"] = config.aws.secret_access_key
         if config.aws.session_token:
             client_kwargs["aws_session_token"] = config.aws.session_token
         if config.aws.endpoint_url:
@@ -92,3 +93,5 @@ class SQSService:
                 QueueUrl=queue_url,
                 ReceiptHandle=receipt_handle,
             )
+
+
