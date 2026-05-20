@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from typing import Optional
 import aiobotocore.session
 
-from app.config import config
-from app.utils.logger import get_logger
+from config import config
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -16,9 +16,10 @@ class S3Service:
         client_kwargs: dict = {
             "service_name": "s3",
             "region_name": config.aws.region,
-            "aws_access_key_id": config.aws.access_key_id,
-            "aws_secret_access_key": config.aws.secret_access_key,
         }
+        if config.aws.access_key_id and config.aws.secret_access_key:
+            client_kwargs["aws_access_key_id"] = config.aws.access_key_id
+            client_kwargs["aws_secret_access_key"] = config.aws.secret_access_key
         if config.aws.session_token:
             client_kwargs["aws_session_token"] = config.aws.session_token
         if config.aws.endpoint_url:
@@ -61,3 +62,5 @@ class S3Service:
             response = await client.get_object(Bucket=bucket_name, Key=s3_key)
             async with response["Body"] as stream:
                 return await stream.read()
+
+

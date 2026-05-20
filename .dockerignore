@@ -1,0 +1,60 @@
+# Ignore Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Ignore test and coverage files
+.coverage
+htmlcov/
+tests/
+*.log
+
+# Ignore local environment and config files
+.env
+.env.*
+*.env
+*.local
+
+# Ignore editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Ignore Git and CI/CD files
+.git/
+.gitignore
+.github/
+
+# Ignore documentation and markdown
+*.md
+docs/
+
+# Ignore node and frontend artifacts
+node_modules/
+*.tsbuildinfo
+
+# Ignore Docker and compose artifacts
+*.tar
+*.img
+compose.yml
+
+# Ignore data, debug, and output folders
+logs/
+data/
+debug/
+output/
+
+# Ignore postman collections
+postman-collection/
+
+# Ignore scripts not needed in image
+scripts/
+
+# Ignore any other unwanted files
+*.bak
+*.swp
+*.tmp

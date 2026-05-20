@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from app.agent_service.worker import run_worker
-from app.core.config import config
+from app.config import config
 from app.utils.logger import get_logger
 
 logger = get_logger("app.agent_service.main")

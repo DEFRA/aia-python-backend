@@ -67,8 +67,11 @@ MODE="${1:---start}"   # default to --start if no arg
 if [[ "$MODE" == "--logs" ]]; then
     exec tail -f \
         "$LOG_DIR/core-backend.log" \
+    "$LOG_DIR/core-backend.err" \
         "$LOG_DIR/orchestrator.log" \
-        "$LOG_DIR/agent-service.log"
+    "$LOG_DIR/orchestrator.err" \
+    "$LOG_DIR/agent-service.log" \
+    "$LOG_DIR/agent-service.err"
 fi
 
 # ── --stop mode ───────────────────────────────────────────────────────────────
@@ -305,28 +308,43 @@ banner "Starting AIA backend services"
 mkdir -p "$LOG_DIR"
 
 # Kill any stale processes from a previous run
-for pattern in "app.api.main:app" "app.orchestrator.main:app" "app.agent_service.main:app"; do
+for pattern in "api.main:app" "app.orchestrator.main:app" "app.agent_service.main:app"; do
     pkill -f "$pattern" 2>/dev/null || true
 done
 sleep 1
 
 > "$PID_FILE"
 
-# start_service <display-name> <uvicorn-module> <port> <logfile>
+# start_service <display-name> <uvicorn-module> <port> <logfile> [extra_pythonpath]
 start_service() {
-    local name="$1" module="$2" port="$3" logfile="$4"
+    local name="$1" module="$2" port="$3" logfile="$4" extra_pythonpath="${5:-}"
+    local errfile="${logfile%.log}.err"
     # Truncate the log so the new run starts clean
     > "$logfile"
+    > "$errfile"
+    local prev_pythonpath="${PYTHONPATH:-}"
+    if [[ -n "$extra_pythonpath" ]]; then
+        if [[ -n "${PYTHONPATH:-}" ]]; then
+            export PYTHONPATH="$extra_pythonpath:$PYTHONPATH"
+        else
+            export PYTHONPATH="$extra_pythonpath"
+        fi
+    fi
     "$VENV_UVICORN" "$module" \
         --host 127.0.0.1 \
         --port "$port" \
-        >> "$logfile" 2>&1 &
+        >> "$logfile" 2>> "$errfile" &
+    if [[ -n "$extra_pythonpath" ]]; then
+        export PYTHONPATH="$prev_pythonpath"
+    fi
     local pid=$!
     echo "${name}:${pid}" >> "$PID_FILE"
     info "$name" "port=$port  PID=$pid  log=logs/$(basename "$logfile")"
 }
 
-start_service "core-backend"  "app.api.main:app"            8086 "$LOG_DIR/core-backend.log"
+CORE_SRC_PATH="$REPO_ROOT/app/core_backend/src"
+
+start_service "core-backend"  "api.main:app"                8086 "$LOG_DIR/core-backend.log" "$CORE_SRC_PATH"
 start_service "orchestrator"  "app.orchestrator.main:app"   8001 "$LOG_DIR/orchestrator.log"
 start_service "agent-service" "app.agent_service.main:app"  8002 "$LOG_DIR/agent-service.log"
 

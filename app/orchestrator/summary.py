@@ -6,7 +6,7 @@ _EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
-from src.agents.schemas import AgentResult, AssessmentRow  # noqa: E402
+from app.agents.evaluation.src.agents.schemas import AgentResult, AssessmentRow  # noqa: E402
 
 
 @runtime_checkable

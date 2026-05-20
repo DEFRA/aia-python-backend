@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 *.pyo
 connection_test.py
-config.py
 db.py
 !app/datapipeline/src/db.py
 sharepoint.py
