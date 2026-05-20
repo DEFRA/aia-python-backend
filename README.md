@@ -417,6 +417,39 @@ To add a new template, add an entry to `TEMPLATE_AGENTS` and redeploy. If a `tem
 
 Each agent type in the list becomes one `TaskMessage` on the `aia-tasks` queue. The Orchestrator waits for all of them to respond before writing a terminal status. See [docs/adr-orchestrator-fan-out.md](docs/adr-orchestrator-fan-out.md) for the full design decision.
 
+## Agent Retry Policy
+
+Each call from an evaluation agent (`security`, `technical`, `tagging`) to the LLM is wrapped by a [tenacity](https://tenacity.readthedocs.io/) retry decorator defined in [app/agents/evaluation/src/utils/retry.py](app/agents/evaluation/src/utils/retry.py). The Anthropic SDK's own silent retries are disabled (`llm.sdk_max_retries: 0`) so retry logic lives in exactly one place.
+
+**Why not just use the SDK's built-in retries?**
+
+1. **Catches post-response failures** — the SDK only retries transport-level errors. Our policy also retries `json.JSONDecodeError`, which fires when the model returns malformed JSON — the SDK can't see that because it happens after the response is parsed by our code.
+2. **Visibility** — SDK retries are silent. Tenacity emits a `WARNING` via `before_sleep_log` before each sleep, so retry storms surface in CloudWatch instead of hiding inside the client.
+3. **Single source of truth** — running both layers compounds delays unpredictably and double-counts attempts. Disabling SDK retries (`sdk_max_retries: 0`) keeps backoff math in exactly one place.
+4. **Ops-tunable without redeploy** — backoff numbers come from `config.yaml` / `RETRY_*` env vars, so we can dial attempts/waits per environment without code changes; the SDK's retry is fixed at construction.
+
+**Retried (transient):**
+- `anthropic.APIConnectionError`, `APITimeoutError`, `RateLimitError`
+- `anthropic.APIStatusError` with a 5xx `status_code`
+- `json.JSONDecodeError` (malformed LLM JSON)
+
+**Re-raised on the first attempt (terminal):**
+- `APIStatusError` with any non-5xx status (4xx, 3xx)
+- `pydantic.ValidationError`, `KeyError`, anything else
+
+Backoff is exponential with jitter and capped by `max_wait_s`. Tunables are read from the `retry:` block of [app/agents/evaluation/config.yaml](app/agents/evaluation/config.yaml) and can be overridden per-environment via env vars:
+
+| YAML key | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `retry.max_attempts` | `RETRY_MAX_ATTEMPTS` | `3` | Total attempts (1 disables retry) |
+| `retry.initial_wait_s` | `RETRY_INITIAL_WAIT_S` | `2` | First backoff wait, seconds |
+| `retry.max_wait_s` | `RETRY_MAX_WAIT_S` | `30` | Cap on backoff wait, seconds |
+| `retry.jitter_s` | `RETRY_JITTER_S` | `1` | Random jitter added per wait |
+| `llm.sdk_max_retries` | `LLM_SDK_MAX_RETRIES` | `0` | SDK-level retries (keep at 0) |
+| `llm.request_timeout_s` | `LLM_REQUEST_TIMEOUT_S` | `120` | Per-request timeout, seconds |
+
+Each retry attempt logs a `WARNING` (via `tenacity.before_sleep_log`) so retry storms surface in service logs.
+
 ## Verification and Debugging
 
 ### Run connectivity checks

@@ -1,6 +1,8 @@
 """Tests for the TechnicalAgent.
 
-assess() returns AgentLLMOutput and malformed payloads raise ValueError.
+assess() returns AgentLLMOutput; malformed JSON raises JSONDecodeError
+(transient — tenacity will retry); valid JSON missing the ``Technical`` key
+raises KeyError (terminal).
 """
 
 from __future__ import annotations
@@ -14,6 +16,15 @@ import pytest
 from src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary
 from src.agents.technical_agent import TechnicalAgent
 from src.config import TechnicalAgentConfig
+
+
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch asyncio.sleep so tenacity backoffs run instantly during retries."""
+    import asyncio
+
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock(return_value=None))
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -121,15 +132,23 @@ async def test_technical_agent_rows_have_correct_question_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_technical_agent_raises_on_invalid_payload() -> None:
-    """Unparseable JSON or a missing ``Technical`` top-level key must raise ValueError."""
-    # Case 1: malformed JSON
+    """Malformed JSON raises JSONDecodeError; missing top-level key raises KeyError.
+
+    Both cases used to be wrapped in a single ``ValueError``. After the
+    tenacity retry change (Plan 12) the JSONDecodeError propagates as-is so the
+    retry predicate can classify it as transient, and the missing-key case
+    raises KeyError so it is treated as terminal.
+    """
+    # Case 1: malformed JSON — propagates as JSONDecodeError (transient).
+    # The autouse ``_no_sleep`` fixture keeps tenacity's backoff instant; after
+    # exhausting retries the original JSONDecodeError is re-raised.
     bad_client: MagicMock = _make_mock_client("Not JSON at all")
     agent: TechnicalAgent = _make_agent(bad_client)
-    with pytest.raises(ValueError, match="Could not parse assessment response"):
+    with pytest.raises(json.JSONDecodeError):
         await agent.assess(_DOCUMENT, _QUESTIONS)
 
-    # Case 2: valid JSON but missing top-level ``Technical`` key
+    # Case 2: valid JSON but missing top-level ``Technical`` key — terminal.
     wrong_key_client: MagicMock = _make_mock_client(json.dumps({"Security": {"Assessments": []}}))
     agent = _make_agent(wrong_key_client)
-    with pytest.raises(ValueError, match="Could not parse assessment response"):
+    with pytest.raises(KeyError):
         await agent.assess(_DOCUMENT, _QUESTIONS)
