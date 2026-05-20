@@ -33,7 +33,7 @@ load_dotenv(_ROOT / ".env")
 
 sys.path.insert(0, str(_ROOT))
 
-from app.core.config import config  # noqa: E402
+from app.config import config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
 

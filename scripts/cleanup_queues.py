@@ -55,7 +55,7 @@ load_dotenv(_ROOT / ".env")
 
 sys.path.insert(0, str(_ROOT))
 
-from app.core.config import config  # noqa: E402
+from app.config import config  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:

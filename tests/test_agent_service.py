@@ -4,18 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-_EVAL_ROOT = Path(__file__).resolve().parent.parent / "app" / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary  # noqa: E402
+from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary  # noqa: E402
 
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402

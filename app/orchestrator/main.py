@@ -1,21 +1,18 @@
 import asyncio
-import sys
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
+import sys
 from typing import Any
 
 from pydantic import ValidationError
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 
-_EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from app.agents.evaluation.src.agents.schemas import AgentResult  # noqa: E402
-from app.agents.evaluation.src.config import PipelineConfig  # noqa: E402
 from app.config import config  # noqa: E402
-from app.agents.evaluation.src.utils.document_parser import _parse_bytes  # noqa: E402
+from app.orchestrator.contracts import AgentResult  # noqa: E402
+from app.orchestrator.document_parser import _parse_bytes  # noqa: E402
+from app.orchestrator.pipeline_config import PipelineConfig  # noqa: E402
 
 from app.orchestrator.enums import DocumentStatus  # noqa: E402
 from app.models.orchestrate_request import OrchestrateRequest  # noqa: E402
@@ -36,6 +33,7 @@ logger = get_logger("app.orchestrator")
 # References: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html
 _MAX_SQS_MESSAGE_BYTES = 1024 * 1024
 _POSTGRES_INT_MAX = 2_147_483_647
+_MAX_PRIORITY_ACTIONS = int(os.getenv("MAX_PRIORITY_ACTIONS", "10"))
 
 _session_store = SessionStore()
 _summary_generator = MarkdownReportGenerator()
@@ -326,7 +324,7 @@ async def _process_document(doc_id: str, s3_key: str, template_type: str) -> Non
         collected = dict(session.collected_results)
         await _session_store.remove(doc_id)
 
-        _pipeline_cfg = PipelineConfig()
+        _pipeline_cfg = PipelineConfig(max_priority_actions=_MAX_PRIORITY_ACTIONS)
 
         # Group results by agent_type — each value is a list of AgentResult (or None on error).
         by_agent_type: dict[str, list[Any]] = {}

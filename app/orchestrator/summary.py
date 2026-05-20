@@ -1,12 +1,6 @@
-import sys
-from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-_EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from app.agents.evaluation.src.agents.schemas import AgentResult, AssessmentRow  # noqa: E402
+from app.orchestrator.contracts import AgentResult, AssessmentRow
 
 
 @runtime_checkable

@@ -121,17 +121,61 @@ async def main():
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         sys.exit(1)
-    row = await conn.fetchrow(
-        "SELECT COUNT(*) AS n FROM data_pipeline.questions WHERE isactive = TRUE"
+
+    # Check if schemas exist
+    backend_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'backend')"
     )
-    await conn.close()
-    print(f"connected — {row['n']} active questions in data_pipeline.questions")
+    data_pipeline_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'data_pipeline')"
+    )
+
+    # Initialize backend schema if missing
+    if not backend_exists:
+        try:
+            backend_sql_path = "app/core_backend/src/db/init.sql"
+            if os.path.exists(backend_sql_path):
+                with open(backend_sql_path) as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                print("INIT: Backend schema initialized from app/core_backend/src/db/init.sql")
+            else:
+                print(f"WARN: Backend schema missing and {backend_sql_path} not found", file=sys.stderr)
+        except Exception as exc:
+            print(f"WARN: Could not initialize backend schema: {exc}", file=sys.stderr)
+
+    # Initialize data_pipeline schema if missing
+    if not data_pipeline_exists:
+        try:
+            data_sql_path = "app/datapipeline/db/init.sql"
+            if os.path.exists(data_sql_path):
+                with open(data_sql_path) as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                print("INIT: Data pipeline schema initialized from app/datapipeline/db/init.sql")
+            else:
+                print(f"WARN: Data pipeline schema missing and {data_sql_path} not found", file=sys.stderr)
+        except Exception as exc:
+            print(f"WARN: Could not initialize data pipeline schema: {exc}", file=sys.stderr)
+
+    try:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM data_pipeline.questions WHERE isactive = TRUE"
+        )
+        backend_check = await conn.fetchrow("SELECT COUNT(*) AS n FROM backend.users")
+        await conn.close()
+        print(f"OK: Connected — {row['n']} active questions, backend schema ready")
+    except Exception as exc:
+        print(f"FAIL (schema validation failed): {exc}", file=sys.stderr)
+        sys.exit(1)
 
 asyncio.run(main())
 PY
 )
-if echo "$PG_OUT" | grep -q "^connected"; then
+if echo "$PG_OUT" | grep -q "^OK"; then
     ok "PostgreSQL" "$PG_OUT"
+elif echo "$PG_OUT" | grep -q "^INIT"; then
+    warn "PostgreSQL" "$PG_OUT"
 else
     fail "PostgreSQL" "$PG_OUT"
     info "" "Start container:  ./scripts/start-datapipeline-dev.sh"

@@ -15,7 +15,7 @@
 #   * .venv built from requirements.txt
 #   * Podman PostgreSQL container running with schemas pre-initialized
 #     (Database schema is now deployed via CI/CD pipeline; see app/core_backend/src/db/init.sql)
-#   * Enums have been moved to app/core/src/app/utils/enums.py and app/orchestrator/enums.py
+#   * Enums have been moved to app/core_backend/src/ and app/orchestrator/enums.py
 #
 # STS credentials expire every few hours. Re-run after refreshing .env.
 

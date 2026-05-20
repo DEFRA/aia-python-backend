@@ -44,15 +44,10 @@ load_dotenv(_ROOT / ".env")
 
 sys.path.insert(0, str(_ROOT))
 
-# Inject evaluation module root so src.* imports resolve (same as agent_service/worker.py)
-_EVAL_ROOT = _ROOT / "app" / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from app.core.config import config  # noqa: E402
+from app.config import config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
-from src.utils.document_parser import _parse_bytes  # noqa: E402
+from app.orchestrator.document_parser import _parse_bytes  # noqa: E402
 
 # --------------------------------------------------------------------------
 
