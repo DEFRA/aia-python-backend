@@ -18,6 +18,7 @@ from src.agents.schemas import (
 )
 from src.config import SecurityAgentConfig
 from src.utils.helpers import parse_llm_json
+from src.utils.retry import agent_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class SecurityAgent:
         self.client: anthropic.AsyncAnthropic = client
         self.agent_config: SecurityAgentConfig = agent_config
 
+    @agent_retry()
     async def assess(
         self,
         document: str,
@@ -80,19 +82,19 @@ class SecurityAgent:
 
         try:
             payload: dict[str, object] = parse_llm_json(raw_text)
-            security_block: dict[str, object] = payload["Security"]  # type: ignore[assignment]
-            raw_rows: list[RawAssessmentRow] = [
-                RawAssessmentRow.model_validate(row)
-                for row in cast(list[object], security_block["Assessments"])
-            ]
-            summary_obj: Summary = Summary.model_validate(security_block["Summary"])
-        except (json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.error(
-                "Failed to parse LLM response. raw_text=%.200s error=%s",
-                raw_text,
-                exc,
-            )
-            raise ValueError(f"Could not parse assessment response: {exc}") from exc
+        except json.JSONDecodeError:
+            # Transient: tenacity will retry. Log raw response for debugging.
+            logger.error("Failed to parse LLM response as JSON. raw_text=%.200s", raw_text)
+            raise
+
+        # KeyError and pydantic.ValidationError are terminal — let them propagate
+        # so tenacity's predicate classifies them correctly without retry.
+        security_block: dict[str, object] = payload["Security"]  # type: ignore[assignment]
+        raw_rows: list[RawAssessmentRow] = [
+            RawAssessmentRow.model_validate(row)
+            for row in cast(list[object], security_block["Assessments"])
+        ]
+        summary_obj: Summary = Summary.model_validate(security_block["Summary"])
 
         logger.info(
             "Assessment complete: %d questions, %d input / %d output tokens",

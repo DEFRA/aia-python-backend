@@ -1,8 +1,15 @@
 """Tests for evaluation pipeline configuration models."""
 
 import pytest
+from pydantic import ValidationError
 
-from src.config import EventBridgeConfig, PipelineConfig, TechnicalAgentConfig
+from src.config import (
+    EventBridgeConfig,
+    LLMConfig,
+    PipelineConfig,
+    RetryConfig,
+    TechnicalAgentConfig,
+)
 
 
 def test_redis_config_is_gone() -> None:
@@ -51,6 +58,53 @@ def test_pipeline_config_default_agent_types() -> None:
     """PipelineConfig should default ``agent_types`` to the two surviving agents."""
     config: PipelineConfig = PipelineConfig.model_construct()
     assert config.agent_types == ["security", "technical"]
+
+
+def test_llm_config_loads_sdk_max_retries_and_timeout_from_yaml(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLMConfig reads sdk_max_retries and request_timeout_s from config.yaml."""
+    for key in ("LLM_SDK_MAX_RETRIES", "LLM_REQUEST_TIMEOUT_S"):
+        monkeypatch.delenv(key, raising=False)
+
+    config: LLMConfig = LLMConfig()
+
+    assert config.sdk_max_retries == 0
+    assert config.request_timeout_s == 120.0
+
+
+def test_llm_config_env_var_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM_SDK_MAX_RETRIES env var should override the yaml value."""
+    monkeypatch.setenv("LLM_SDK_MAX_RETRIES", "5")
+    config: LLMConfig = LLMConfig()
+    assert config.sdk_max_retries == 5
+
+
+def test_retry_config_defaults_match_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RetryConfig should pick up the four documented yaml values."""
+    for key in (
+        "RETRY_MAX_ATTEMPTS",
+        "RETRY_INITIAL_WAIT_S",
+        "RETRY_MAX_WAIT_S",
+        "RETRY_JITTER_S",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    config: RetryConfig = RetryConfig()
+
+    assert config.max_attempts == 3
+    assert config.initial_wait_s == 2.0
+    assert config.max_wait_s == 30.0
+    assert config.jitter_s == 1.0
+
+
+def test_retry_config_validators_reject_bad_values() -> None:
+    """RetryConfig should reject max_attempts < 1 and max_wait_s < initial_wait_s."""
+    with pytest.raises(ValidationError):
+        RetryConfig(max_attempts=0)
+
+    with pytest.raises(ValidationError):
+        RetryConfig(initial_wait_s=10.0, max_wait_s=5.0)
 
 
 def test_technical_agent_config_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

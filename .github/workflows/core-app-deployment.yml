@@ -84,7 +84,6 @@ jobs:
           {
             echo "build_args<<EOF"
             echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
-            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}"
             echo "PYTHON_ENV=${{ vars.PYTHON_ENV || 'production' }}"
             echo "HOST=${{ vars.HOST }}"
             echo "PORT=${{ vars.PORT }}"
@@ -94,6 +93,7 @@ jobs:
             echo "DB_PORT=${{ vars.DB_PORT }}"
             echo "DB_NAME=${{ secrets.DB_NAME }}"
             echo "DB_USER=${{ secrets.DB_USER }}"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}"
             echo "AWS_DEFAULT_REGION=${{ vars.AWS_DEFAULT_REGION }}"
             echo "S3_BUCKET_NAME=${{ vars.S3_BUCKET_NAME }}"
             echo "S3_UPLOAD_PREFIX=${{ vars.S3_UPLOAD_PREFIX }}"
