@@ -28,8 +28,8 @@ module = ["tests.*", "*.tests.*", "agents_evaluation.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["reportlab.*"]
-ignore_errors = true  # reportlab doesn't have type stubs
+module = ["reportlab.*", "asyncpg.*", "boto3.*", "fitz.*"]
+ignore_errors = true  # third-party libraries without type stubs
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
