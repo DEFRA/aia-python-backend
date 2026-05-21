@@ -1,0 +1,85 @@
+# Centralised operational configuration for the Defra evaluation pipeline.
+#
+# Precedence (highest wins): environment variables > values in this file > code defaults.
+# Secrets (API keys, DB credentials) MUST NOT be placed in this file; they are sourced
+# from environment variables only.
+
+# --- LLM provider ---
+# "anthropic" uses the direct Anthropic API (ANTHROPIC_API_KEY required).
+# "bedrock"   uses AWS Bedrock (AWS credentials required; no API key needed).
+llm:
+  provider: "bedrock"
+
+# --- Agent models ---
+agents:
+  security:
+    model: "anthropic.claude-sonnet-4-6"
+    max_tokens: 4096
+    temperature: 0.0
+  technical:
+    model: "anthropic.claude-sonnet-4-6"
+    max_tokens: 16000
+    temperature: 0.0
+  tagging:
+    model: "anthropic.claude-sonnet-4-6"
+    batch_size: 15
+    max_tokens: 4096
+    temperature: 0.0
+
+# --- AWS infrastructure ---
+cloudwatch:
+  namespace: "Defra/Pipeline"
+
+eventbridge:
+  bus_name: "defra-pipeline"
+  source: "defra.pipeline"
+  region: "eu-west-2"
+
+# --- Pipeline constants ---
+pipeline:
+  agent_types:
+    - "security"
+    - "technical"
+  section_labels:
+    security: "Security Policy"
+    technical: "Technology Policy"
+  sqs_inline_limit: 240000  # bytes - leave headroom below 256 KB
+  agent_tag_map:
+    security:
+      - "authentication"
+      - "authorisation"
+      - "encryption"
+      - "vulnerability_management"
+      - "secrets_management"
+      - "network_security"
+    technical:
+      - "data_protection"
+      - "records_of_processing"
+      - "data_retention"
+      - "data_subject_rights"
+      - "lawful_basis"
+      - "privacy_notice"
+      - "dpia"
+      - "data_sharing"
+      - "ig_governance"
+      - "audit_trail"
+      - "information_classification"
+
+# --- Document parser ---
+parser:
+  min_text_chars: 100       # threshold for text-based vs scanned PDF
+  chunk_max_chars: 1500     # soft max characters per chunk
+
+# --- Database connection defaults (non-secret) ---
+database:
+  port: 5432
+
+# --- Local runner (main.py end-to-end driver) ---
+local_runner:
+  data_dir: "data"
+  assessment_filename: "sample_policy_assessment.json"
+  default_input_filename: "fictional_product_logistics_report.pdf"
+  output_filename_template: "pipeline_output_{doc_id}.json"
+  display_keys:
+    security: "Security"
+    technical: "Technical"

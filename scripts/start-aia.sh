@@ -308,7 +308,7 @@ banner "Starting AIA backend services"
 mkdir -p "$LOG_DIR"
 
 # Kill any stale processes from a previous run
-for pattern in "api.main:app" "app.orchestrator.main:app" "app.agent_service.main:app"; do
+for pattern in "api.main:app" "app.orchestrator.main:app" "app.agent_service.src.main:app"; do
     pkill -f "$pattern" 2>/dev/null || true
 done
 sleep 1
@@ -346,7 +346,7 @@ CORE_SRC_PATH="$REPO_ROOT/app/core_backend/src"
 
 start_service "core-backend"  "api.main:app"                8086 "$LOG_DIR/core-backend.log" "$CORE_SRC_PATH"
 start_service "orchestrator"  "app.orchestrator.main:app"   8001 "$LOG_DIR/orchestrator.log"
-start_service "agent-service" "app.agent_service.main:app"  8002 "$LOG_DIR/agent-service.log"
+start_service "agent-service" "app.agent_service.src.main:app"  8002 "$LOG_DIR/agent-service.log"
 
 # ── Wait then verify all three survived startup ───────────────────────────────
 sleep 2

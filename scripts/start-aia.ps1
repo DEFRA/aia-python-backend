@@ -415,7 +415,7 @@ if (-not (Test-Path $LogDir)) {
 }
 
 # Kill any stale processes from a previous run
-@("api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
+@("api.main:app", "app.orchestrator.main:app", "app.agent_service.src.main:app") | ForEach-Object {
     Get-WmiObject Win32_Process -Filter "CommandLine LIKE '%$_%'" -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
@@ -467,7 +467,7 @@ $CoreSrcPath = Join-Path $RepoRoot "app\core_backend\src"
 
 Start-Service "core-backend"  "api.main:app"           8086 (Join-Path $LogDir "core-backend.log") $CoreSrcPath
 Start-Service "orchestrator"  "app.orchestrator.main:app"  8001 (Join-Path $LogDir "orchestrator.log")
-Start-Service "agent-service" "app.agent_service.main:app" 8002 (Join-Path $LogDir "agent-service.log")
+Start-Service "agent-service" "app.agent_service.src.main:app" 8002 (Join-Path $LogDir "agent-service.log")
 
 # ── Wait then verify all three survived startup ────────────────────────────────
 Start-Sleep -Seconds 2
