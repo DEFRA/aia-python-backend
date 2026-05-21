@@ -114,13 +114,13 @@ jobs:
         run: pip install -r app/agents/evaluation/requirements-ci.txt
 
       - name: Ruff — lint
-        run: ruff check app/agents/evaluation/src/ app/agents/evaluation/tests/ app/agents/evaluation/main.py
+        run: ruff check app/agents/evaluation/src/ tests/agents-evaluation/ app/agents/evaluation/main.py
 
       - name: Ruff — format check
-        run: ruff format --check app/agents/evaluation/src/ app/agents/evaluation/tests/ app/agents/evaluation/main.py
+        run: ruff format --check app/agents/evaluation/src/ tests/agents-evaluation/ app/agents/evaluation/main.py
 
       - name: mypy — type check
-        run: mypy app/agents/evaluation/src/ app/agents/evaluation/tests/ app/agents/evaluation/main.py
+        run: mypy app/agents/evaluation/src/ tests/agents-evaluation/ app/agents/evaluation/main.py
 
       - name: pytest
         run: pytest -v --tb=short -x tests/agents-evaluation/
