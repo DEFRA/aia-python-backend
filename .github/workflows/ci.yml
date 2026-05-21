@@ -120,7 +120,7 @@ jobs:
         run: ruff format --check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
 
       - name: mypy — type check
-        run: mypy app/agents/evaluation/src/ app/agents/evaluation/main.py
+        run: mypy --config-file app/agents/evaluation/pyproject.toml app/agents/evaluation/src/ app/agents/evaluation/main.py
 
       - name: pytest
         run: pytest -v --tb=short -x tests/agents_evaluation/
