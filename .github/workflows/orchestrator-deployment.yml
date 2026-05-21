@@ -22,7 +22,7 @@ on:
           - production
 
 env:
-  REPOSITORY: aia/orchestrator
+  REPOSITORY: aia/backend-orchestrator
 
 jobs:
   build:
