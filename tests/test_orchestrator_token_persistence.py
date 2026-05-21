@@ -88,7 +88,7 @@ async def test_persist_status_tokens_persists_partial_payload():
 
 @pytest.mark.asyncio
 async def test_persist_status_tokens_clamps_negative_values_to_zero():
-    status_msg = StatusMessage(
+    status_msg = StatusMessage.model_construct(
         task_id="doc1_security",
         document_id="aaaaaaaa-0000-0000-0000-000000000001",
         agent_type="security",

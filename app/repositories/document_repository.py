@@ -2,6 +2,7 @@ from typing import Optional
 
 import asyncpg
 
+from app.models.document_record import DocumentRecord
 from app.utils.app_context import AppContext
 from app.utils.logger import get_logger
 
@@ -20,6 +21,27 @@ class DocumentRepository:
     def __init__(self, pool: asyncpg.Pool, context: AppContext):
         self.pool = pool
         self.context = context
+
+    async def claim_pending_documents(self, limit: int = 10) -> list[DocumentRecord]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH claimed AS (
+                    UPDATE backend.document_uploads
+                    SET status = 'Claimed'
+                    WHERE doc_id IN (
+                        SELECT doc_id FROM backend.document_uploads
+                        WHERE status = 'Pending'
+                        LIMIT $1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING doc_id, user_id, template_type, file_name, status, uploaded_ts
+                )
+                SELECT * FROM claimed
+                """,
+                limit,
+            )
+        return [DocumentRecord(**dict(row)) for row in rows]
 
     async def update_status(
         self,

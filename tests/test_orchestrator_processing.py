@@ -1,16 +1,11 @@
 import asyncio
-import sys
 from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-_EVAL_ROOT = Path(__file__).resolve().parent.parent / "app" / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from src.agents.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary  # noqa: E402
+from app.agent_service.src.models.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary
 
 from app.orchestrator.enums import DocumentStatus  # noqa: E402
 from app.orchestrator.main import _process_document, app  # noqa: E402

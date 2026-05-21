@@ -35,7 +35,7 @@ async def test_claim_pending_documents():
     conn.fetch.assert_called_once()
     sql = conn.fetch.call_args[0][0]
     assert "FOR UPDATE SKIP LOCKED" in sql
-    assert "UPDATE document_uploads" in sql
+    assert "UPDATE backend.document_uploads" in sql
 
 @pytest.mark.asyncio
 async def test_update_status_with_result():

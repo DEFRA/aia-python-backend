@@ -19,10 +19,5 @@ class StatusMessage(BaseModel):
     result: dict[str, Any]
     error: Optional[str] = None
     model_id: Optional[str] = Field(default=None, max_length=200)
-    input_tokens: Optional[int] = Field(
-        default=None,
-        ge=0,
-    )  # Aggregated input tokens across all policy docs
-    output_tokens: Optional[int] = Field(
-        default=None, ge=0
-    )  # Aggregated output tokens across all policy docs
+    input_tokens: Optional[int] = Field(default=None, ge=0)  # Aggregated input tokens across all policy docs
+    output_tokens: Optional[int] = Field(default=None, ge=0)  # Aggregated output tokens across all policy docs

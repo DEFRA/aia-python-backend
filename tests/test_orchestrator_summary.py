@@ -1,12 +1,4 @@
-import sys
-from pathlib import Path
-
-
-_EVAL_ROOT = Path(__file__).resolve().parent.parent / "app" / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from src.agents.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary  # noqa: E402
+from app.agent_service.src.models.schemas import AgentResult, AssessmentRow, PolicyDocResult, Summary
 
 from app.orchestrator.summary import MarkdownReportGenerator, SummaryGenerator  # noqa: E402
 
@@ -310,17 +302,17 @@ def test_generate_includes_overall_conclusion():
 
 def test_classify_risk_high_when_red_present():
     gen = MarkdownReportGenerator()
-    assert gen._classify_risk(red=1, amber=0) == "High Risk"
+    assert gen._classify_risk(0) == "High Risk"
 
 
 def test_classify_risk_medium_when_two_amber():
     gen = MarkdownReportGenerator()
-    assert gen._classify_risk(red=0, amber=2) == "Medium Risk"
+    assert gen._classify_risk(65) == "Medium Risk"
 
 
 def test_classify_risk_low_when_no_issues():
     gen = MarkdownReportGenerator()
-    assert gen._classify_risk(red=0, amber=0) == "Low Risk"
+    assert gen._classify_risk(80) == "Low Risk"
 
 
 def test_top_finding_returns_first_red():
