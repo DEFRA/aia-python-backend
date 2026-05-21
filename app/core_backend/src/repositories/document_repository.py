@@ -223,4 +223,3 @@ class DocumentRepository:
         if count > 0:
             logger.warning("Reset %d stuck CLAIMED documents back to PROCESSING", count)
         return count
-

@@ -120,5 +120,3 @@ async def delete_policy_document_by_url_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Policy document '{url_id}' not found.",
         )
-
-

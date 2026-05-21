@@ -11,7 +11,9 @@ class PipelineConfig:
                 if agent_type not in ordered:
                     ordered.append(agent_type)
 
-        self.agent_types: list[str] = ordered or [config.orchestrator.default_agent_type]
+        self.agent_types: list[str] = ordered or [
+            config.orchestrator.default_agent_type
+        ]
         self.section_labels: dict[str, str] = {
             agent_type: agent_type.replace("_", " ").title()
             for agent_type in self.agent_types

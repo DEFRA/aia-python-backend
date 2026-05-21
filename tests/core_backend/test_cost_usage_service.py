@@ -42,8 +42,8 @@ class TestFetchCostUsage:
     async def test_groups_rows_by_document_and_sums_total_cost(self):
         ts = datetime(2026, 5, 1, 10, 0, tzinfo=timezone.utc)
         rows = [
-            _row("doc-1", "a.docx", ts, "Security",     100, 50, 0.10),
-            _row("doc-1", "a.docx", ts, "Technology",   200, 80, 0.20),
+            _row("doc-1", "a.docx", ts, "Security", 100, 50, 0.10),
+            _row("doc-1", "a.docx", ts, "Technology", 200, 80, 0.20),
             _row("doc-1", "a.docx", ts, "Architecture", 300, 90, 0.30),
         ]
         service = CostUsageService(_build_repo(rows))
@@ -54,7 +54,11 @@ class TestFetchCostUsage:
         doc = response.costUsage[0]
         assert doc.doc_id == "doc-1"
         assert doc.file_name == "a.docx"
-        assert [a.name for a in doc.agents] == ["Security", "Technology", "Architecture"]
+        assert [a.name for a in doc.agents] == [
+            "Security",
+            "Technology",
+            "Architecture",
+        ]
         assert doc.totalCost == pytest.approx(0.60)
         assert doc.currency == "USD"
 
@@ -63,9 +67,9 @@ class TestFetchCostUsage:
         ts1 = datetime(2026, 5, 1, tzinfo=timezone.utc)
         ts2 = datetime(2026, 5, 2, tzinfo=timezone.utc)
         rows = [
-            _row("doc-1", "a.docx", ts1, "Security",   100, 50, 0.10),
+            _row("doc-1", "a.docx", ts1, "Security", 100, 50, 0.10),
             _row("doc-1", "a.docx", ts1, "Technology", 200, 80, 0.20),
-            _row("doc-2", "b.docx", ts2, "Security",   400, 60, 0.40),
+            _row("doc-2", "b.docx", ts2, "Security", 400, 60, 0.40),
         ]
         service = CostUsageService(_build_repo(rows))
 
@@ -84,7 +88,7 @@ class TestFetchCostUsage:
             ts = datetime(2026, 5, 1 + i, tzinfo=timezone.utc)
             rows.extend(
                 [
-                    _row(f"doc-{i}", f"f-{i}.docx", ts, "Security",   100, 50, 0.1),
+                    _row(f"doc-{i}", f"f-{i}.docx", ts, "Security", 100, 50, 0.1),
                     _row(f"doc-{i}", f"f-{i}.docx", ts, "Technology", 200, 80, 0.2),
                 ]
             )
@@ -167,7 +171,7 @@ class TestFetchCostUsageByDoc:
     async def test_builds_single_document_with_summed_cost(self):
         ts = datetime(2026, 5, 1, tzinfo=timezone.utc)
         rows = [
-            _row("doc-1", "a.docx", ts, "Security",   100, 50, 0.10),
+            _row("doc-1", "a.docx", ts, "Security", 100, 50, 0.10),
             _row("doc-1", "a.docx", ts, "Governance", 200, 80, 0.25),
         ]
         repo = AsyncMock()
@@ -181,4 +185,3 @@ class TestFetchCostUsageByDoc:
         assert [a.name for a in result.agents] == ["Security", "Governance"]
         assert result.totalCost == pytest.approx(0.35)
         assert result.currency == "USD"
-

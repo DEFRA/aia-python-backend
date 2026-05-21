@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Block files larger than 500 KB from being committed."""
+
 import os
 import sys
 

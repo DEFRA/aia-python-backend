@@ -24,5 +24,3 @@ async def get_current_user(
         logger.info("User %s not found in DB; returning guest user", user_id)
         return GUEST_USER
     return user
-
-

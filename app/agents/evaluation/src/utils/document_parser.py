@@ -12,8 +12,9 @@ from collections import Counter
 from typing import Any
 
 import fitz
-from app.agents.evaluation.src.config import ParserConfig
 from docx import Document
+
+from app.agents.evaluation.src.config import ParserConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 

@@ -68,7 +68,9 @@ def _sample_response() -> CostUsageResponse:
 
 
 class TestFetchCostUsage:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_returns_paginated_response(self, mock_get_user, mock_auth):
         mock_service = AsyncMock()
@@ -88,16 +90,16 @@ class TestFetchCostUsage:
 
         app.dependency_overrides.pop(get_cost_usage_service, None)
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_passes_pagination_query_params_to_service(self, mock_get_user, mock_auth):
         mock_service = AsyncMock()
         mock_service.fetch_cost_usage.return_value = _sample_response()
         app.dependency_overrides[get_cost_usage_service] = lambda: mock_service
 
-        response = client.get(
-            "/api/v1/cost-usage?page=3&limit=5", headers=BASE_HEADERS
-        )
+        response = client.get("/api/v1/cost-usage?page=3&limit=5", headers=BASE_HEADERS)
 
         assert response.status_code == 200
         kwargs = mock_service.fetch_cost_usage.call_args.kwargs
@@ -109,13 +111,17 @@ class TestFetchCostUsage:
         response = client.get("/api/v1/cost-usage")
         assert response.status_code == 401
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_invalid_page_returns_422(self, mock_get_user, mock_auth):
         response = client.get("/api/v1/cost-usage?page=0", headers=BASE_HEADERS)
         assert response.status_code == 422
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_limit_above_max_returns_422(self, mock_get_user, mock_auth):
         response = client.get("/api/v1/cost-usage?limit=500", headers=BASE_HEADERS)
@@ -128,16 +134,18 @@ class TestFetchCostUsage:
 
 
 class TestFetchCostUsageByDoc:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_returns_document_when_found(self, mock_get_user, mock_auth):
         mock_service = AsyncMock()
-        mock_service.fetch_cost_usage_by_doc.return_value = _sample_response().costUsage[0]
+        mock_service.fetch_cost_usage_by_doc.return_value = (
+            _sample_response().costUsage[0]
+        )
         app.dependency_overrides[get_cost_usage_service] = lambda: mock_service
 
-        response = client.get(
-            f"/api/v1/cost-usage/{MOCK_DOC_ID}", headers=BASE_HEADERS
-        )
+        response = client.get(f"/api/v1/cost-usage/{MOCK_DOC_ID}", headers=BASE_HEADERS)
 
         assert response.status_code == 200
         body = response.json()
@@ -146,16 +154,16 @@ class TestFetchCostUsageByDoc:
 
         app.dependency_overrides.pop(get_cost_usage_service, None)
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_missing_document_returns_404(self, mock_get_user, mock_auth):
         mock_service = AsyncMock()
         mock_service.fetch_cost_usage_by_doc.return_value = None
         app.dependency_overrides[get_cost_usage_service] = lambda: mock_service
 
-        response = client.get(
-            f"/api/v1/cost-usage/{MOCK_DOC_ID}", headers=BASE_HEADERS
-        )
+        response = client.get(f"/api/v1/cost-usage/{MOCK_DOC_ID}", headers=BASE_HEADERS)
 
         assert response.status_code == 404
 
@@ -164,5 +172,3 @@ class TestFetchCostUsageByDoc:
     def test_no_auth_returns_401(self):
         response = client.get(f"/api/v1/cost-usage/{MOCK_DOC_ID}")
         assert response.status_code == 401
-
-

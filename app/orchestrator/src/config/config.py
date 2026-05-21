@@ -148,7 +148,9 @@ class AppConfig(BaseSettings):
 
     @property
     def sqs(self) -> SQSConfig:
-        return SQSConfig(status_queue_url=self.status_queue_url, task_queue_url=self.task_queue_url)
+        return SQSConfig(
+            status_queue_url=self.status_queue_url, task_queue_url=self.task_queue_url
+        )
 
     @property
     def app(self) -> AppRunConfig:

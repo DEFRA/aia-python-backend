@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate YAML syntax."""
+
 import sys
 import yaml
 

@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary  # noqa: E402
+from app.agents.evaluation.src.agents.schemas import (
+    AgentLLMOutput,
+    QuestionItem,
+    RawAssessmentRow,
+    Summary,
+)  # noqa: E402
 
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
@@ -83,7 +88,9 @@ async def test_get_document_downloads_from_s3_when_no_inline() -> None:
     s3 = AsyncMock()
     s3.download_file.return_value = b"S3 document text"
 
-    with patch("app.agent_service.worker._extract_text", return_value="S3 document text"):
+    with patch(
+        "app.agent_service.worker._extract_text", return_value="S3 document text"
+    ):
         doc = await _get_document(task, s3)
 
     assert doc == "S3 document text"
@@ -139,7 +146,11 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
         patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
             "app.agent_service.worker.fetch_all_policy_docs_by_category",
-            new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
+            new=AsyncMock(
+                return_value=[
+                    ("policy-doc-id-001", "https://example.com", "policy.pdf")
+                ]
+            ),
         ),
         patch(
             "app.agent_service.worker.fetch_questions_by_policy_doc_id",
@@ -159,7 +170,9 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
             },
         ),
     ):
-        mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
+        mock_db_cfg.return_value = MagicMock(
+            dsn="postgresql://test:test@localhost/test"
+        )
         status = await dispatch(task, s3)
 
     assert status.task_id == task.task_id
@@ -189,7 +202,11 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
         patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
             "app.agent_service.worker.fetch_all_policy_docs_by_category",
-            new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
+            new=AsyncMock(
+                return_value=[
+                    ("policy-doc-id-001", "https://example.com", "policy.pdf")
+                ]
+            ),
         ),
         patch(
             "app.agent_service.worker.fetch_questions_by_policy_doc_id",
@@ -209,7 +226,9 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
             },
         ),
     ):
-        mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
+        mock_db_cfg.return_value = MagicMock(
+            dsn="postgresql://test:test@localhost/test"
+        )
         status = await dispatch(task, s3)
 
     assert status.error is not None
@@ -241,7 +260,11 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
         patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
             "app.agent_service.worker.fetch_all_policy_docs_by_category",
-            new=AsyncMock(return_value=[("policy-doc-id-001", "https://example.com", "policy.pdf")]),
+            new=AsyncMock(
+                return_value=[
+                    ("policy-doc-id-001", "https://example.com", "policy.pdf")
+                ]
+            ),
         ),
         patch(
             "app.agent_service.worker.fetch_questions_by_policy_doc_id",
@@ -262,7 +285,9 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
         ),
         patch("app.agent_service.worker._AGENT_TIMEOUT_SECONDS", 1),
     ):
-        mock_db_cfg.return_value = MagicMock(dsn="postgresql://test:test@localhost/test")
+        mock_db_cfg.return_value = MagicMock(
+            dsn="postgresql://test:test@localhost/test"
+        )
         status = await dispatch(task, s3)
 
     assert status.error is not None
@@ -298,7 +323,12 @@ async def test_process_message_publishes_and_deletes_on_success() -> None:
         new=AsyncMock(return_value=mock_status),
     ):
         await _process_message(
-            raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore
+            raw_msg,
+            mock_sqs,
+            mock_s3,
+            "http://localhost/tasks",
+            "http://localhost/status",
+            semaphore,
         )
 
     mock_sqs.publish.assert_called_once()
@@ -324,7 +354,12 @@ async def test_process_message_does_not_delete_on_exception() -> None:
         new=AsyncMock(side_effect=RuntimeError("infra failure")),
     ):
         await _process_message(
-            raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore
+            raw_msg,
+            mock_sqs,
+            mock_s3,
+            "http://localhost/tasks",
+            "http://localhost/status",
+            semaphore,
         )
 
     mock_sqs.delete_message.assert_not_called()
@@ -336,7 +371,10 @@ async def test_process_message_retries_delete_on_transient_failure() -> None:
     from app.agent_service.worker import _process_message
 
     task = _make_task()
-    raw_msg = {"body": task.model_dump_json(by_alias=True), "receipt_handle": "rh-retry"}
+    raw_msg = {
+        "body": task.model_dump_json(by_alias=True),
+        "receipt_handle": "rh-retry",
+    }
     mock_sqs = AsyncMock()
     mock_s3 = AsyncMock()
     semaphore = asyncio.Semaphore(10)
@@ -352,10 +390,19 @@ async def test_process_message_retries_delete_on_transient_failure() -> None:
     mock_sqs.delete_message = AsyncMock(side_effect=[Exception("transient"), None])
 
     with (
-        patch("app.agent_service.worker.dispatch", new=AsyncMock(return_value=mock_status)),
+        patch(
+            "app.agent_service.worker.dispatch", new=AsyncMock(return_value=mock_status)
+        ),
         patch("app.agent_service.worker.asyncio.sleep", new=AsyncMock()),
     ):
-        await _process_message(raw_msg, mock_sqs, mock_s3, "http://localhost/tasks", "http://localhost/status", semaphore)
+        await _process_message(
+            raw_msg,
+            mock_sqs,
+            mock_s3,
+            "http://localhost/tasks",
+            "http://localhost/status",
+            semaphore,
+        )
 
     assert mock_sqs.delete_message.call_count == 2
     mock_sqs.publish.assert_called_once()
@@ -367,7 +414,7 @@ async def test_process_message_deletes_poison_payload() -> None:
     from app.agent_service.worker import _process_message
 
     raw_msg = {
-        "body": "{\"documentId\": \"doc1\", \"agentType\": \"security\"}",
+        "body": '{"documentId": "doc1", "agentType": "security"}',
         "receipt_handle": "rh-poison",
     }
 
@@ -385,11 +432,16 @@ async def test_process_message_deletes_poison_payload() -> None:
     )
 
     mock_sqs.publish.assert_not_called()
-    mock_sqs.delete_message.assert_called_once_with("http://localhost/tasks", "rh-poison")
+    mock_sqs.delete_message.assert_called_once_with(
+        "http://localhost/tasks", "rh-poison"
+    )
 
 
 def test_parse_task_message_rejects_invariant_violation() -> None:
-    from app.agent_service.worker import NonRetriableTaskMessageError, _parse_task_message
+    from app.agent_service.worker import (
+        NonRetriableTaskMessageError,
+        _parse_task_message,
+    )
 
     bad_task = {
         "taskId": "doc1_technical",
@@ -404,7 +456,10 @@ def test_parse_task_message_rejects_invariant_violation() -> None:
 
 
 def test_parse_task_message_rejects_extra_fields() -> None:
-    from app.agent_service.worker import NonRetriableTaskMessageError, _parse_task_message
+    from app.agent_service.worker import (
+        NonRetriableTaskMessageError,
+        _parse_task_message,
+    )
 
     bad_task = {
         "taskId": "doc1_security",

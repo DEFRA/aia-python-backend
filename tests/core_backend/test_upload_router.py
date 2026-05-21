@@ -27,7 +27,9 @@ client = TestClient(app)
 
 
 class TestUploadSuccess:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_upload_returns_doc_id(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
@@ -63,7 +65,9 @@ class TestUploadSuccess:
 
 
 class TestUploadDuplicate:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_duplicate_returns_400(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
@@ -110,7 +114,10 @@ class TestUploadAuth:
     def test_missing_user_id_returns_401(self):
         response = client.post(
             "/api/v1/documents/upload",
-            headers={"Authorization": "Bearer test-token", "Accept": "application/json"},
+            headers={
+                "Authorization": "Bearer test-token",
+                "Accept": "application/json",
+            },
             data={
                 "templateType": "CHEDP",
                 "fileName": "test.pdf",
@@ -221,7 +228,9 @@ class TestUploadAuth:
 
 
 class TestFetchHistory:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_fetch_history_returns_list(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
@@ -256,7 +265,9 @@ class TestFetchHistory:
 
 
 class TestGetResult:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_result_not_found_returns_404(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
@@ -279,5 +290,3 @@ class TestGetResult:
     def test_result_no_auth_returns_401(self):
         response = client.get(f"/api/v1/documents/{MOCK_DOC_ID}")
         assert response.status_code == 401
-
-

@@ -47,7 +47,9 @@ def _parse_docx(file_bytes: bytes) -> list[dict[str, str | int | bool]]:
     return chunks
 
 
-def _parse_bytes(file_bytes: bytes, s3_key: str, doc_id: str) -> list[dict[str, str | int | bool]]:
+def _parse_bytes(
+    file_bytes: bytes, s3_key: str, doc_id: str
+) -> list[dict[str, str | int | bool]]:
     _ = doc_id
     extension = s3_key.rsplit(".", maxsplit=1)[-1].lower() if "." in s3_key else ""
 

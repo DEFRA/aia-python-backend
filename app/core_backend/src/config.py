@@ -189,9 +189,7 @@ class AppConfig(BaseSettings):
         if all([self.db_host, self.db_name, self.db_user, self.db_password]):
             user = quote_plus(self.db_user)
             password = quote_plus(self.db_password)
-            uri = (
-                f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
-            )
+            uri = f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
             return DBConfig(uri=uri)
 
         return DBConfig(uri=None)

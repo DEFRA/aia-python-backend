@@ -227,4 +227,3 @@ class PolicyDocumentRepository:
             is_active=row["isactive"],
             updated_at=row["updated_at"],
         )
-

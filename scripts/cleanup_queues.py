@@ -23,11 +23,11 @@ from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-_GREEN  = "\033[0;32m"
+_GREEN = "\033[0;32m"
 _YELLOW = "\033[1;33m"
-_RED    = "\033[0;31m"
-_BOLD   = "\033[1m"
-_NC     = "\033[0m"
+_RED = "\033[0;31m"
+_BOLD = "\033[1m"
+_NC = "\033[0m"
 
 
 def ok(label: str, detail: str = "") -> None:
@@ -49,6 +49,7 @@ def info(label: str, detail: str = "") -> None:
 def banner(title: str) -> None:
     print(f"\n{_BOLD}{title}{_NC}")
     print("─" * 58)
+
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / ".env")
@@ -237,7 +238,10 @@ async def run(include_dlq: bool, auto_yes: bool, dry_run: bool) -> int:
             except ClientError as exc:
                 code = exc.response.get("Error", {}).get("Code", "Unknown")
                 if code == "PurgeQueueInProgress":
-                    warn("Purge in progress", f"{q} (SQS allows one purge per 60 seconds).")
+                    warn(
+                        "Purge in progress",
+                        f"{q} (SQS allows one purge per 60 seconds).",
+                    )
                 else:
                     failures += 1
                     fail("Cleanup failed", f"{q}: {exc}")

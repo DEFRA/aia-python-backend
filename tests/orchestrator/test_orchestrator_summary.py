@@ -1,6 +1,14 @@
-from app.orchestrator.src.schemas.contracts import AgentResult, AssessmentRow, PolicyDocResult, Summary
+from app.orchestrator.src.schemas.contracts import (
+    AgentResult,
+    AssessmentRow,
+    PolicyDocResult,
+    Summary,
+)
 
-from app.orchestrator.src.reporting.report_generator import MarkdownReportGenerator, SummaryGenerator  # noqa: E402
+from app.orchestrator.src.reporting.report_generator import (
+    MarkdownReportGenerator,
+    SummaryGenerator,
+)  # noqa: E402
 
 DOC_ID = "aaaaaaaa-0000-0000-0000-000000000001"
 

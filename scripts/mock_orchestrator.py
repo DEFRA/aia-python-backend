@@ -187,7 +187,9 @@ def _print_results(results: dict[str, StatusMessage], expected: set[str]) -> Non
 
     missing = expected - set(results)
     print("\n" + "=" * 60)
-    print(f"Received {len(results)}/{len(expected)} responses.  Missing: {missing or 'none'}")
+    print(
+        f"Received {len(results)}/{len(expected)} responses.  Missing: {missing or 'none'}"
+    )
     print("=" * 60)
 
 
@@ -264,10 +266,11 @@ if __name__ == "__main__":
             file_bytes = file_path.read_bytes()
             chunks = _parse_bytes(file_bytes, str(file_path), doc_id)
             file_content = "\n\n".join(
-                f"## {c['text']}" if c.get("is_heading") else c["text"]
-                for c in chunks
+                f"## {c['text']}" if c.get("is_heading") else c["text"] for c in chunks
             )
-            print(f"Using file: {args.file} (parsed {len(chunks)} chunks → {len(file_content)} chars)")
+            print(
+                f"Using file: {args.file} (parsed {len(chunks)} chunks → {len(file_content)} chars)"
+            )
         else:
             file_content = file_path.read_text(encoding="utf-8")
             print(f"Using file: {args.file} ({len(file_content)} chars)")

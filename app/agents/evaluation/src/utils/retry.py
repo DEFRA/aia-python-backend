@@ -41,7 +41,6 @@ from anthropic import (
     APITimeoutError,
     RateLimitError,
 )
-from app.agents.evaluation.src.config import RetryConfig
 from tenacity import (
     before_sleep_log,
     retry,
@@ -49,6 +48,8 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+
+from app.agents.evaluation.src.config import RetryConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 

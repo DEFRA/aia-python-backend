@@ -125,6 +125,3 @@ def get_upload_service(
     orchestrator_service: OrchestratorService = Depends(get_orchestrator_service),
 ) -> UploadService:
     return UploadService(repo, s3_service, context, orchestrator_service)
-
-
-

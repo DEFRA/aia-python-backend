@@ -5,7 +5,12 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.orchestrator.src.schemas.contracts import AgentResult, AssessmentRow, PolicyDocResult, Summary
+from app.orchestrator.src.schemas.contracts import (
+    AgentResult,
+    AssessmentRow,
+    PolicyDocResult,
+    Summary,
+)
 
 from app.orchestrator.src.utils.enums import DocumentStatus  # noqa: E402
 from app.orchestrator.src.main import _process_document, app  # noqa: E402
@@ -144,7 +149,10 @@ async def test_process_document_complete_writes_complete_status():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -178,7 +186,10 @@ async def test_process_document_complete_result_md_contains_document_title():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -213,11 +224,16 @@ async def test_process_document_complete_result_md_contains_document_title():
 @pytest.mark.asyncio
 async def test_process_document_timeout_zero_results_writes_error():
     """Timeout fires with no collected results → ERROR."""
-    session = _make_session(expected_task_ids={TASK_ID}, collected_results={}, event_set=False)
+    session = _make_session(
+        expected_task_ids={TASK_ID}, collected_results={}, event_set=False
+    )
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -242,11 +258,16 @@ async def test_process_document_timeout_zero_results_writes_error():
 
 @pytest.mark.asyncio
 async def test_process_document_timeout_zero_results_does_not_produce_result_md():
-    session = _make_session(expected_task_ids={TASK_ID}, collected_results={}, event_set=False)
+    session = _make_session(
+        expected_task_ids={TASK_ID}, collected_results={}, event_set=False
+    )
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -283,7 +304,10 @@ async def test_process_document_timeout_partial_results_writes_partial_complete(
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -318,7 +342,10 @@ async def test_process_document_partial_complete_includes_missing_agents_in_erro
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -354,7 +381,10 @@ async def test_process_document_partial_complete_includes_result_md():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -388,7 +418,10 @@ async def test_process_document_s3_failure_writes_error_status():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -410,7 +443,10 @@ async def test_process_document_s3_failure_includes_exception_in_error_message()
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -437,7 +473,10 @@ async def test_process_document_extraction_failure_writes_error_status():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -448,7 +487,9 @@ async def test_process_document_extraction_failure_writes_error_status():
         ),
         patch("app.orchestrator.src.main._session_store"),
     ):
-        mock_s3_cls.return_value.download_file = AsyncMock(return_value=b"corrupt-bytes")
+        mock_s3_cls.return_value.download_file = AsyncMock(
+            return_value=b"corrupt-bytes"
+        )
 
         await _process_document(DOC_ID, S3_KEY, TEMPLATE)
 
@@ -461,7 +502,10 @@ async def test_process_document_extraction_failure_includes_message():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,
@@ -495,7 +539,10 @@ async def test_process_document_removes_session_after_complete():
     mock_repo = _make_mock_repo()
 
     with (
-        patch("app.orchestrator.src.main.get_postgres_pool", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "app.orchestrator.src.main.get_postgres_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch("app.orchestrator.src.main.AppContext"),
         patch("app.orchestrator.src.main.DocumentRepository", return_value=mock_repo),
         patch("app.orchestrator.src.main.S3Service") as mock_s3_cls,

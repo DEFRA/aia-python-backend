@@ -31,6 +31,9 @@ from typing import Any
 from uuid import uuid4
 
 import anthropic
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
 from app.agents.evaluation.src.agents.schemas import QuestionItem, TaggedChunk
 from app.agents.evaluation.src.agents.tagging_agent import TaggingAgent
 from app.agents.evaluation.src.config import (
@@ -52,8 +55,6 @@ from app.agents.evaluation.src.handlers.agent import (
 from app.agents.evaluation.src.utils.document_parser import _parse_bytes
 from app.agents.evaluation.src.utils.exceptions import UnknownCategoryError
 from app.agents.evaluation.src.utils.llm_client import make_llm_client
-from dotenv import load_dotenv
-from pydantic import BaseModel
 
 
 class AgentTaskBody(BaseModel):

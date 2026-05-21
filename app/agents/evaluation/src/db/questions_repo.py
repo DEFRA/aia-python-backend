@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 import asyncpg
+
 from app.agents.evaluation.src.agents.schemas import QuestionItem
 from app.agents.evaluation.src.utils.exceptions import UnknownCategoryError
 

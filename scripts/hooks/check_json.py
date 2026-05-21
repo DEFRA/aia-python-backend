@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate JSON syntax."""
+
 import sys
 import json
 

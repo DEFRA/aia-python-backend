@@ -107,4 +107,3 @@ class CostUsageRepository:
                 output_tokens,
                 total_cost_usd,
             )
-

@@ -35,4 +35,3 @@ class UserRepository:
                 "Could not fetch user %s from DB; falling back to guest user", user_id
             )
             return GUEST_USER
-

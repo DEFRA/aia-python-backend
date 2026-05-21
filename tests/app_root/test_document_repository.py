@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from app.orchestrator.src.repositories.document_repository import DocumentRepository
 
+
 @pytest.mark.asyncio
 async def test_update_status_with_result():
     # Setup

@@ -62,5 +62,3 @@ async def fetch_cost_usage_by_document(
         len(document.agents),
     )
     return document
-
-

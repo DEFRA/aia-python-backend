@@ -21,9 +21,13 @@ client = TestClient(app)
 
 
 class TestCreatePolicyDocument:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
-    def test_create_policy_document_returns_created_doc(self, _mock_get_user, _mock_auth):
+    def test_create_policy_document_returns_created_doc(
+        self, _mock_get_user, _mock_auth
+    ):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
         app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
@@ -48,7 +52,9 @@ class TestCreatePolicyDocument:
             "isActive": True,
         }
 
-        response = client.post("/api/v1/policy-documents", headers=BASE_HEADERS, json=payload)
+        response = client.post(
+            "/api/v1/policy-documents", headers=BASE_HEADERS, json=payload
+        )
 
         assert response.status_code == 201
         assert response.json()["urlId"] == 11
@@ -68,7 +74,9 @@ class TestCreatePolicyDocument:
         response = client.post("/api/v1/policy-documents", json=payload)
         assert response.status_code == 401
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_create_policy_document_invalid_category_returns_400(
         self, _mock_get_user, _mock_auth
@@ -100,7 +108,9 @@ class TestCreatePolicyDocument:
         app.dependency_overrides.pop(get_policy_document_service, None)
         app.dependency_overrides.pop(get_user_repository, None)
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_create_policy_document_duplicate_url_returns_400(
         self, _mock_get_user, _mock_auth
@@ -137,9 +147,13 @@ class TestCreatePolicyDocument:
 
 
 class TestFetchPolicyDocuments:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
-    def test_fetch_policy_documents_returns_paginated_list(self, _mock_get_user, _mock_auth):
+    def test_fetch_policy_documents_returns_paginated_list(
+        self, _mock_get_user, _mock_auth
+    ):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
         app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
@@ -163,7 +177,9 @@ class TestFetchPolicyDocuments:
         }
         app.dependency_overrides[get_policy_document_service] = lambda: mock_service
 
-        response = client.get("/api/v1/policy-documents?page=1&limit=20", headers=BASE_HEADERS)
+        response = client.get(
+            "/api/v1/policy-documents?page=1&limit=20", headers=BASE_HEADERS
+        )
 
         assert response.status_code == 200
         body = response.json()
@@ -176,7 +192,9 @@ class TestFetchPolicyDocuments:
 
 
 class TestFetchPolicyDocumentOptions:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_fetch_policy_document_options_returns_sources_and_categories(
         self, _mock_get_user, _mock_auth
@@ -204,9 +222,13 @@ class TestFetchPolicyDocumentOptions:
 
 
 class TestFetchPolicyDocumentByUrlId:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
-    def test_fetch_policy_document_by_url_id_returns_document(self, _mock_get_user, _mock_auth):
+    def test_fetch_policy_document_by_url_id_returns_document(
+        self, _mock_get_user, _mock_auth
+    ):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
         app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
@@ -231,9 +253,13 @@ class TestFetchPolicyDocumentByUrlId:
         app.dependency_overrides.pop(get_policy_document_service, None)
         app.dependency_overrides.pop(get_user_repository, None)
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
-    def test_fetch_policy_document_by_url_id_returns_404_when_missing(self, _mock_get_user, _mock_auth):
+    def test_fetch_policy_document_by_url_id_returns_404_when_missing(
+        self, _mock_get_user, _mock_auth
+    ):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
         app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
@@ -251,9 +277,13 @@ class TestFetchPolicyDocumentByUrlId:
 
 
 class TestUpdatePolicyDocumentByUrlId:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
-    def test_update_policy_document_by_url_id_returns_updated_doc(self, _mock_get_user, _mock_auth):
+    def test_update_policy_document_by_url_id_returns_updated_doc(
+        self, _mock_get_user, _mock_auth
+    ):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
         app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
@@ -277,7 +307,9 @@ class TestUpdatePolicyDocumentByUrlId:
             "url": "https://example.com/updated-policy",
             "isActive": False,
         }
-        response = client.put("/api/v1/policy-documents/5", headers=BASE_HEADERS, json=payload)
+        response = client.put(
+            "/api/v1/policy-documents/5", headers=BASE_HEADERS, json=payload
+        )
 
         assert response.status_code == 200
         assert response.json()["urlId"] == 5
@@ -297,7 +329,9 @@ class TestUpdatePolicyDocumentByUrlId:
         response = client.put("/api/v1/policy-documents/5", json=payload)
         assert response.status_code == 401
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_update_policy_document_invalid_category_returns_400(
         self, _mock_get_user, _mock_auth
@@ -329,7 +363,9 @@ class TestUpdatePolicyDocumentByUrlId:
         app.dependency_overrides.pop(get_policy_document_service, None)
         app.dependency_overrides.pop(get_user_repository, None)
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_update_policy_document_duplicate_url_returns_400(
         self, _mock_get_user, _mock_auth
@@ -366,7 +402,9 @@ class TestUpdatePolicyDocumentByUrlId:
 
 
 class TestDeletePolicyDocumentByUrlId:
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_delete_policy_document_returns_204(self, _mock_get_user, _mock_auth):
         mock_user_repo = AsyncMock()
@@ -389,7 +427,9 @@ class TestDeletePolicyDocumentByUrlId:
         response = client.delete("/api/v1/policy-documents/7")
         assert response.status_code == 401
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_delete_policy_document_invalid_url_id_returns_422(
         self, _mock_get_user, _mock_auth
@@ -408,7 +448,9 @@ class TestDeletePolicyDocumentByUrlId:
         app.dependency_overrides.pop(get_policy_document_service, None)
         app.dependency_overrides.pop(get_user_repository, None)
 
-    @patch("utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch(
+        "utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"}
+    )
     @patch("utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_delete_policy_document_returns_404_when_missing(
         self, _mock_get_user, _mock_auth
@@ -428,5 +470,3 @@ class TestDeletePolicyDocumentByUrlId:
 
         app.dependency_overrides.pop(get_policy_document_service, None)
         app.dependency_overrides.pop(get_user_repository, None)
-
-

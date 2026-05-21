@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Block PEM private keys from being committed."""
+
 import re
 import sys
 

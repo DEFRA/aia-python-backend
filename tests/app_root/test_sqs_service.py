@@ -47,6 +47,7 @@ async def test_send_task_failure():
 @pytest.mark.asyncio
 async def test_send_task_includes_fifo_params_for_fifo_queue():
     from unittest.mock import patch as _patch
+
     sqs_service = SQSService()
     mock_client = AsyncMock()
     mock_client.send_message.return_value = {"MessageId": "msg-fifo"}
@@ -61,7 +62,9 @@ async def test_send_task_includes_fifo_params_for_fifo_queue():
         mock_cfg.aws.secret_access_key = "test"  # pragma: allowlist secret
         mock_cfg.aws.session_token = None
         mock_cfg.aws.endpoint_url = None
-        mock_cfg.sqs.task_queue_url = "http://localhost:4566/000000000000/aia-tasks.fifo"
+        mock_cfg.sqs.task_queue_url = (
+            "http://localhost:4566/000000000000/aia-tasks.fifo"
+        )
         mock_get_client.return_value.__aenter__.return_value = mock_client
 
         msg_id = await sqs_service.send_task(task)
