@@ -28,8 +28,8 @@ client = TestClient(app)
 
 
 class TestUploadSuccess:
-    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
-    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.core_backend.src.utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_upload_returns_doc_id(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
@@ -64,8 +64,8 @@ class TestUploadSuccess:
 
 
 class TestUploadDuplicate:
-    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
-    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.core_backend.src.utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_duplicate_returns_400(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
@@ -120,8 +120,8 @@ class TestUploadAuth:
         )
         assert response.status_code == 401
 
-    @patch("app.utils.auth.AuthService.authorise_user", return_value="some-token")
-    @patch("app.utils.auth.AuthService.get_user_id", return_value="different-user")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value="some-token")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.get_user_id", return_value="different-user")
     def test_sub_mismatch_returns_401(self, mock_get_user, mock_auth):
         """JWT sub does not match X-USER-ID header → 401."""
         response = client.post(
@@ -135,8 +135,8 @@ class TestUploadAuth:
         )
         assert response.status_code == 401
 
-    @patch("app.utils.auth.AuthService.authorise_user", return_value="some-token")
-    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value="some-token")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_unknown_user_returns_401(self, mock_get_user, mock_auth):
         """JWT valid and sub matches X-USER-ID, but user not found in DB → 401."""
         mock_user_repo = AsyncMock()
@@ -157,7 +157,7 @@ class TestUploadAuth:
         app.dependency_overrides.pop(get_user_repository, None)
 
     @patch(
-        "app.utils.auth.AuthService.authorise_user",
+        "app.core_backend.src.utils.dependencies.AuthService.authorise_user",
         side_effect=__import__("fastapi").HTTPException(
             status_code=401, detail="Token has expired"
         ),
@@ -175,9 +175,9 @@ class TestUploadAuth:
         )
         assert response.status_code == 401
 
-    @patch("app.utils.auth.AuthService.authorise_user", return_value="some-token")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value="some-token")
     @patch(
-        "app.utils.auth.AuthService.get_user_id",
+        "app.core_backend.src.utils.dependencies.AuthService.get_user_id",
         side_effect=__import__("fastapi").HTTPException(
             status_code=401, detail="Invalid token: missing issuance time (iat) claim"
         ),
@@ -195,9 +195,9 @@ class TestUploadAuth:
         )
         assert response.status_code == 401
 
-    @patch("app.utils.auth.AuthService.authorise_user", return_value="some-token")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value="some-token")
     @patch(
-        "app.utils.auth.AuthService.get_user_id",
+        "app.core_backend.src.utils.dependencies.AuthService.get_user_id",
         side_effect=__import__("fastapi").HTTPException(
             status_code=401, detail="Invalid token: issuance time is in the future"
         ),
@@ -222,8 +222,8 @@ class TestUploadAuth:
 
 
 class TestFetchHistory:
-    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
-    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.core_backend.src.utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_fetch_history_returns_list(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER
@@ -257,8 +257,8 @@ class TestFetchHistory:
 
 
 class TestGetResult:
-    @patch("app.utils.auth.AuthService.authorise_user", return_value={"sub": "user123"})
-    @patch("app.utils.auth.AuthService.get_user_id", return_value="user123")
+    @patch("app.core_backend.src.utils.dependencies.AuthService.authorise_user", return_value={"sub": "user123"})
+    @patch("app.core_backend.src.utils.dependencies.AuthService.get_user_id", return_value="user123")
     def test_result_not_found_returns_404(self, mock_get_user, mock_auth):
         mock_user_repo = AsyncMock()
         mock_user_repo.get_user_by_id.return_value = MOCK_USER

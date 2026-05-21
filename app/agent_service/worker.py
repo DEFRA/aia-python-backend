@@ -253,7 +253,13 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
                 policy_doc_filename=policy_doc_filename,
                 policy_doc_url=policy_doc_url,
                 assessments=assessments,
-                summary=llm_output.summary,
+                # Accept summary objects from either `src.*` or `app.agents.evaluation.src.*`
+                # imports by normalizing to a plain dict before Pydantic validation.
+                summary=(
+                    llm_output.summary.model_dump()
+                    if hasattr(llm_output.summary, "model_dump")
+                    else llm_output.summary
+                ),
             )
             return (result, tokens)
         except asyncio.TimeoutError:
