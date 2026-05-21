@@ -35,6 +35,7 @@ dist/
 # Claude Code
 .claude/
 .aia-pids/
+.aia.pids
 
 # Stale test mirror — superseded by app/agents/evaluation/tests/ (Plan 09)
 app/agents/evaluation/src/tests/
