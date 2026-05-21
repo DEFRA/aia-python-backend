@@ -85,7 +85,7 @@ jobs:
           {
             echo "build_args<<EOF"
             echo "PYTHON_ENV=${{ vars.PYTHON_ENV || 'production' }}"
-            echo "ORCHESTRATOR_PORT=${{ vars.ORCHESTRATOR_PORT || '8001' }}"
+            echo "PORT=${{ vars.PORT || '8001' }}"
             echo "AGENT_TIMEOUT_SECONDS=${{ vars.AGENT_TIMEOUT_SECONDS || '480' }}"
             echo "DB_HOST=${{ secrets.DB_HOST }}"
             echo "DB_PORT=${{ vars.DB_PORT }}"
