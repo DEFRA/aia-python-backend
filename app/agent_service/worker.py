@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from app.agent_service.src.models.schemas import AgentResult, AssessmentRow, PolicyDocResult
 from app.agent_service.src.config import DatabaseConfig
 from app.agent_service.src.utils.doc_parser import _parse_bytes
-from app.agent_service.src.database.questions_repo import (
+from app.agent_service.src.repositories.questions_repo import (
     fetch_all_policy_docs_by_category,
     fetch_questions_by_policy_doc_id,
 )
