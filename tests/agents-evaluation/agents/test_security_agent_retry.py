@@ -45,7 +45,9 @@ def _make_request() -> httpx.Request:
 
 
 def _make_status_error(status_code: int) -> APIStatusError:
-    response: httpx.Response = httpx.Response(status_code=status_code, request=_make_request())
+    response: httpx.Response = httpx.Response(
+        status_code=status_code, request=_make_request()
+    )
     return APIStatusError(message=f"status {status_code}", response=response, body=None)
 
 
@@ -171,7 +173,9 @@ async def test_security_agent_does_not_retry_on_validation_error() -> None:
         }
     }
     client: MagicMock = MagicMock()
-    client.messages.create = AsyncMock(return_value=_make_response(json.dumps(bad_payload)))
+    client.messages.create = AsyncMock(
+        return_value=_make_response(json.dumps(bad_payload))
+    )
     agent: SecurityAgent = _make_agent(client)
 
     with pytest.raises(ValidationError):

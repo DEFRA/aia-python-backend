@@ -60,4 +60,6 @@ def test_tagging_taxonomy_drops_legacy_only_tags() -> None:
     }
     for tag in legacy_only:
         assert tag not in surviving_tags
-        assert tag not in TAXONOMY, f"Legacy-only tag '{tag}' should be dropped from taxonomy"
+        assert tag not in TAXONOMY, (
+            f"Legacy-only tag '{tag}' should be dropped from taxonomy"
+        )

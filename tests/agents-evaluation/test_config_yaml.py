@@ -22,7 +22,9 @@ def test_yaml_loads_technical_agent_block(monkeypatch: pytest.MonkeyPatch) -> No
     assert 0.0 <= config.temperature <= 1.0
 
 
-def test_yaml_pipeline_agent_tag_map_lists_technical(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yaml_pipeline_agent_tag_map_lists_technical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``pipeline.agent_tag_map`` in ``config.yaml`` must list ``technical``
     with the eleven UK information-governance tags.
     """
@@ -47,7 +49,9 @@ def test_yaml_pipeline_agent_tag_map_lists_technical(monkeypatch: pytest.MonkeyP
     assert set(config.agent_tag_map["technical"]) == expected
 
 
-def test_yaml_pipeline_agent_types_lists_two_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yaml_pipeline_agent_types_lists_two_agents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``pipeline.agent_types`` must list exactly the two surviving agents."""
     monkeypatch.delenv("PIPELINE_AGENT_TYPES", raising=False)
 
@@ -56,7 +60,9 @@ def test_yaml_pipeline_agent_types_lists_two_agents(monkeypatch: pytest.MonkeyPa
     assert config.agent_types == ["security", "technical"]
 
 
-def test_yaml_pipeline_agent_tag_map_drops_legacy_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yaml_pipeline_agent_tag_map_drops_legacy_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The four removed agents must not appear in ``agent_tag_map``."""
     monkeypatch.delenv("PIPELINE_AGENT_TAG_MAP", raising=False)
 

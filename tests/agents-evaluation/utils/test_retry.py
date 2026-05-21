@@ -31,7 +31,9 @@ def _make_request() -> httpx.Request:
 
 def _make_status_error(status_code: int) -> APIStatusError:
     """Build an APIStatusError with the given HTTP status."""
-    response: httpx.Response = httpx.Response(status_code=status_code, request=_make_request())
+    response: httpx.Response = httpx.Response(
+        status_code=status_code, request=_make_request()
+    )
     return APIStatusError(message=f"status {status_code}", response=response, body=None)
 
 
@@ -137,7 +139,9 @@ def _zero_wait_config() -> RetryConfig:
 @pytest.mark.asyncio
 async def test_agent_retry_factory_uses_supplied_config() -> None:
     """agent_retry(config=...) honours max_attempts and retries on transient errors."""
-    cfg: RetryConfig = RetryConfig(max_attempts=2, initial_wait_s=0.0, max_wait_s=0.0, jitter_s=0.0)
+    cfg: RetryConfig = RetryConfig(
+        max_attempts=2, initial_wait_s=0.0, max_wait_s=0.0, jitter_s=0.0
+    )
 
     inner: AsyncMock = AsyncMock(
         side_effect=[APIConnectionError(request=_make_request()), "ok"],

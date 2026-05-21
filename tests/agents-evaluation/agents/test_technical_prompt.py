@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "agents" / "prompts"
+_PROMPTS_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "src" / "agents" / "prompts"
+)
 
 
 def _load(filename: str) -> str:
@@ -20,7 +22,10 @@ def test_technical_prompt_renders_json_questions() -> None:
     template = _load("technical_user.md")
     questions_block: str = json.dumps(
         [
-            {"id": "aaaa-0001", "question": "Is a Record of Processing Activity maintained?"},
+            {
+                "id": "aaaa-0001",
+                "question": "Is a Record of Processing Activity maintained?",
+            },
             {"id": "bbbb-0002", "question": "Are retention schedules documented?"},
         ],
         indent=2,

@@ -96,7 +96,10 @@ def test_invalid_provider_raises() -> None:
 
     from src.config import LLMConfig
 
-    with patch.dict(os.environ, {"LLM_PROVIDER": "openai"}), pytest.raises(ValidationError):
+    with (
+        patch.dict(os.environ, {"LLM_PROVIDER": "openai"}),
+        pytest.raises(ValidationError),
+    ):
         LLMConfig()
 
 

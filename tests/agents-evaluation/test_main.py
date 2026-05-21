@@ -54,7 +54,9 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
     doc_path.write_bytes(b"%PDF-1.4 stub")
     output_path: Path = tmp_path / "out.json"
 
-    questions: list[QuestionItem] = [QuestionItem(id="q-001", question="Q1", reference="G1.a")]
+    questions: list[QuestionItem] = [
+        QuestionItem(id="q-001", question="Q1", reference="G1.a")
+    ]
     tagged_chunks: list[TaggedChunk] = [
         TaggedChunk(
             chunk_index=0,
@@ -85,7 +87,11 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
         patch(
             "main.fetch_policy_doc_by_category",
             new=AsyncMock(
-                return_value=("policy-doc-id-001", "https://example.test/", "policy.pdf")
+                return_value=(
+                    "policy-doc-id-001",
+                    "https://example.test/",
+                    "policy.pdf",
+                )
             ),
         ),
         patch(

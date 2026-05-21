@@ -148,7 +148,9 @@ async def test_technical_agent_raises_on_invalid_payload() -> None:
         await agent.assess(_DOCUMENT, _QUESTIONS)
 
     # Case 2: valid JSON but missing top-level ``Technical`` key — terminal.
-    wrong_key_client: MagicMock = _make_mock_client(json.dumps({"Security": {"Assessments": []}}))
+    wrong_key_client: MagicMock = _make_mock_client(
+        json.dumps({"Security": {"Assessments": []}})
+    )
     agent = _make_agent(wrong_key_client)
     with pytest.raises(KeyError):
         await agent.assess(_DOCUMENT, _QUESTIONS)

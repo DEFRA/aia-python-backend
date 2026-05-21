@@ -98,8 +98,12 @@ async def test_tagging_agent_retries_one_failed_batch_only() -> None:
     client.messages.create = AsyncMock(
         side_effect=[
             _make_rate_limit_error(),  # batch 1 attempt 1: transient
-            _make_response(_make_tagged_response_text(batch1)),  # batch 1 attempt 2: success
-            _make_response(_make_tagged_response_text(batch2)),  # batch 2 attempt 1: success
+            _make_response(
+                _make_tagged_response_text(batch1)
+            ),  # batch 1 attempt 2: success
+            _make_response(
+                _make_tagged_response_text(batch2)
+            ),  # batch 2 attempt 1: success
         ],
     )
     agent: TaggingAgent = _make_agent(client, batch_size=2)

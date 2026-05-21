@@ -90,7 +90,9 @@ async def test_tag_batching_with_more_than_batch_size() -> None:
     async def _mock_create(**kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
-        input_chunks: list[dict[str, Any]] = json.loads(kwargs["messages"][0]["content"])
+        input_chunks: list[dict[str, Any]] = json.loads(
+            kwargs["messages"][0]["content"]
+        )
         text: str = _make_tagged_response(input_chunks)
         return MagicMock(content=[MagicMock(text=text)])
 

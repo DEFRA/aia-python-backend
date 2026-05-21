@@ -40,7 +40,9 @@ def test_inline_or_s3_inlines_small_payload() -> None:
 def test_inline_or_s3_offloads_large_payload() -> None:
     """Payloads over the threshold are offloaded to S3 and reported via s3Key."""
     s3: Any = MagicMock()
-    big_payload: list[dict[str, str]] = [{"text": "x" * 1000} for _ in range(300)]  # > 240 KB
+    big_payload: list[dict[str, str]] = [
+        {"text": "x" * 1000} for _ in range(300)
+    ]  # > 240 KB
 
     envelope: dict[str, Any] = inline_or_s3(
         payload=big_payload,
@@ -83,7 +85,9 @@ def test_resolve_payload_fetches_from_s3_for_s3key_envelope() -> None:
     out: bytes = resolve_payload(envelope, s3_client=s3, bucket="my-bucket")
 
     assert out == payload_bytes
-    s3.get_object.assert_called_once_with(Bucket="my-bucket", Key="state/doc-3/tagged.json")
+    s3.get_object.assert_called_once_with(
+        Bucket="my-bucket", Key="state/doc-3/tagged.json"
+    )
 
 
 def test_resolve_payload_rejects_envelope_with_neither_field() -> None:
