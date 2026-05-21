@@ -145,5 +145,3 @@ async def get_document(
             detail=messages.DOC_NOT_FOUND.format(doc_id=document_id),
         )
     return record
-
-

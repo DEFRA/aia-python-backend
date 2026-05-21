@@ -118,4 +118,3 @@ def _build_pagination(page: int, limit: int, total: int) -> Pagination:
         nextPage=page + 1 if has_next else None,
         previousPage=page - 1 if has_previous else None,
     )
-

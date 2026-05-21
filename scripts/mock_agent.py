@@ -33,7 +33,7 @@ load_dotenv(_ROOT / ".env")
 
 sys.path.insert(0, str(_ROOT))
 
-from app.core.config import config  # noqa: E402
+from app.config import config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
 
@@ -95,7 +95,9 @@ async def _receive_one(client: Any) -> list[dict[str, str]]:
     ]
 
 
-async def run(count: int | None, rating: str | None, delay: float, doc_id: str | None) -> None:
+async def run(
+    count: int | None, rating: str | None, delay: float, doc_id: str | None
+) -> None:
     processed = 0
     filter_desc = f"doc_id={doc_id}" if doc_id else "all docs"
     print(
@@ -175,10 +177,27 @@ async def run(count: int | None, rating: str | None, delay: float, doc_id: str |
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--count", type=int, default=None, help="Stop after N tasks (default: run forever)")
-    p.add_argument("--rating", choices=_RATINGS, default=None, help="Force a specific rating (default: random)")
-    p.add_argument("--delay", type=float, default=0.0, help="Seconds to wait before responding (default: 0)")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="Stop after N tasks (default: run forever)",
+    )
+    p.add_argument(
+        "--rating",
+        choices=_RATINGS,
+        default=None,
+        help="Force a specific rating (default: random)",
+    )
+    p.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="Seconds to wait before responding (default: 0)",
+    )
     p.add_argument(
         "--doc-id",
         default=None,
@@ -190,6 +209,13 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
     try:
-        asyncio.run(run(count=args.count, rating=args.rating, delay=args.delay, doc_id=args.doc_id))
+        asyncio.run(
+            run(
+                count=args.count,
+                rating=args.rating,
+                delay=args.delay,
+                doc_id=args.doc_id,
+            )
+        )
     except KeyboardInterrupt:
         print("\nmock_agent: interrupted.")

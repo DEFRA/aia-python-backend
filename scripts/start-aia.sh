@@ -11,10 +11,10 @@
 #   ./scripts/start-aia.sh --logs     # tail all three service logs (Ctrl-C to exit)
 #
 # Requirements:
-#   • .env in the repo root with AWS_*, S3_BUCKET_NAME, TASK/STATUS_QUEUE_URL,
+#   â€¢ .env in the repo root with AWS_*, S3_BUCKET_NAME, TASK/STATUS_QUEUE_URL,
 #     POSTGRES_URI (or DB_* vars), and LLM_PROVIDER=bedrock
-#   • .venv built from requirements.txt
-#   • Podman PostgreSQL container running
+#   â€¢ .venv built from requirements.txt
+#   â€¢ Podman PostgreSQL container running
 #     (start with: ./scripts/start-datapipeline-dev.sh)
 #
 # STS credentials expire every few hours.  Re-run after refreshing .env.
@@ -27,27 +27,27 @@ VENV_UVICORN="$REPO_ROOT/.venv/bin/uvicorn"
 LOG_DIR="$REPO_ROOT/logs"
 PID_FILE="$REPO_ROOT/.aia.pids"
 
-# ── Colours ───────────────────────────────────────────────────────────────────
+# â”€â”€ Colours â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-ok()     { printf "${GREEN}  ✓${NC}  %-28s %s\n" "$1" "${2:-}"; }
-fail()   { printf "${RED}  ✗${NC}  %-28s %s\n" "$1" "${2:-}"; }
+ok()     { printf "${GREEN}  âœ“${NC}  %-28s %s\n" "$1" "${2:-}"; }
+fail()   { printf "${RED}  âœ—${NC}  %-28s %s\n" "$1" "${2:-}"; }
 warn()   { printf "${YELLOW}  !${NC}  %-28s %s\n" "$1" "${2:-}"; }
 info()   { printf "     %-28s %s\n" "$1" "${2:-}"; }
-banner() { echo -e "\n${BOLD}$1${NC}"; printf '─%.0s' {1..58}; echo; }
+banner() { echo -e "\n${BOLD}$1${NC}"; printf 'â”€%.0s' {1..58}; echo; }
 
-# ── Check .venv up-front (needed for safe .env loading below) ─────────────────
+# â”€â”€ Check .venv up-front (needed for safe .env loading below) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if [[ ! -x "$VENV_PYTHON" ]]; then
     echo -e "${RED}ERROR:${NC} .venv not found at $VENV_PYTHON"
     echo "  Build it:  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     exit 1
 fi
 
-# ── Load .env via python-dotenv ───────────────────────────────────────────────
+# â”€â”€ Load .env via python-dotenv â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Using Python avoids bash variable expansion on values that contain special
 # characters such as $ in passwords (e.g. Admin123$@...).
 if [ -f "$REPO_ROOT/.env" ]; then
@@ -60,10 +60,10 @@ for k, v in dotenv_values('$REPO_ROOT/.env').items():
 " 2>/dev/null)"
 fi
 
-# ── Parse argument ─────────────────────────────────────────────────────────────
+# â”€â”€ Parse argument â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 MODE="${1:---start}"   # default to --start if no arg
 
-# ── --logs mode ───────────────────────────────────────────────────────────────
+# â”€â”€ --logs mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if [[ "$MODE" == "--logs" ]]; then
     exec tail -f \
         "$LOG_DIR/core-backend.log" \
@@ -74,7 +74,7 @@ if [[ "$MODE" == "--logs" ]]; then
     "$LOG_DIR/agent-service.err"
 fi
 
-# ── --stop mode ───────────────────────────────────────────────────────────────
+# â”€â”€ --stop mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if [[ "$MODE" == "--stop" ]]; then
     banner "Stopping AIA backend services"
     if [ ! -f "$PID_FILE" ]; then
@@ -94,14 +94,14 @@ if [[ "$MODE" == "--stop" ]]; then
     exit 0
 fi
 
-# ── Change to repo root so Python module paths resolve ────────────────────────
+# â”€â”€ Change to repo root so Python module paths resolve â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 cd "$REPO_ROOT"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 banner "Connectivity checks"
 CHECKS_OK=true
 
-# ── PostgreSQL ─────────────────────────────────────────────────────────────────
+# â”€â”€ PostgreSQL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 PG_OUT=$(
     "$VENV_PYTHON" - <<'PY' 2>&1 || true
 import asyncio, asyncpg, os, sys
@@ -121,24 +121,68 @@ async def main():
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         sys.exit(1)
-    row = await conn.fetchrow(
-        "SELECT COUNT(*) AS n FROM data_pipeline.questions WHERE isactive = TRUE"
+
+    # Check if schemas exist
+    backend_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'backend')"
     )
-    await conn.close()
-    print(f"connected — {row['n']} active questions in data_pipeline.questions")
+    data_pipeline_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'data_pipeline')"
+    )
+
+    # Initialize backend schema if missing
+    if not backend_exists:
+        try:
+            backend_sql_path = "app/core_backend/src/db/init.sql"
+            if os.path.exists(backend_sql_path):
+                with open(backend_sql_path) as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                print("INIT: Backend schema initialized from app/core_backend/src/db/init.sql")
+            else:
+                print(f"WARN: Backend schema missing and {backend_sql_path} not found", file=sys.stderr)
+        except Exception as exc:
+            print(f"WARN: Could not initialize backend schema: {exc}", file=sys.stderr)
+
+    # Initialize data_pipeline schema if missing
+    if not data_pipeline_exists:
+        try:
+            data_sql_path = "app/datapipeline/db/init.sql"
+            if os.path.exists(data_sql_path):
+                with open(data_sql_path) as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                print("INIT: Data pipeline schema initialized from app/datapipeline/db/init.sql")
+            else:
+                print(f"WARN: Data pipeline schema missing and {data_sql_path} not found", file=sys.stderr)
+        except Exception as exc:
+            print(f"WARN: Could not initialize data pipeline schema: {exc}", file=sys.stderr)
+
+    try:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM data_pipeline.questions WHERE isactive = TRUE"
+        )
+        backend_check = await conn.fetchrow("SELECT COUNT(*) AS n FROM backend.users")
+        await conn.close()
+        print(f"OK: Connected â€” {row['n']} active questions, backend schema ready")
+    except Exception as exc:
+        print(f"FAIL (schema validation failed): {exc}", file=sys.stderr)
+        sys.exit(1)
 
 asyncio.run(main())
 PY
 )
-if echo "$PG_OUT" | grep -q "^connected"; then
+if echo "$PG_OUT" | grep -q "^OK"; then
     ok "PostgreSQL" "$PG_OUT"
+elif echo "$PG_OUT" | grep -q "^INIT"; then
+    warn "PostgreSQL" "$PG_OUT"
 else
     fail "PostgreSQL" "$PG_OUT"
     info "" "Start container:  ./scripts/start-datapipeline-dev.sh"
     CHECKS_OK=false
 fi
 
-# ── S3 ────────────────────────────────────────────────────────────────────────
+# â”€â”€ S3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 S3_OUT=$(
     "$VENV_PYTHON" - <<'PY' 2>&1 || true
 import boto3, os, sys
@@ -155,7 +199,7 @@ s3 = boto3.client(
 )
 try:
     s3.head_bucket(Bucket=bucket)
-    print(f"accessible — s3://{bucket} in {region}")
+    print(f"accessible â€” s3://{bucket} in {region}")
 except ClientError as exc:
     code = exc.response["Error"]["Code"]
     print(f"FAIL ({code}): {exc}", file=sys.stderr)
@@ -170,7 +214,7 @@ else
     CHECKS_OK=false
 fi
 
-# ── SQS — tasks queue ─────────────────────────────────────────────────────────
+# â”€â”€ SQS â€” tasks queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SQS_TASKS_OUT=$(
     "$VENV_PYTHON" - <<'PY' 2>&1 || true
 import boto3, os, sys
@@ -195,7 +239,7 @@ try:
     )["Attributes"]
     visible = attrs.get("ApproximateNumberOfMessages", "?")
     inflight = attrs.get("ApproximateNumberOfMessagesNotVisible", "?")
-    print(f"reachable — ~{visible} waiting, ~{inflight} in-flight")
+    print(f"reachable â€” ~{visible} waiting, ~{inflight} in-flight")
 except ClientError as exc:
     print(f"FAIL: {exc}", file=sys.stderr)
     sys.exit(1)
@@ -209,7 +253,7 @@ else
     CHECKS_OK=false
 fi
 
-# ── SQS — status queue ────────────────────────────────────────────────────────
+# â”€â”€ SQS â€” status queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SQS_STATUS_OUT=$(
     "$VENV_PYTHON" - <<'PY' 2>&1 || true
 import boto3, os, sys
@@ -234,7 +278,7 @@ try:
     )["Attributes"]
     visible = attrs.get("ApproximateNumberOfMessages", "?")
     inflight = attrs.get("ApproximateNumberOfMessagesNotVisible", "?")
-    print(f"reachable — ~{visible} waiting, ~{inflight} in-flight")
+    print(f"reachable â€” ~{visible} waiting, ~{inflight} in-flight")
 except ClientError as exc:
     print(f"FAIL: {exc}", file=sys.stderr)
     sys.exit(1)
@@ -248,7 +292,7 @@ else
     CHECKS_OK=false
 fi
 
-# ── Bedrock ───────────────────────────────────────────────────────────────────
+# â”€â”€ Bedrock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Uses Haiku 3 (cheapest, widely available) for the probe call.
 # Confirms the full credential chain works for Bedrock runtime in eu-west-2.
 BEDROCK_OUT=$(
@@ -268,7 +312,7 @@ async def main():
             max_tokens=1,
             messages=[{"role": "user", "content": "1"}],
         )
-        print(f"OK — Bedrock runtime responding (stop_reason={msg.stop_reason})")
+        print(f"OK â€” Bedrock runtime responding (stop_reason={msg.stop_reason})")
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -286,29 +330,29 @@ fi
 
 echo ""
 
-# ── Abort if any check failed ─────────────────────────────────────────────────
+# â”€â”€ Abort if any check failed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if [[ "$CHECKS_OK" == false ]]; then
     echo -e "${RED}One or more checks failed.${NC} Fix the issues above, then re-run."
     echo ""
-    echo "  Tip: STS credentials expire — refresh .env if AWS checks fail."
+    echo "  Tip: STS credentials expire â€” refresh .env if AWS checks fail."
     exit 1
 fi
 
 ok "All checks passed" ""
 echo ""
 
-# ── Check-only mode exits here ────────────────────────────────────────────────
+# â”€â”€ Check-only mode exits here â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if [[ "$MODE" == "--check" ]]; then
     exit 0
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 banner "Starting AIA backend services"
 
 mkdir -p "$LOG_DIR"
 
 # Kill any stale processes from a previous run
-for pattern in "api.main:app" "app.orchestrator.main:app" "app.agent_service.main:app"; do
+for pattern in "api.main:app" "app.orchestrator.src.main:app" "app.orchestrator.main:app" "app.agent_service.main:app"; do
     pkill -f "$pattern" 2>/dev/null || true
 done
 sleep 1
@@ -345,18 +389,18 @@ start_service() {
 CORE_SRC_PATH="$REPO_ROOT/app/core_backend/src"
 
 start_service "core-backend"  "api.main:app"                8086 "$LOG_DIR/core-backend.log" "$CORE_SRC_PATH"
-start_service "orchestrator"  "app.orchestrator.main:app"   8001 "$LOG_DIR/orchestrator.log"
+start_service "orchestrator" "app.orchestrator.src.main:app" 8001 "$LOG_DIR/orchestrator.log"
 start_service "agent-service" "app.agent_service.main:app"  8002 "$LOG_DIR/agent-service.log"
 
-# ── Wait then verify all three survived startup ───────────────────────────────
+# â”€â”€ Wait then verify all three survived startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 sleep 2
 echo ""
 ALL_UP=true
 while IFS=: read -r name pid; do
     if kill -0 "$pid" 2>/dev/null; then
-        ok "$name" "PID $pid — running"
+        ok "$name" "PID $pid â€” running"
     else
-        fail "$name" "PID $pid — exited at startup"
+        fail "$name" "PID $pid â€” exited at startup"
         info "" "Check logs/$name.log for the error"
         ALL_UP=false
     fi
@@ -367,9 +411,9 @@ echo ""
 if [[ "$ALL_UP" == true ]]; then
     echo -e "${BOLD}All services running.${NC}"
     echo ""
-    echo "  Core Backend   →  http://127.0.0.1:8086/health"
-    echo "  Orchestrator   →  http://127.0.0.1:8001"
-    echo "  Agent Service  →  http://127.0.0.1:8002/health"
+    echo "  Core Backend   â†’  http://127.0.0.1:8086/health"
+    echo "  Orchestrator   â†’  http://127.0.0.1:8001"
+    echo "  Agent Service  â†’  http://127.0.0.1:8002/health"
     echo ""
     echo "  Follow logs:   ./scripts/start-aia.sh --logs"
     echo "  Stop all:      ./scripts/start-aia.sh --stop"

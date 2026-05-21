@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Validate JSON syntax."""
-import sys, json
+
+import sys
+import json
 
 failed = False
 for path in sys.argv[1:]:

@@ -37,5 +37,3 @@ class OrchestratorService:
             logger.warning(
                 "Failed to reach orchestrator for doc_id=%s: %s", document_id, exc
             )
-
-

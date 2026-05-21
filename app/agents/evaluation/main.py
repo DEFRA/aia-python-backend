@@ -34,19 +34,27 @@ import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from src.agents.schemas import QuestionItem, TaggedChunk
-from src.agents.tagging_agent import TaggingAgent
-from src.config import DatabaseConfig, LocalRunnerConfig, PipelineConfig, TaggingAgentConfig
-from src.db.questions_repo import fetch_policy_doc_by_category, fetch_questions_by_policy_doc_id
-from src.handlers.agent import (
+from app.agents.evaluation.src.agents.schemas import QuestionItem, TaggedChunk
+from app.agents.evaluation.src.agents.tagging_agent import TaggingAgent
+from app.agents.evaluation.src.config import (
+    DatabaseConfig,
+    LocalRunnerConfig,
+    PipelineConfig,
+    TaggingAgentConfig,
+)
+from app.agents.evaluation.src.db.questions_repo import (
+    fetch_policy_doc_by_category,
+    fetch_questions_by_policy_doc_id,
+)
+from app.agents.evaluation.src.handlers.agent import (
     AGENT_REGISTRY,
     CONFIG_REGISTRY,
     SpecialistAgent,
     SpecialistAgentConfig,
 )
-from src.utils.document_parser import _parse_bytes
-from src.utils.exceptions import UnknownCategoryError
-from src.utils.llm_client import make_llm_client
+from app.agents.evaluation.src.utils.document_parser import _parse_bytes
+from app.agents.evaluation.src.utils.exceptions import UnknownCategoryError
+from app.agents.evaluation.src.utils.llm_client import make_llm_client
 
 
 class AgentTaskBody(BaseModel):

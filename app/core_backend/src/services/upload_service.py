@@ -79,6 +79,3 @@ class UploadService:
             return
 
         await self.orchestrator_service.trigger(doc_id, s3_key, template_type)
-
-
-

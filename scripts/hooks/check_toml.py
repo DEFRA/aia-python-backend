@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Validate TOML syntax."""
+
 import sys
+
 try:
     import tomllib
 except ImportError:

@@ -4,10 +4,9 @@ from urllib.parse import quote_plus
 
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-_ENV_FILE = Path(__file__).parent.parent / ".env"
-
 from app.utils.enums import LogLevel
+
+_ENV_FILE = Path(__file__).parent / ".env"
 
 # ---------------------------------------------------------------------------
 # Template → agent-type mapping.
@@ -190,9 +189,7 @@ class AppConfig(BaseSettings):
         if all([self.db_host, self.db_name, self.db_user, self.db_password]):
             user = quote_plus(self.db_user)
             password = quote_plus(self.db_password)
-            uri = (
-                f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
-            )
+            uri = f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
             return DBConfig(uri=uri)
 
         return DBConfig(uri=None)

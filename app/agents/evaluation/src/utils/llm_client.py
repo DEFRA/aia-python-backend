@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import anthropic
 
-from src.config import LLMConfig
+from app.agents.evaluation.src.config import LLMConfig
 
 
 def make_llm_client() -> anthropic.AsyncAnthropic:

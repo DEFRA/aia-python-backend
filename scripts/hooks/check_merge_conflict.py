@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Block files containing leftover merge conflict markers."""
+
 import sys
 
 MARKERS = ("<" * 7 + " ", ">" * 7 + " ", "=" * 7 + "\n")

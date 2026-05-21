@@ -13,16 +13,16 @@ import anthropic
 from anthropic import APIError
 from anthropic.types import Message, TextBlock
 
-from src.agents.schemas import (
+from app.agents.evaluation.src.agents.schemas import (
     AgentLLMOutput,
     LLMResponseMeta,
     QuestionItem,
     RawAssessmentRow,
     Summary,
 )
-from src.config import TechnicalAgentConfig
-from src.utils.helpers import parse_llm_json
-from src.utils.retry import agent_retry
+from app.agents.evaluation.src.config import TechnicalAgentConfig
+from app.agents.evaluation.src.utils.helpers import parse_llm_json
+from app.agents.evaluation.src.utils.retry import agent_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 

@@ -85,9 +85,9 @@ app/
 │   ├── result_record.py      # { ..., resultMd, errorMessage }
 │   ├── user_record.py        # { userId, email, name }
 │   ├── cost_usage_record.py  # CostUsageDocument, CostUsageResponse, Pagination, CostUsageSummary
-│   ├── task_message.py       # SQS message published to aia-tasks (s3_bucket/s3_key optional — None for inline)
-│   ├── status_message.py     # SQS message received from aia-status
-│   ├── orchestrate_request.py# Payload for POST /orchestrate
+│   ├── task_message.py       # Shared with Agent Service scripts/tests
+│   ├── status_message.py     # Shared with Agent Service scripts/tests
+│   ├── orchestrate_request.py# Shared schema (Orchestrator uses local copy under src/schemas)
 │   └── document_record.py
 ├── repositories/
 │   ├── document_repository.py  # document_uploads table queries
@@ -101,9 +101,32 @@ app/
 │   ├── s3_service.py           # S3 upload/download
 │   └── sqs_service.py          # send_task, receive_messages, delete_message
 ├── orchestrator/
-│   ├── main.py     # FastAPI service :8001 — POST /orchestrate + status queue poller
-│   ├── session.py  # In-memory per-document agent dispatch state
-│   └── summary.py  # SummaryGenerator protocol + MarkdownReportGenerator
+│   ├── tests/
+│   └── src/
+│       ├── main.py              # FastAPI service :8001 — POST /orchestrate + status queue poller
+│       ├── config/
+│       │   └── pipeline_config.py
+│       ├── repositories/
+│       │   ├── document_repository.py
+│       │   └── cost_usage_repository.py
+│       ├── services/
+│       │   ├── s3_service.py    # Download-only for orchestration
+│       │   └── sqs_service.py   # send_task, receive_messages, delete_message
+│       ├── session/
+│       │   └── store.py
+│       ├── reporting/
+│       │   └── report_generator.py
+│       ├── schemas/
+│       │   ├── contracts.py
+│       │   ├── orchestrate_request.py
+│       │   ├── status_message.py
+│       │   └── task_message.py
+│       └── utils/
+│           ├── app_context.py
+│           ├── document_parser.py
+│           ├── enums.py
+│           ├── logger.py
+│           └── postgres.py
 ├── agent_service/
 │   ├── __init__.py
 │   ├── main.py     # FastAPI app :8002 — lifespan starts SQS polling loop + /health
@@ -133,7 +156,7 @@ tests/
 ├── test_ingestor_service.py            # DOCX text extraction
 ├── test_sqs_service.py                 # SQS send/receive/delete
 ├── test_upload_router.py               # CoreBackend upload/history/result endpoints
-├── test_cost_usage_repository.py       # CostUsageRepository — JOIN query shape
+├── test_cost_usage_repository.py       # CostUsageRepository — upsert query shape
 ├── test_cost_usage_service.py          # Grouping, per-doc totalCost, summary, pagination
 ├── test_cost_usage_router.py           # /cost-usage endpoints — auth, validation, 404
 ├── test_orchestrator_session.py        # SessionStore — create, record, remove, events
@@ -193,8 +216,8 @@ Key environment variables:
 The Orchestrator calculates `total_cost_usd` from token usage using model-specific pricing in USD per 1M tokens.
 
 Source of truth in code:
-- `app/core/config.py` → `DEFAULT_LLM_PRICING_USD_PER_MTOKENS`
-- `app/orchestrator/main.py` → `_calculate_total_cost_usd(...)`
+- `app/config.py` → `DEFAULT_LLM_PRICING_USD_PER_MTOKENS`
+- `app/orchestrator/src/main.py` → `_calculate_total_cost_usd(...)`
 
 You can override pricing via `.env` using `LLM_PRICING_USD_PER_MTOKENS` as JSON:
 
@@ -310,7 +333,7 @@ PYTHONPATH=. pytest tests/test_orchestrator_processing.py -v
 | `test_ingestor_service.py` | DOCX text extraction | No |
 | `test_sqs_service.py` | SQS send/receive/delete | No (mocked) |
 | `test_agent_service.py` | Agent Service `_process_message()`, `_get_document()`, concurrent `run_worker()` loop | No (mocked) |
-| `test_cost_usage_repository.py` | `CostUsageRepository` JOIN query shape and parameter binding | No (mocked) |
+| `test_cost_usage_repository.py` | `CostUsageRepository` upsert query shape and parameter binding | No (mocked) |
 | `test_cost_usage_service.py` | Document grouping, per-doc `totalCost = SUM(total_cost_usd)`, summary aggregation, document-level pagination | No |
 | `test_cost_usage_router.py` | `/cost-usage` and `/cost-usage/{id}` — auth, query-param validation, 404 path | No (mocked) |
 

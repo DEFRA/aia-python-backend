@@ -93,5 +93,3 @@ class SQSService:
                 QueueUrl=queue_url,
                 ReceiptHandle=receipt_handle,
             )
-
-

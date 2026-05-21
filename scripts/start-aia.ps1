@@ -15,7 +15,7 @@
 #   * .venv built from requirements.txt
 #   * Podman PostgreSQL container running with schemas pre-initialized
 #     (Database schema is now deployed via CI/CD pipeline; see app/core_backend/src/db/init.sql)
-#   * Enums have been moved to app/core/src/app/utils/enums.py and app/orchestrator/enums.py
+#   * Orchestrator enums now live under app/orchestrator/src/utils/enums.py
 #
 # STS credentials expire every few hours. Re-run after refreshing .env.
 
@@ -77,22 +77,27 @@ if (-not (Test-Path $VenvPython)) {
     exit 1
 }
 
-# ── Load .env via python-dotenv ────────────────────────────────────────────────
-$EnvFile = Join-Path $RepoRoot ".env"
-if (Test-Path $EnvFile) {
-    $EnvJson = & $VenvPython -c @"
+# ── Load .env files — root first, then service-specific overrides ──────────────
+# Priority (highest last): root .env → app/core_backend/.env → app/orchestrator/.env
+function Load-EnvFile([string]$Path) {
+    if (-not (Test-Path $Path)) { return }
+    $json = & $VenvPython -c @"
 import json
 from dotenv import dotenv_values
-vals = {k: v for k, v in dotenv_values(r'$EnvFile').items() if v is not None}
+vals = {k: v for k, v in dotenv_values(r'$Path').items() if v is not None}
 print(json.dumps(vals))
 "@ 2>$null
-    if ($LASTEXITCODE -eq 0 -and $EnvJson) {
-        $Parsed = $EnvJson | ConvertFrom-Json
-        foreach ($prop in $Parsed.PSObject.Properties) {
+    if ($LASTEXITCODE -eq 0 -and $json) {
+        $parsed = $json | ConvertFrom-Json
+        foreach ($prop in $parsed.PSObject.Properties) {
             Set-Item -Path "Env:\$($prop.Name)" -Value $prop.Value
         }
     }
 }
+
+Load-EnvFile (Join-Path $RepoRoot ".env")
+Load-EnvFile (Join-Path $RepoRoot "app\core_backend\.env")
+Load-EnvFile (Join-Path $RepoRoot "app\orchestrator\.env")
 
 # ── Parse argument ─────────────────────────────────────────────────────────────
 $Mode = if ($args.Count -gt 0) { $args[0] } else { "--start" }
@@ -104,8 +109,8 @@ if ($Mode -eq "--logs") {
         (Join-Path $LogDir "core-backend.err"),
         (Join-Path $LogDir "orchestrator.log"),
         (Join-Path $LogDir "orchestrator.err"),
-        (Join-Path $LogDir "relay-service.log"),
-        (Join-Path $LogDir "relay-service.err")
+        (Join-Path $LogDir "agent-service.log"),
+        (Join-Path $LogDir "agent-service.err")
     )
     Write-Host "Tailing logs — press Ctrl-C to stop" -ForegroundColor Yellow
     Write-Host ""
@@ -415,7 +420,7 @@ if (-not (Test-Path $LogDir)) {
 }
 
 # Kill any stale processes from a previous run
-@("api.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
+@("api.main:app", "app.orchestrator.src.main:app", "app.orchestrator.main:app", "app.agent_service.main:app") | ForEach-Object {
     Get-WmiObject Win32_Process -Filter "CommandLine LIKE '%$_%'" -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
@@ -466,7 +471,7 @@ function Start-Service {
 $CoreSrcPath = Join-Path $RepoRoot "app\core_backend\src"
 
 Start-Service "core-backend"  "api.main:app"           8086 (Join-Path $LogDir "core-backend.log") $CoreSrcPath
-Start-Service "orchestrator"  "app.orchestrator.main:app"  8001 (Join-Path $LogDir "orchestrator.log")
+Start-Service "orchestrator"  "app.orchestrator.src.main:app"  8001 (Join-Path $LogDir "orchestrator.log")
 Start-Service "agent-service" "app.agent_service.main:app" 8002 (Join-Path $LogDir "agent-service.log")
 
 # ── Wait then verify all three survived startup ────────────────────────────────

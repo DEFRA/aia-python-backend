@@ -10,8 +10,8 @@ import logging
 
 import asyncpg
 
-from src.agents.schemas import QuestionItem
-from src.utils.exceptions import UnknownCategoryError
+from app.agents.evaluation.src.agents.schemas import QuestionItem
+from app.agents.evaluation.src.utils.exceptions import UnknownCategoryError
 
 logger: logging.Logger = logging.getLogger(__name__)
 

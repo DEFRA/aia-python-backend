@@ -94,6 +94,3 @@ class AuthService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=messages.INTERNAL_AUTH_ERROR,
             )
-
-
-

@@ -55,4 +55,3 @@ class PolicyDocumentService:
         if not await self.repo.category_exists(request.category):
             raise ValueError(f"Unsupported category: {request.category}")
         return await self.repo.update_policy_document_by_url_id(url_id, request)
-

@@ -62,5 +62,3 @@ class S3Service:
             response = await client.get_object(Bucket=bucket_name, Key=s3_key)
             async with response["Body"] as stream:
                 return await stream.read()
-
-

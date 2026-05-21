@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 import time
 import uuid
@@ -44,15 +43,10 @@ load_dotenv(_ROOT / ".env")
 
 sys.path.insert(0, str(_ROOT))
 
-# Inject evaluation module root so src.* imports resolve (same as agent_service/worker.py)
-_EVAL_ROOT = _ROOT / "app" / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-from app.core.config import config  # noqa: E402
+from app.config import config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
 from app.models.task_message import TaskMessage  # noqa: E402
-from src.utils.document_parser import _parse_bytes  # noqa: E402
+from app.orchestrator.document_parser import _parse_bytes  # noqa: E402
 
 # --------------------------------------------------------------------------
 
@@ -193,7 +187,9 @@ def _print_results(results: dict[str, StatusMessage], expected: set[str]) -> Non
 
     missing = expected - set(results)
     print("\n" + "=" * 60)
-    print(f"Received {len(results)}/{len(expected)} responses.  Missing: {missing or 'none'}")
+    print(
+        f"Received {len(results)}/{len(expected)} responses.  Missing: {missing or 'none'}"
+    )
     print("=" * 60)
 
 
@@ -211,7 +207,7 @@ async def run(
     print(f"  task queue  : {config.sqs.task_queue_url}")
     print(f"  status queue: {config.sqs.status_queue_url}")
     print()
-    print(f"  Pair with mock_agent (run in a separate terminal):")
+    print("  Pair with mock_agent (run in a separate terminal):")
     print(f"    python scripts/mock_agent.py --doc-id {doc_id} --count {n_tasks}")
 
     async with _sqs_client() as client:
@@ -270,10 +266,11 @@ if __name__ == "__main__":
             file_bytes = file_path.read_bytes()
             chunks = _parse_bytes(file_bytes, str(file_path), doc_id)
             file_content = "\n\n".join(
-                f"## {c['text']}" if c.get("is_heading") else c["text"]
-                for c in chunks
+                f"## {c['text']}" if c.get("is_heading") else c["text"] for c in chunks
             )
-            print(f"Using file: {args.file} (parsed {len(chunks)} chunks → {len(file_content)} chars)")
+            print(
+                f"Using file: {args.file} (parsed {len(chunks)} chunks → {len(file_content)} chars)"
+            )
         else:
             file_content = file_path.read_text(encoding="utf-8")
             print(f"Using file: {args.file} ({len(file_content)} chars)")
