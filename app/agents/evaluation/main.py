@@ -36,8 +36,16 @@ from pydantic import BaseModel
 
 from app.agents.evaluation.src.agents.schemas import QuestionItem, TaggedChunk
 from app.agents.evaluation.src.agents.tagging_agent import TaggingAgent
-from app.agents.evaluation.src.config import DatabaseConfig, LocalRunnerConfig, PipelineConfig, TaggingAgentConfig
-from app.agents.evaluation.src.db.questions_repo import fetch_policy_doc_by_category, fetch_questions_by_policy_doc_id
+from app.agents.evaluation.src.config import (
+    DatabaseConfig,
+    LocalRunnerConfig,
+    PipelineConfig,
+    TaggingAgentConfig,
+)
+from app.agents.evaluation.src.db.questions_repo import (
+    fetch_policy_doc_by_category,
+    fetch_questions_by_policy_doc_id,
+)
 from app.agents.evaluation.src.handlers.agent import (
     AGENT_REGISTRY,
     CONFIG_REGISTRY,

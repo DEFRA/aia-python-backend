@@ -191,14 +191,18 @@ async def test_agent_retry_logs_warning_before_each_sleep(
     async def call() -> str:
         return await inner()
 
-    with caplog.at_level(logging.WARNING, logger="app.agents.evaluation.src.utils.retry"):
+    with caplog.at_level(
+        logging.WARNING, logger="app.agents.evaluation.src.utils.retry"
+    ):
         result: str = await call()
 
     assert result == "ok"
     warning_records: list[logging.LogRecord] = [
         rec for rec in caplog.records if rec.levelno == logging.WARNING
     ]
-    assert warning_records, "Expected at least one WARNING from app.agents.evaluation.src.utils.retry"
+    assert warning_records, (
+        "Expected at least one WARNING from app.agents.evaluation.src.utils.retry"
+    )
 
 
 @pytest.mark.asyncio

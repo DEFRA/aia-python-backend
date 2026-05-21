@@ -13,7 +13,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem, RawAssessmentRow, Summary
+from app.agents.evaluation.src.agents.schemas import (
+    AgentLLMOutput,
+    QuestionItem,
+    RawAssessmentRow,
+    Summary,
+)
 from app.agents.evaluation.src.agents.technical_agent import TechnicalAgent
 from app.agents.evaluation.src.config import TechnicalAgentConfig
 

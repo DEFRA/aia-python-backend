@@ -21,7 +21,9 @@ def test_anthropic_provider_returns_async_anthropic() -> None:
         mock_cfg.sdk_max_retries = 0
         mock_cfg.request_timeout_s = 120.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropic") as mock_cls:
+        with patch(
+            "app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropic"
+        ) as mock_cls:
             client = make_llm_client()
 
     mock_cls.assert_called_once()
@@ -38,7 +40,9 @@ def test_bedrock_provider_returns_async_anthropic_bedrock() -> None:
         mock_cfg.sdk_max_retries = 0
         mock_cfg.request_timeout_s = 120.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_cls:
+        with patch(
+            "app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock"
+        ) as mock_cls:
             mock_cls.return_value = MagicMock()
             client = make_llm_client()
 
@@ -59,7 +63,9 @@ def test_provider_read_from_env_var() -> None:
 
     with (
         patch.dict(os.environ, {"LLM_PROVIDER": "bedrock"}),
-        patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_bedrock,
+        patch(
+            "app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock"
+        ) as mock_bedrock,
     ):
         mock_bedrock.return_value = MagicMock()
         # Reload to bust the module-level import; call directly
@@ -118,7 +124,9 @@ def test_make_llm_client_passes_max_retries_and_timeout() -> None:
         mock_cfg.sdk_max_retries = 0
         mock_cfg.request_timeout_s = 120.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropic") as mock_cls:
+        with patch(
+            "app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropic"
+        ) as mock_cls:
             make_llm_client()
 
     mock_cls.assert_called_once_with(max_retries=0, timeout=120.0)
@@ -134,7 +142,9 @@ def test_make_llm_client_bedrock_branch_passes_kwargs() -> None:
         mock_cfg.sdk_max_retries = 2
         mock_cfg.request_timeout_s = 60.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_cls:
+        with patch(
+            "app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock"
+        ) as mock_cls:
             mock_cls.return_value = MagicMock()
             make_llm_client()
 
