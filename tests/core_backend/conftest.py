@@ -1,7 +1,11 @@
 import sys
 from pathlib import Path
 
-# Add core_backend src to path so that relative imports (utils, models, services, etc.) 
-# resolve to app/core_backend/src namespace
-_CORE_SRC = Path(__file__).resolve().parents[2] / "app" / "core_backend" / "src"
-sys.path.insert(0, str(_CORE_SRC))
+# Add both repo root and core_backend/src to path
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_CORE_BACKEND_SRC = _REPO_ROOT / "app" / "core_backend" / "src"
+
+for path in [_REPO_ROOT, _CORE_BACKEND_SRC]:
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
