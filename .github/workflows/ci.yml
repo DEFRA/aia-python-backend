@@ -64,6 +64,7 @@ jobs:
           AWS_DEFAULT_REGION: eu-west-2
           ORCHESTRATOR_DEFAULT_AGENT_TYPE: general
           MAX_PRIORITY_ACTIONS: "10"
+          S3_UPLOAD_PREFIX: "uploaded_docs"
           STATUS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/000000000000/dummy-status
           TASK_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/000000000000/dummy-tasks
 
