@@ -67,9 +67,9 @@ def _make_response(text: str) -> MagicMock:
 
 def _make_agent(client: MagicMock, batch_size: int = 15) -> TaggingAgent:
     config: TaggingAgentConfig = TaggingAgentConfig(
-        TAGGING_MODEL="test-model",
-        TAGGING_BATCH_SIZE=batch_size,
-        ANTHROPIC_API_KEY="test-key",  # pragma: allowlist secret
+        model="test-model",
+        batch_size=batch_size,
+        api_key="test-key",  # pragma: allowlist secret
     )
     return TaggingAgent(client=client, config=config)
 
