@@ -13,15 +13,15 @@ import pytest
 
 def test_anthropic_provider_returns_async_anthropic() -> None:
     """make_llm_client() returns AsyncAnthropic when provider is 'anthropic'."""
-    from src.utils.llm_client import make_llm_client
+    from app.agents.evaluation.src.utils.llm_client import make_llm_client
 
-    with patch("src.utils.llm_client.LLMConfig") as mock_cfg_cls:
+    with patch("app.agents.evaluation.src.utils.llm_client.LLMConfig") as mock_cfg_cls:
         mock_cfg = MagicMock()
         mock_cfg.provider = "anthropic"
         mock_cfg.sdk_max_retries = 0
         mock_cfg.request_timeout_s = 120.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("src.utils.llm_client.anthropic.AsyncAnthropic") as mock_cls:
+        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropic") as mock_cls:
             client = make_llm_client()
 
     mock_cls.assert_called_once()
@@ -30,15 +30,15 @@ def test_anthropic_provider_returns_async_anthropic() -> None:
 
 def test_bedrock_provider_returns_async_anthropic_bedrock() -> None:
     """make_llm_client() returns AsyncAnthropicBedrock when provider is 'bedrock'."""
-    from src.utils.llm_client import make_llm_client
+    from app.agents.evaluation.src.utils.llm_client import make_llm_client
 
-    with patch("src.utils.llm_client.LLMConfig") as mock_cfg_cls:
+    with patch("app.agents.evaluation.src.utils.llm_client.LLMConfig") as mock_cfg_cls:
         mock_cfg = MagicMock()
         mock_cfg.provider = "bedrock"
         mock_cfg.sdk_max_retries = 0
         mock_cfg.request_timeout_s = 120.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_cls:
+        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_cls:
             mock_cls.return_value = MagicMock()
             client = make_llm_client()
 
@@ -55,11 +55,11 @@ def test_provider_read_from_env_var() -> None:
     """LLM_PROVIDER env var overrides config.yaml value."""
     import os
 
-    import src.utils.llm_client as llm_module
+    import app.agents.evaluation.src.utils.llm_client as llm_module
 
     with (
         patch.dict(os.environ, {"LLM_PROVIDER": "bedrock"}),
-        patch("src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_bedrock,
+        patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_bedrock,
     ):
         mock_bedrock.return_value = MagicMock()
         # Reload to bust the module-level import; call directly
@@ -70,8 +70,8 @@ def test_provider_read_from_env_var() -> None:
 
 def test_default_provider_is_bedrock() -> None:
     """With no env override, the default provider reads from config.yaml."""
-    import src.config as cfg_mod
-    from src.config import LLMConfig
+    import app.agents.evaluation.src.config as cfg_mod
+    from app.agents.evaluation.src.config import LLMConfig
 
     original_cache = cfg_mod._YAML_CACHE
     cfg_mod._YAML_CACHE = {"llm": {"provider": "bedrock"}}
@@ -94,7 +94,7 @@ def test_invalid_provider_raises() -> None:
 
     from pydantic import ValidationError
 
-    from src.config import LLMConfig
+    from app.agents.evaluation.src.config import LLMConfig
 
     with (
         patch.dict(os.environ, {"LLM_PROVIDER": "openai"}),
@@ -110,15 +110,15 @@ def test_invalid_provider_raises() -> None:
 
 def test_make_llm_client_passes_max_retries_and_timeout() -> None:
     """make_llm_client() forwards LLMConfig fields to AsyncAnthropic."""
-    from src.utils.llm_client import make_llm_client
+    from app.agents.evaluation.src.utils.llm_client import make_llm_client
 
-    with patch("src.utils.llm_client.LLMConfig") as mock_cfg_cls:
+    with patch("app.agents.evaluation.src.utils.llm_client.LLMConfig") as mock_cfg_cls:
         mock_cfg = MagicMock()
         mock_cfg.provider = "anthropic"
         mock_cfg.sdk_max_retries = 0
         mock_cfg.request_timeout_s = 120.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("src.utils.llm_client.anthropic.AsyncAnthropic") as mock_cls:
+        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropic") as mock_cls:
             make_llm_client()
 
     mock_cls.assert_called_once_with(max_retries=0, timeout=120.0)
@@ -126,15 +126,15 @@ def test_make_llm_client_passes_max_retries_and_timeout() -> None:
 
 def test_make_llm_client_bedrock_branch_passes_kwargs() -> None:
     """The bedrock branch should also forward max_retries and timeout."""
-    from src.utils.llm_client import make_llm_client
+    from app.agents.evaluation.src.utils.llm_client import make_llm_client
 
-    with patch("src.utils.llm_client.LLMConfig") as mock_cfg_cls:
+    with patch("app.agents.evaluation.src.utils.llm_client.LLMConfig") as mock_cfg_cls:
         mock_cfg = MagicMock()
         mock_cfg.provider = "bedrock"
         mock_cfg.sdk_max_retries = 2
         mock_cfg.request_timeout_s = 60.0
         mock_cfg_cls.return_value = mock_cfg
-        with patch("src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_cls:
+        with patch("app.agents.evaluation.src.utils.llm_client.anthropic.AsyncAnthropicBedrock") as mock_cls:
             mock_cls.return_value = MagicMock()
             make_llm_client()
 

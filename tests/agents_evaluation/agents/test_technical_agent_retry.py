@@ -17,9 +17,9 @@ import pytest
 from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from pydantic import ValidationError
 
-from src.agents.schemas import AgentLLMOutput, QuestionItem
-from src.agents.technical_agent import TechnicalAgent
-from src.config import TechnicalAgentConfig
+from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem
+from app.agents.evaluation.src.agents.technical_agent import TechnicalAgent
+from app.agents.evaluation.src.config import TechnicalAgentConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures

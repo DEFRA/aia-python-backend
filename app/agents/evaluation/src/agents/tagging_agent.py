@@ -9,11 +9,11 @@ from typing import Any, cast
 import anthropic
 from anthropic.types import Message, TextBlock
 
-from src.agents.prompts.tagging import SYSTEM_PROMPT
-from src.agents.schemas import TaggedChunk
-from src.config import TaggingAgentConfig
-from src.utils.helpers import strip_code_fences
-from src.utils.retry import agent_retry
+from app.agents.evaluation.src.agents.prompts.tagging import SYSTEM_PROMPT
+from app.agents.evaluation.src.agents.schemas import TaggedChunk
+from app.agents.evaluation.src.config import TaggingAgentConfig
+from app.agents.evaluation.src.utils.helpers import strip_code_fences
+from app.agents.evaluation.src.utils.retry import agent_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 

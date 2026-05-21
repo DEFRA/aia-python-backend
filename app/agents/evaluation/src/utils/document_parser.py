@@ -14,7 +14,7 @@ from typing import Any
 import fitz
 from docx import Document
 
-from src.config import ParserConfig
+from app.agents.evaluation.src.config import ParserConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ def parse_docx(file_bytes: bytes) -> list[dict[str, Any]]:
     return chunks
 
 
-from src.utils.exceptions import ScannedPdfError  # noqa: E402
+from app.agents.evaluation.src.utils.exceptions import ScannedPdfError  # noqa: E402
 
 
 def _parse_bytes(file_bytes: bytes, s3_key: str, doc_id: str) -> list[dict[str, Any]]:

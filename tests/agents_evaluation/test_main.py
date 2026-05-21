@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agents.schemas import (
+from app.agents.evaluation.src.agents.schemas import (
     AgentLLMOutput,
     QuestionItem,
     RawAssessmentRow,
@@ -103,7 +103,7 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
             return_value=MagicMock(dsn="postgresql://test:test@localhost/test"),
         ),
         patch.dict(
-            "src.handlers.agent.AGENT_REGISTRY",
+            "app.agents.evaluation.src.handlers.agent.AGENT_REGISTRY",
             {"security": mock_security_cls, "technical": mock_technical_cls},
         ),
         patch("main.anthropic") as mock_anthropic_mod,

@@ -14,7 +14,7 @@ from typing import Any
 
 import boto3
 
-from src.config import EventBridgeConfig
+from app.agents.evaluation.src.config import EventBridgeConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 

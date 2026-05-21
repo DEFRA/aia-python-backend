@@ -16,9 +16,9 @@ import pytest
 from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from pydantic import ValidationError
 
-from src.agents.schemas import AgentLLMOutput, QuestionItem
-from src.agents.security_agent import SecurityAgent
-from src.config import SecurityAgentConfig
+from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem
+from app.agents.evaluation.src.agents.security_agent import SecurityAgent
+from app.agents.evaluation.src.config import SecurityAgentConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures

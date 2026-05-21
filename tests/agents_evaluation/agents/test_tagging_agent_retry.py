@@ -15,9 +15,9 @@ import pytest
 from anthropic import RateLimitError
 from pydantic import ValidationError
 
-from src.agents.schemas import TaggedChunk
-from src.agents.tagging_agent import TaggingAgent
-from src.config import TaggingAgentConfig
+from app.agents.evaluation.src.agents.schemas import TaggedChunk
+from app.agents.evaluation.src.agents.tagging_agent import TaggingAgent
+from app.agents.evaluation.src.config import TaggingAgentConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures

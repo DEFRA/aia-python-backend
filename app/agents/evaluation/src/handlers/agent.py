@@ -8,10 +8,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from src.agents.schemas import AgentLLMOutput, QuestionItem
-from src.agents.security_agent import SecurityAgent
-from src.agents.technical_agent import TechnicalAgent
-from src.config import (
+from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem
+from app.agents.evaluation.src.agents.security_agent import SecurityAgent
+from app.agents.evaluation.src.agents.technical_agent import TechnicalAgent
+from app.agents.evaluation.src.config import (
     SecurityAgentConfig,
     TechnicalAgentConfig,
 )

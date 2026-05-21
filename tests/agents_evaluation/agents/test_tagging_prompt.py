@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.agents.prompts.tagging import SYSTEM_PROMPT, TAXONOMY
+from app.agents.evaluation.src.agents.prompts.tagging import SYSTEM_PROMPT, TAXONOMY
 
 
 def test_tagging_prompt_lists_technical_agent_tags() -> None:

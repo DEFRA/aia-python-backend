@@ -49,7 +49,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from src.config import RetryConfig
+from app.agents.evaluation.src.config import RetryConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 

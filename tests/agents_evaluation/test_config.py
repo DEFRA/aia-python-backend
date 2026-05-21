@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.config import (
+from app.agents.evaluation.src.config import (
     EventBridgeConfig,
     LLMConfig,
     PipelineConfig,
@@ -15,25 +15,25 @@ from src.config import (
 def test_redis_config_is_gone() -> None:
     """Plan 11: RedisConfig must no longer be importable."""
     with pytest.raises(ImportError):
-        from src.config import RedisConfig  # noqa: F401
+        from app.agents.evaluation.src.config import RedisConfig  # noqa: F401
 
 
 def test_cache_config_is_gone() -> None:
     """Plan 11: CacheConfig and its TTLs were removed alongside Redis."""
     with pytest.raises(ImportError):
-        from src.config import CacheConfig  # noqa: F401
+        from app.agents.evaluation.src.config import CacheConfig  # noqa: F401
 
 
 def test_gdpr_agent_config_is_gone() -> None:
     """GDPRAgentConfig was removed in Phase 3."""
     with pytest.raises(ImportError):
-        from src.config import GDPRAgentConfig  # noqa: F401
+        from app.agents.evaluation.src.config import GDPRAgentConfig  # noqa: F401
 
 
 def test_governance_agent_config_is_gone() -> None:
     """GovernanceAgentConfig was renamed to TechnicalAgentConfig in Phase 3."""
     with pytest.raises(ImportError):
-        from src.config import GovernanceAgentConfig  # noqa: F401
+        from app.agents.evaluation.src.config import GovernanceAgentConfig  # noqa: F401
 
 
 def test_eventbridge_config_defaults() -> None:

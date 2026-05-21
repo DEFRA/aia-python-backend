@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.schemas import TaggedChunk
-from src.agents.tagging_agent import TaggingAgent
+from app.agents.evaluation.src.agents.schemas import TaggedChunk
+from app.agents.evaluation.src.agents.tagging_agent import TaggingAgent
 
 # TaggingAgent constructor signature drifted away from these fixtures. Marker
 # is strict=True so a future fix flips xfail -> xpass and pytest will fail the
