@@ -74,4 +74,4 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl --fail http://127.0.0.1:8001/docs || exit 1
 
-CMD ["uvicorn", "app.orchestrator.src.main:app", "--host", "${HOST}", "--port", "${PORT}"]
+CMD ["sh", "-c", "uvicorn app.orchestrator.src.main:app --host ${HOST} --port ${PORT}"]
