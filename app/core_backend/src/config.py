@@ -4,10 +4,9 @@ from urllib.parse import quote_plus
 
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from utils.enums import LogLevel
 
 _ENV_FILE = Path(__file__).parent / ".env"
-
-from utils.enums import LogLevel
 
 # ---------------------------------------------------------------------------
 # Template → agent-type mapping.

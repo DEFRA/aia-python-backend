@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Block PEM private keys from being committed."""
-import re, sys
+import re
+import sys
 
 PATTERN = re.compile(r"-----BEGIN\s+(?:\w+ )?PRIVATE KEY-----")
 failed = False

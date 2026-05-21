@@ -13,7 +13,6 @@ import logging
 from typing import Any
 
 import boto3
-
 from app.agents.evaluation.src.config import EventBridgeConfig
 
 logger: logging.Logger = logging.getLogger(__name__)

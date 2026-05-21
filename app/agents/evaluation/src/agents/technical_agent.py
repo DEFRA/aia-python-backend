@@ -12,7 +12,6 @@ from typing import cast
 import anthropic
 from anthropic import APIError
 from anthropic.types import Message, TextBlock
-
 from app.agents.evaluation.src.agents.schemas import (
     AgentLLMOutput,
     LLMResponseMeta,

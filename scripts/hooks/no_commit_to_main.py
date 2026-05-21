@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Prevent direct commits to the main branch."""
-import subprocess, sys
+import subprocess
+import sys
 
 result = subprocess.run(
     ["git", "symbolic-ref", "HEAD"],

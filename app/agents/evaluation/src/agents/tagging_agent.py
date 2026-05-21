@@ -8,7 +8,6 @@ from typing import Any, cast
 
 import anthropic
 from anthropic.types import Message, TextBlock
-
 from app.agents.evaluation.src.agents.prompts.tagging import SYSTEM_PROMPT
 from app.agents.evaluation.src.agents.schemas import TaggedChunk
 from app.agents.evaluation.src.config import TaggingAgentConfig

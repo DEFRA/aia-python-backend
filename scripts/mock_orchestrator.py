@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 import time
 import uuid
@@ -206,7 +205,7 @@ async def run(
     print(f"  task queue  : {config.sqs.task_queue_url}")
     print(f"  status queue: {config.sqs.status_queue_url}")
     print()
-    print(f"  Pair with mock_agent (run in a separate terminal):")
+    print("  Pair with mock_agent (run in a separate terminal):")
     print(f"    python scripts/mock_agent.py --doc-id {doc_id} --count {n_tasks}")
 
     async with _sqs_client() as client:

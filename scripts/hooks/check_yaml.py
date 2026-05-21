@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate YAML syntax."""
-import sys, yaml
+import sys
+import yaml
 
 failed = False
 for path in sys.argv[1:]:
