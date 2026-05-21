@@ -55,7 +55,7 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: pytest
-        run: pytest -v --tb=short app/orchestrator/tests/
+        run: pytest -v --tb=short app/tests/orchestrator/
         env:
           DB_HOST: localhost
           DB_NAME: dummy
@@ -85,7 +85,7 @@ jobs:
           pip install pytest pytest-asyncio pytest-mock
 
       - name: pytest
-        run: pytest -v --tb=short app/core_backend/src/tests/
+        run: pytest -v --tb=short app/tests/core_backend/
         env:
           DB_HOST: localhost
           DB_NAME: dummy
