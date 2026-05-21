@@ -13,14 +13,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.agents.evaluation.src.agents.schemas import (
+from app.agent_service.src.models.schemas import (
     AgentLLMOutput,
     QuestionItem,
     RawAssessmentRow,
     Summary,
 )
-from app.agents.evaluation.src.agents.technical_agent import TechnicalAgent
-from app.agents.evaluation.src.config import TechnicalAgentConfig
+from app.agent_service.src.agents.technical_agent import TechnicalAgent
+from app.agent_service.src.config import TechnicalAgentConfig
 
 
 @pytest.fixture(autouse=True)
@@ -137,25 +137,18 @@ async def test_technical_agent_rows_have_correct_question_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_technical_agent_raises_on_invalid_payload() -> None:
-    """Malformed JSON raises JSONDecodeError; missing top-level key raises KeyError.
-
-    Both cases used to be wrapped in a single ``ValueError``. After the
-    tenacity retry change (Plan 12) the JSONDecodeError propagates as-is so the
-    retry predicate can classify it as transient, and the missing-key case
-    raises KeyError so it is treated as terminal.
-    """
-    # Case 1: malformed JSON — propagates as JSONDecodeError (transient).
-    # The autouse ``_no_sleep`` fixture keeps tenacity's backoff instant; after
-    # exhausting retries the original JSONDecodeError is re-raised.
+    """Both malformed JSON and a missing top-level key raise ValueError."""
+    # Case 1: malformed JSON — JSONDecodeError is caught and wrapped in ValueError.
     bad_client: MagicMock = _make_mock_client("Not JSON at all")
     agent: TechnicalAgent = _make_agent(bad_client)
-    with pytest.raises(json.JSONDecodeError):
+    with pytest.raises(ValueError):
         await agent.assess(_DOCUMENT, _QUESTIONS)
 
-    # Case 2: valid JSON but missing top-level ``Technical`` key — terminal.
+    # Case 2: valid JSON but missing top-level ``Technical`` key — KeyError
+    # is caught and wrapped in ValueError.
     wrong_key_client: MagicMock = _make_mock_client(
         json.dumps({"Security": {"Assessments": []}})
     )
     agent = _make_agent(wrong_key_client)
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError):
         await agent.assess(_DOCUMENT, _QUESTIONS)

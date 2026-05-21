@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.agents.evaluation.src.agents.schemas import (
+from app.agent_service.src.models.schemas import (
     AgentLLMOutput,
     QuestionItem,
     RawAssessmentRow,
@@ -42,6 +42,7 @@ def _sample_llm_output(rating: str = "Green") -> AgentLLMOutput:
     )
 
 
+@pytest.mark.skip(reason="run_pipeline local runner was removed; agent service now runs as ECS/SQS worker")
 @pytest.mark.asyncio
 async def test_run_pipeline_dispatches_via_registry_and_writes_json(
     tmp_path: Path,
@@ -103,7 +104,7 @@ async def test_run_pipeline_dispatches_via_registry_and_writes_json(
             return_value=MagicMock(dsn="postgresql://test:test@localhost/test"),
         ),
         patch.dict(
-            "app.agents.evaluation.src.handlers.agent.AGENT_REGISTRY",
+            "app.agent_service.src.handlers.agent.AGENT_REGISTRY",
             {"security": mock_security_cls, "technical": mock_technical_cls},
         ),
         patch("main.anthropic") as mock_anthropic_mod,

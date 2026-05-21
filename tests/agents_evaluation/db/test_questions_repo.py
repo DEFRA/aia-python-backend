@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 import asyncpg
 import pytest
 
-from app.agents.evaluation.src.db.questions_repo import (
+from app.agent_service.src.database.questions_repo import (
     fetch_policy_doc_by_category,
     fetch_questions_by_policy_doc_id,
 )
-from app.agents.evaluation.src.utils.exceptions import UnknownCategoryError
+from app.agent_service.src.utils.exceptions import UnknownCategoryError
 
 # ---------------------------------------------------------------------------
 # fetch_policy_doc_by_category
@@ -29,7 +29,7 @@ async def test_fetch_policy_doc_returns_id_url_and_filename() -> None:
     }
 
     with patch(
-        "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+        "app.agent_service.src.database.questions_repo.asyncpg.connect",
         AsyncMock(return_value=mock_conn),
     ):
         result = await fetch_policy_doc_by_category("dsn", "security")
@@ -48,7 +48,7 @@ async def test_fetch_policy_doc_raises_unknown_category_when_no_row() -> None:
 
     with (
         patch(
-            "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+            "app.agent_service.src.database.questions_repo.asyncpg.connect",
             AsyncMock(return_value=mock_conn),
         ),
         pytest.raises(UnknownCategoryError, match="no-such-category"),
@@ -67,7 +67,7 @@ async def test_fetch_policy_doc_connection_closed_on_success() -> None:
     }
 
     with patch(
-        "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+        "app.agent_service.src.database.questions_repo.asyncpg.connect",
         AsyncMock(return_value=mock_conn),
     ):
         await fetch_policy_doc_by_category("dsn", "security")
@@ -83,7 +83,7 @@ async def test_fetch_policy_doc_connection_closed_on_error() -> None:
 
     with (
         patch(
-            "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+            "app.agent_service.src.database.questions_repo.asyncpg.connect",
             AsyncMock(return_value=mock_conn),
         ),
         pytest.raises(asyncpg.PostgresConnectionError),
@@ -101,7 +101,7 @@ async def test_fetch_policy_doc_connection_closed_on_error() -> None:
 @pytest.mark.asyncio
 async def test_fetch_questions_returns_question_items() -> None:
     """Returns a list of QuestionItem instances with id populated."""
-    from app.agents.evaluation.src.agents.schemas import QuestionItem
+    from app.agent_service.src.models.schemas import QuestionItem
 
     mock_conn = AsyncMock()
     mock_conn.fetch.return_value = [
@@ -118,7 +118,7 @@ async def test_fetch_questions_returns_question_items() -> None:
     ]
 
     with patch(
-        "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+        "app.agent_service.src.database.questions_repo.asyncpg.connect",
         AsyncMock(return_value=mock_conn),
     ):
         questions = await fetch_questions_by_policy_doc_id(
@@ -140,7 +140,7 @@ async def test_fetch_questions_returns_empty_list_when_no_rows() -> None:
     mock_conn.fetch.return_value = []
 
     with patch(
-        "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+        "app.agent_service.src.database.questions_repo.asyncpg.connect",
         AsyncMock(return_value=mock_conn),
     ):
         questions = await fetch_questions_by_policy_doc_id("dsn", "some-uuid")
@@ -155,7 +155,7 @@ async def test_fetch_questions_connection_closed_on_success() -> None:
     mock_conn.fetch.return_value = []
 
     with patch(
-        "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+        "app.agent_service.src.database.questions_repo.asyncpg.connect",
         AsyncMock(return_value=mock_conn),
     ):
         await fetch_questions_by_policy_doc_id("dsn", "some-uuid")
@@ -171,7 +171,7 @@ async def test_fetch_questions_connection_closed_on_error() -> None:
 
     with (
         patch(
-            "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+            "app.agent_service.src.database.questions_repo.asyncpg.connect",
             AsyncMock(return_value=mock_conn),
         ),
         pytest.raises(asyncpg.PostgresConnectionError),
@@ -188,7 +188,7 @@ async def test_fetch_questions_sql_uses_policy_doc_id() -> None:
     mock_conn.fetch.return_value = []
 
     with patch(
-        "app.agents.evaluation.src.db.questions_repo.asyncpg.connect",
+        "app.agent_service.src.database.questions_repo.asyncpg.connect",
         AsyncMock(return_value=mock_conn),
     ):
         await fetch_questions_by_policy_doc_id("dsn", "some-uuid")

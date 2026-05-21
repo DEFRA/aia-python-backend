@@ -9,43 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
-from pathlib import Path
 
 from pydantic import ValidationError
 
-# ---------------------------------------------------------------------------
-# Evaluation module path injection — must precede 'src.*' imports below.
-# The evaluation sub-package uses bare 'src.*' imports because its Lambda
-# handler runs with app/agents/evaluation/ as the Python root.  We replicate
-# that here so the worker can share the same agent/config/db code without
-# duplicating it.
-# ---------------------------------------------------------------------------
-_EVAL_ROOT = Path(__file__).resolve().parent.parent / "agents" / "evaluation"
-if str(_EVAL_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EVAL_ROOT))
-
-# Load the evaluation module's own .env so DatabaseConfig picks up DB_HOST/NAME/USER/PASSWORD.
-# This must happen before any src.* import that triggers Pydantic settings initialisation.
-from dotenv import load_dotenv as _load_dotenv  # noqa: E402
-
-_load_dotenv(
-    _EVAL_ROOT / ".env", override=False
-)  # override=False: root .env values take precedence
-
-from src.agents.schemas import (  # noqa: E402
-    AgentResult,
-    AssessmentRow,
-    PolicyDocResult,
-)
-from src.config import DatabaseConfig  # noqa: E402
-from src.utils.document_parser import _parse_bytes  # noqa: E402
-from src.db.questions_repo import (  # noqa: E402
+from app.agent_service.src.models.schemas import AgentResult, AssessmentRow, PolicyDocResult
+from app.agent_service.src.config import DatabaseConfig
+from app.agent_service.src.utils.doc_parser import _parse_bytes
+from app.agent_service.src.database.questions_repo import (
     fetch_all_policy_docs_by_category,
     fetch_questions_by_policy_doc_id,
 )
-from src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY  # noqa: E402
-from src.utils.llm_client import make_llm_client  # noqa: E402
+from app.agent_service.src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY
+from app.agent_service.src.utils.llm_client import make_llm_client
 
 from app.config import config as app_config  # noqa: E402
 from app.models.status_message import StatusMessage  # noqa: E402
@@ -253,13 +228,7 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
                 policy_doc_filename=policy_doc_filename,
                 policy_doc_url=policy_doc_url,
                 assessments=assessments,
-                # Accept summary objects from either `src.*` or `app.agents.evaluation.src.*`
-                # imports by normalizing to a plain dict before Pydantic validation.
-                summary=(
-                    llm_output.summary.model_dump()
-                    if hasattr(llm_output.summary, "model_dump")
-                    else llm_output.summary
-                ),
+                summary=llm_output.summary,
             )
             return (result, tokens)
         except asyncio.TimeoutError:

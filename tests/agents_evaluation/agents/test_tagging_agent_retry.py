@@ -15,9 +15,9 @@ import pytest
 from anthropic import RateLimitError
 from pydantic import ValidationError
 
-from app.agents.evaluation.src.agents.schemas import TaggedChunk
-from app.agents.evaluation.src.agents.tagging_agent import TaggingAgent
-from app.agents.evaluation.src.config import TaggingAgentConfig
+from app.agent_service.src.models.schemas import TaggedChunk
+from app.agent_service.src.agents.tagging_agent import TaggingAgent
+from app.agent_service.src.config import TaggingAgentConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -88,49 +88,34 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tagging_agent_retries_one_failed_batch_only() -> None:
-    """A failure in batch 1 retries only batch 1 — batch 2 still runs once."""
-    chunks: list[dict[str, Any]] = [_make_chunk(i) for i in range(4)]
-    batch1: list[dict[str, Any]] = chunks[:2]
-    batch2: list[dict[str, Any]] = chunks[2:]
+async def test_tagging_agent_raises_on_rate_limit_error() -> None:
+    """RateLimitError propagates immediately — no retry in the agent."""
+    chunks: list[dict[str, Any]] = [_make_chunk(i) for i in range(2)]
 
     client: MagicMock = MagicMock()
-    client.messages.create = AsyncMock(
-        side_effect=[
-            _make_rate_limit_error(),  # batch 1 attempt 1: transient
-            _make_response(
-                _make_tagged_response_text(batch1)
-            ),  # batch 1 attempt 2: success
-            _make_response(
-                _make_tagged_response_text(batch2)
-            ),  # batch 2 attempt 1: success
-        ],
-    )
+    client.messages.create = AsyncMock(side_effect=_make_rate_limit_error())
     agent: TaggingAgent = _make_agent(client, batch_size=2)
 
-    result: list[TaggedChunk] = await agent.tag(chunks)
+    with pytest.raises(RateLimitError):
+        await agent.tag(chunks)
 
-    assert len(result) == 4
-    assert client.messages.create.await_count == 3
+    assert client.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_tagging_agent_retries_on_malformed_json() -> None:
-    """Malformed JSON in a batch is transient — retry then succeed."""
+async def test_tagging_agent_raises_on_malformed_json() -> None:
+    """Malformed JSON raises JSONDecodeError on the first attempt — no retry."""
     chunks: list[dict[str, Any]] = [_make_chunk(0), _make_chunk(1)]
     client: MagicMock = MagicMock()
     client.messages.create = AsyncMock(
-        side_effect=[
-            _make_response("not json"),
-            _make_response(_make_tagged_response_text(chunks)),
-        ],
+        return_value=_make_response("not json"),
     )
     agent: TaggingAgent = _make_agent(client, batch_size=15)
 
-    result: list[TaggedChunk] = await agent.tag(chunks)
+    with pytest.raises(json.JSONDecodeError):
+        await agent.tag(chunks)
 
-    assert len(result) == 2
-    assert client.messages.create.await_count == 2
+    assert client.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio

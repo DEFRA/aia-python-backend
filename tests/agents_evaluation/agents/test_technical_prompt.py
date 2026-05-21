@@ -7,8 +7,7 @@ from pathlib import Path
 _PROMPTS_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
     / "app"
-    / "agents"
-    / "evaluation"
+    / "agent_service"
     / "src"
     / "agents"
     / "prompts"

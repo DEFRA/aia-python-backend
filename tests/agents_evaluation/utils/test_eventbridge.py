@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.agents.evaluation.src.config import EventBridgeConfig
-from app.agents.evaluation.src.utils.eventbridge import EventBridgePublisher
+from app.agent_service.src.config import EventBridgeConfig
+from app.agent_service.src.utils.eventbridge import EventBridgePublisher
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def config() -> EventBridgeConfig:
 
 def test_publisher_init_creates_boto3_client(config: EventBridgeConfig) -> None:
     """Constructor should store config and create a boto3 events client."""
-    with patch("app.agents.evaluation.src.utils.eventbridge.boto3") as mock_boto3:
+    with patch("app.agent_service.src.utils.eventbridge.boto3") as mock_boto3:
         publisher = EventBridgePublisher(config=config)
         mock_boto3.client.assert_called_once_with("events", region_name="eu-west-2")
         assert publisher._config is config
@@ -40,7 +40,7 @@ async def test_publish_builds_correct_envelope(config: EventBridgeConfig) -> Non
     mock_client = MagicMock()
     mock_client.put_events.return_value = {"FailedEntryCount": 0, "Entries": []}
 
-    with patch("app.agents.evaluation.src.utils.eventbridge.boto3") as mock_boto3:
+    with patch("app.agent_service.src.utils.eventbridge.boto3") as mock_boto3:
         mock_boto3.client.return_value = mock_client
         publisher = EventBridgePublisher(config=config)
 
@@ -69,7 +69,7 @@ async def test_publish_raises_on_failed_entry(config: EventBridgeConfig) -> None
         "Entries": [{"ErrorCode": "InternalFailure", "ErrorMessage": "boom"}],
     }
 
-    with patch("app.agents.evaluation.src.utils.eventbridge.boto3") as mock_boto3:
+    with patch("app.agent_service.src.utils.eventbridge.boto3") as mock_boto3:
         mock_boto3.client.return_value = mock_client
         publisher = EventBridgePublisher(config=config)
 

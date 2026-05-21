@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.agents.evaluation.src.agents.schemas import (
+from app.agent_service.src.models.schemas import (
     AgentCompleteDetail,
     AgentLLMOutput,
     AgentResult,
@@ -298,7 +298,7 @@ def test_agent_complete_detail() -> None:
 
 def test_removed_models_are_no_longer_importable() -> None:
     """Stages 7-9 detail models were removed in plan 11."""
-    from app.agents.evaluation.src.agents import schemas
+    from app.agent_service.src.models import schemas
 
     for removed in (
         "AllAgentsCompleteDetail",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.agents.evaluation.src.config import PipelineConfig, TechnicalAgentConfig
+from app.agent_service.src.config import PipelineConfig, TechnicalAgentConfig
 
 
 def test_yaml_loads_technical_agent_block(monkeypatch: pytest.MonkeyPatch) -> None:

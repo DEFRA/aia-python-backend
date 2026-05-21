@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from app.agents.evaluation.src.utils.payload_offload import (
+from app.agent_service.src.utils.payload_offload import (
     inline_or_s3,
     resolve_payload,
 )

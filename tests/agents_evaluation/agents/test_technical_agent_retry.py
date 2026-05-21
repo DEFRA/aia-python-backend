@@ -17,9 +17,9 @@ import pytest
 from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from pydantic import ValidationError
 
-from app.agents.evaluation.src.agents.schemas import AgentLLMOutput, QuestionItem
-from app.agents.evaluation.src.agents.technical_agent import TechnicalAgent
-from app.agents.evaluation.src.config import TechnicalAgentConfig
+from app.agent_service.src.models.schemas import AgentLLMOutput, QuestionItem
+from app.agent_service.src.agents.technical_agent import TechnicalAgent
+from app.agent_service.src.config import TechnicalAgentConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -104,42 +104,33 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_technical_agent_retries_on_transient_api_error() -> None:
-    """Connection / rate-limit errors should retry and eventually succeed."""
-    success_text: str = json.dumps(_technical_payload(_QUESTIONS))
+async def test_technical_agent_raises_on_connection_error() -> None:
+    """APIConnectionError propagates immediately — no retry in the agent."""
     client: MagicMock = MagicMock()
     client.messages.create = AsyncMock(
-        side_effect=[
-            APIConnectionError(request=_make_request()),
-            _make_rate_limit_error(),
-            _make_response(success_text),
-        ],
+        side_effect=APIConnectionError(request=_make_request()),
     )
     agent: TechnicalAgent = _make_agent(client)
 
-    result: AgentLLMOutput = await agent.assess(_DOCUMENT, _QUESTIONS)
+    with pytest.raises(APIConnectionError):
+        await agent.assess(_DOCUMENT, _QUESTIONS)
 
-    assert isinstance(result, AgentLLMOutput)
-    assert client.messages.create.await_count == 3
+    assert client.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_technical_agent_retries_on_malformed_json_then_succeeds() -> None:
-    """Malformed JSON is transient — agent should retry and succeed."""
-    success_text: str = json.dumps(_technical_payload(_QUESTIONS))
+async def test_technical_agent_raises_on_malformed_json() -> None:
+    """Malformed JSON raises ValueError on the first attempt — no retry."""
     client: MagicMock = MagicMock()
     client.messages.create = AsyncMock(
-        side_effect=[
-            _make_response("not json"),
-            _make_response(success_text),
-        ],
+        return_value=_make_response("not json"),
     )
     agent: TechnicalAgent = _make_agent(client)
 
-    result: AgentLLMOutput = await agent.assess(_DOCUMENT, _QUESTIONS)
+    with pytest.raises(ValueError):
+        await agent.assess(_DOCUMENT, _QUESTIONS)
 
-    assert isinstance(result, AgentLLMOutput)
-    assert client.messages.create.await_count == 2
+    assert client.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -156,8 +147,8 @@ async def test_technical_agent_does_not_retry_on_4xx() -> None:
 
 
 @pytest.mark.asyncio
-async def test_technical_agent_does_not_retry_on_validation_error() -> None:
-    """A ValidationError from a malformed payload row is terminal."""
+async def test_technical_agent_raises_on_validation_error() -> None:
+    """A malformed payload row raises ValueError (agent wraps parse errors)."""
     bad_payload: dict[str, Any] = {
         "Technical": {
             "Assessments": [
@@ -179,7 +170,7 @@ async def test_technical_agent_does_not_retry_on_validation_error() -> None:
     )
     agent: TechnicalAgent = _make_agent(client)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError):
         await agent.assess(_DOCUMENT, _QUESTIONS)
 
     assert client.messages.create.await_count == 1

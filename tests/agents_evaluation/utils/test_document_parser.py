@@ -7,7 +7,7 @@ import io
 import fitz
 from docx import Document
 
-from app.agents.evaluation.src.utils.document_parser import (
+from app.agent_service.src.utils.doc_parser import (
     clean_and_chunk,
     extract_text_blocks,
     get_pdf_strategy,
