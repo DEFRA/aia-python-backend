@@ -22,10 +22,7 @@ strict = true
 ignore_missing_imports = true
 warn_unused_ignores = false  # envs differ on whether 3rd-party stubs are installed
 disallow_untyped_calls = false  # allow calls to untyped third-party libraries
-
-[[tool.mypy.overrides]]
-module = ["tests.*", "*.tests.*", "agents_evaluation.*"]
-ignore_errors = true
+exclude = ["tests/", "../../tests/"]  # don't type-check tests
 
 [[tool.mypy.overrides]]
 module = ["reportlab.*", "asyncpg.*", "boto3.*", "fitz.*"]
