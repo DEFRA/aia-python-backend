@@ -1,0 +1,23 @@
+import logging
+import sys
+
+DEFAULT_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+
+def get_logger(name: str) -> logging.Logger:
+    if not logging.getLogger().hasHandlers():
+        try:
+            from app.config import config
+
+            level_name = config.app.log_level.value.upper()
+        except (ImportError, AttributeError):
+            level_name = "INFO"
+
+        level = getattr(logging, level_name, logging.INFO)
+        logging.basicConfig(
+            level=level,
+            format=DEFAULT_FORMAT,
+            handlers=[logging.StreamHandler(sys.stdout)],
+        )
+
+    return logging.getLogger(name)

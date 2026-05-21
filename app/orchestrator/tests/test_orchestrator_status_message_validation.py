@@ -16,7 +16,7 @@ def _valid_status_payload() -> dict[str, object]:
 
 
 def test_parse_status_message_accepts_valid_payload() -> None:
-    from app.orchestrator.main import _parse_status_message
+    from app.orchestrator.src.main import _parse_status_message
 
     payload = _valid_status_payload()
     status_msg = _parse_status_message(json.dumps(payload))
@@ -28,7 +28,7 @@ def test_parse_status_message_accepts_valid_payload() -> None:
 
 
 def test_parse_status_message_rejects_mismatched_task_id() -> None:
-    from app.orchestrator.main import (
+    from app.orchestrator.src.main import (
         NonRetriableStatusMessageError,
         _parse_status_message,
     )
@@ -41,7 +41,7 @@ def test_parse_status_message_rejects_mismatched_task_id() -> None:
 
 
 def test_parse_status_message_rejects_negative_tokens() -> None:
-    from app.orchestrator.main import (
+    from app.orchestrator.src.main import (
         NonRetriableStatusMessageError,
         _parse_status_message,
     )
@@ -54,7 +54,7 @@ def test_parse_status_message_rejects_negative_tokens() -> None:
 
 
 def test_parse_status_message_rejects_unknown_agent_type() -> None:
-    from app.orchestrator.main import (
+    from app.orchestrator.src.main import (
         NonRetriableStatusMessageError,
         _parse_status_message,
     )
@@ -68,7 +68,7 @@ def test_parse_status_message_rejects_unknown_agent_type() -> None:
 
 
 def test_parse_status_message_rejects_extra_fields() -> None:
-    from app.orchestrator.main import (
+    from app.orchestrator.src.main import (
         NonRetriableStatusMessageError,
         _parse_status_message,
     )

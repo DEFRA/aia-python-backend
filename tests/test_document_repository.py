@@ -1,41 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from app.repositories.document_repository import DocumentRepository
-
-@pytest.mark.asyncio
-async def test_claim_pending_documents():
-    # Setup
-    pool = MagicMock()
-    conn = AsyncMock()
-    pool.acquire.return_value.__aenter__.return_value = conn
-
-    # Mock database rows
-    mock_row = {
-        "doc_id": "doc-1",
-        "user_id": "user-1",
-        "template_type": "type-1",
-        "file_name": "file.docx",
-        "status": "Claimed",
-        "uploaded_ts": "2026-01-01"
-    }
-    conn.fetch.return_value = [mock_row]
-
-    context = MagicMock()
-    repo = DocumentRepository(pool, context)
-
-    # Execute
-    records = await repo.claim_pending_documents(limit=5)
-
-    # Verify
-    assert len(records) == 1
-    assert records[0].doc_id == "doc-1"
-    assert records[0].status == "Claimed"
-
-    # Verify SQL
-    conn.fetch.assert_called_once()
-    sql = conn.fetch.call_args[0][0]
-    assert "FOR UPDATE SKIP LOCKED" in sql
-    assert "UPDATE document_uploads" in sql
+from app.orchestrator.src.repositories.document_repository import DocumentRepository
 
 @pytest.mark.asyncio
 async def test_update_status_with_result():

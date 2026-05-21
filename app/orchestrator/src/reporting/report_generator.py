@@ -1,6 +1,6 @@
 from typing import Protocol, runtime_checkable
 
-from app.orchestrator.contracts import AgentResult, AssessmentRow
+from ..schemas.contracts import AgentResult, AssessmentRow
 
 
 @runtime_checkable

@@ -5,7 +5,7 @@ from urllib.parse import quote_plus
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ENV_FILE = Path(__file__).parent.parent / ".env"
+_ENV_FILE = Path(__file__).parent / ".env"
 
 from app.utils.enums import LogLevel
 

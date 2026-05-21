@@ -2,8 +2,8 @@ from typing import Optional
 
 import asyncpg
 
-from app.utils.app_context import AppContext
-from app.utils.logger import get_logger
+from ..utils.app_context import AppContext
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

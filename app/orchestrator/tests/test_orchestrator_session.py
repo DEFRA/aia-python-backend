@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.orchestrator.session import DocumentSession, SessionStore
+from app.orchestrator.src.session.store import DocumentSession, SessionStore
 
 DOC_ID = "aaaaaaaa-0000-0000-0000-000000000001"
 TASK_ID = f"{DOC_ID}_general"

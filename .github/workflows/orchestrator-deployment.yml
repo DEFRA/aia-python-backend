@@ -1,0 +1,147 @@
+name: Orchestrator Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/orchestrator/**"
+      - ".github/workflows/orchestrator-deployment.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - dev
+          - tst
+          - pre
+          - production
+
+jobs:
+  test-orchestrator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: app/orchestrator/requirements.txt
+
+      - name: Install orchestrator dependencies
+        run: |
+          pip install -r app/orchestrator/requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run orchestrator tests
+        run: pytest -q app/orchestrator/tests/ tests/test_document_repository.py tests/test_cost_usage_repository.py
+
+  build-orchestrator-image:
+    runs-on: ubuntu-latest
+    needs: test-orchestrator
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_ENV_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ENV_ACCOUNT }}:role/${{ secrets.AWS_ENV_ROLE }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate raw tag
+        id: raw-tag
+        run: |
+          echo "raw_tag=$(git describe --always --tags)" >> $GITHUB_OUTPUT
+
+      - name: Generate semantic version tag for main
+        id: semver-main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "semver=0.${GITHUB_RUN_NUMBER}.0" >> $GITHUB_OUTPUT
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          flavor: |
+            latest=false
+          images: ${{ steps.login-ecr.outputs.registry }}/aia/orchestrator
+          tags: |
+            type=semver,event=tag,priority=900,pattern={{version}},value=${{ steps.raw-tag.outputs.raw_tag }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,priority=800,value=${{ steps.semver-main.outputs.semver }},enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,priority=800,value=${{ steps.raw-tag.outputs.raw_tag }},enable=${{ github.ref == format('refs/heads/{0}', 'development') }}
+            type=raw,event=branch,value={{branch}}-{{sha}},enable=${{ startsWith(github.ref, 'refs/heads/F') }}
+          labels: |
+            org.opencontainers.image.licenses=OGL-UK-3.0
+
+      - name: Prepare Docker build args
+        id: build-args
+        env:
+          PYTHON_ENV: ${{ vars.PYTHON_ENV || 'production' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          PY_ENV_NORMALIZED=$(echo "${PYTHON_ENV}" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "build_args<<EOF"
+            echo "PYTHON_ENV=${{ vars.PYTHON_ENV || 'production' }}"
+            echo "ORCHESTRATOR_PORT=${{ vars.ORCHESTRATOR_PORT || '8001' }}"
+            echo "AGENT_TIMEOUT_SECONDS=${{ vars.AGENT_TIMEOUT_SECONDS || '480' }}"
+            echo "DB_HOST=${{ secrets.DB_HOST }}"
+            echo "DB_PORT=${{ vars.DB_PORT }}"
+            echo "DB_NAME=${{ secrets.DB_NAME }}"
+            echo "DB_USER=${{ secrets.DB_USER }}"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}"
+            echo "AWS_DEFAULT_REGION=${{ vars.AWS_DEFAULT_REGION }}"
+            echo "DOCUMENTS_BUCKET=${{ vars.DOCUMENTS_BUCKET }}"
+            echo "STATUS_QUEUE_URL=${{ secrets.STATUS_QUEUE_URL }}"
+            echo "TASK_QUEUE_URL=${{ secrets.TASK_QUEUE_URL }}"
+            if [ "${PY_ENV_NORMALIZED}" != "production" ]; then
+              echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
+              echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+              echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: app/orchestrator/Dockerfile
+          build-args: ${{ steps.build-args.outputs.build_args }}
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Generate job summary
+        id: summary
+        run: |
+          {
+            echo "### Orchestrator Docker Image Deployment"
+            echo "The tag is **${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}**"
+            echo "| Label      | Value |"
+            echo "| ---------- | ----- |"
+            echo "| created    | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }} |"
+            echo "| licenses   | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.licenses'] }} |"
+            echo "| revision   | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }} |"
+            echo "| version    | ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }} |"
+          } >> $GITHUB_STEP_SUMMARY

@@ -9,24 +9,24 @@ from pydantic import ValidationError
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 
-from app.config import config  # noqa: E402
-from app.orchestrator.contracts import AgentResult  # noqa: E402
-from app.orchestrator.document_parser import _parse_bytes  # noqa: E402
-from app.orchestrator.pipeline_config import PipelineConfig  # noqa: E402
+from .config import config  # noqa: E402
+from .schemas.contracts import AgentResult  # noqa: E402
+from .schemas.orchestrate_request import OrchestrateRequest  # noqa: E402
+from .utils.document_parser import _parse_bytes  # noqa: E402
+from .config.pipeline_config import PipelineConfig  # noqa: E402
 
-from app.orchestrator.enums import DocumentStatus  # noqa: E402
-from app.models.orchestrate_request import OrchestrateRequest  # noqa: E402
-from app.models.status_message import StatusMessage  # noqa: E402
-from app.models.task_message import TaskMessage  # noqa: E402
-from app.repositories.cost_usage_repository import CostUsageRepository  # noqa: E402
-from app.orchestrator.session import SessionStore  # noqa: E402
-from app.orchestrator.summary import MarkdownReportGenerator  # noqa: E402
-from app.repositories.document_repository import DocumentRepository  # noqa: E402
-from app.services.s3_service import S3Service  # noqa: E402
-from app.services.sqs_service import SQSService  # noqa: E402
-from app.utils.app_context import AppContext  # noqa: E402
-from app.utils.logger import get_logger  # noqa: E402
-from app.utils.postgres import close_postgres_pool, get_postgres_pool, init_db  # noqa: E402
+from .utils.enums import DocumentStatus  # noqa: E402
+from .schemas.status_message import StatusMessage  # noqa: E402
+from .schemas.task_message import TaskMessage  # noqa: E402
+from .session.store import SessionStore  # noqa: E402
+from .reporting.report_generator import MarkdownReportGenerator  # noqa: E402
+from .repositories.document_repository import DocumentRepository  # noqa: E402
+from .repositories.cost_usage_repository import CostUsageRepository  # noqa: E402
+from .services.s3_service import S3Service  # noqa: E402
+from .services.sqs_service import SQSService  # noqa: E402
+from .utils.app_context import AppContext  # noqa: E402
+from .utils.logger import get_logger  # noqa: E402
+from .utils.postgres import close_postgres_pool, get_postgres_pool, init_db  # noqa: E402
 
 logger = get_logger("app.orchestrator")
 
@@ -498,7 +498,7 @@ async def _status_queue_poller() -> None:
 
 def main() -> None:
     uvicorn.run(
-        "app.orchestrator.main:app",
+        "app.orchestrator.src.main:app",
         host=config.app.host,
         port=config.orchestrator.port,
         reload=config.app.env == "development",

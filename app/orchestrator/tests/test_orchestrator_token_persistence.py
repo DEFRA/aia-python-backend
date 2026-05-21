@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.models.status_message import StatusMessage
-from app.orchestrator.main import _persist_status_tokens
+from app.orchestrator.src.schemas.status_message import StatusMessage
+from app.orchestrator.src.main import _persist_status_tokens
 
 
 @pytest.mark.asyncio

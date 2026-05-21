@@ -1,6 +1,6 @@
 import os
 
-from app.config import config
+from .config import config
 
 
 class PipelineConfig:
