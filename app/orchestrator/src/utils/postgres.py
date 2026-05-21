@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_cost_usage_doc_agent ON backend.cost_usage(doc_id
 async def get_postgres_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        logger.info("Creating PostgreSQL connection pool to %s", config.db.uri)
+        logger.info("Creating PostgreSQL connection pool")
         _pool = await asyncpg.create_pool(config.db.uri)
         logger.info("PostgreSQL connection pool created")
     return _pool
