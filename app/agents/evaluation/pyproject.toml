@@ -10,7 +10,7 @@ max-statements = 50  # excludes docstrings; enforces Single Responsibility — s
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["PLR2004"]  # magic values are fine in test assertions
-"../../../tests/agents-evaluation/**/*.py" = ["PLR2004"]  # root-level test location
+"../../../tests/agents_evaluation/**/*.py" = ["PLR2004"]  # root-level test location
 "main.py" = ["PLR2004"]  # sys.argv index checks in CLI entry point
 "src/agents/prompts/*.py" = ["E501"]  # prompt strings are intentionally long
 "src/utils/pdf_creator_multipage.py" = ["E501"]  # example data dicts and ReportLab styles
@@ -28,4 +28,4 @@ ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["../../tests/agents-evaluation"]
+testpaths = ["../../tests/agents_evaluation"]
