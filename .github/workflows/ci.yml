@@ -119,7 +119,7 @@ jobs:
           pip install pytest pytest-asyncio pytest-mock ruff mypy
 
       - name: Ruff — lint
-        run: ruff check app/agent_service/src/ tests/agent_service/
+        run: ruff check --fix app/agent_service/src/ tests/agent_service/
 
       - name: Ruff — format check
         run: ruff format --check app/agent_service/src/ tests/agent_service/
