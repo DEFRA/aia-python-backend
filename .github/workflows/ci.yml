@@ -25,7 +25,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: pytest
-        run: pytest -v --tb=short tests/ --ignore=tests/agent_service/
+        run: pytest -v --tb=short tests/ --ignore=tests/app_root/
         env:
           DB_HOST: localhost
           DB_NAME: dummy
