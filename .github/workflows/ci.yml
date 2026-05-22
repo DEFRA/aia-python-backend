@@ -22,10 +22,12 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -r app/orchestrator/requirements.txt
 
       - name: pytest
-        run: pytest -v --tb=short tests/ --ignore=tests/agents_evaluation/
+        run: pytest -v --tb=short tests/app_root/
         env:
           DB_HOST: localhost
           DB_NAME: dummy
@@ -99,8 +101,8 @@ jobs:
           S3_BUCKET_NAME: dummy-bucket
           ORCHESTRATOR_URL: http://localhost:8001
 
-  test-agents-evaluation:
-    name: Agents evaluation tests
+  test-agent-service:
+    name: Agent service tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -111,63 +113,21 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: app/core_backend/requirements.txt
+          cache-dependency-path: app/agent_service/requirements.txt
 
       - name: Install dependencies
         run: |
-          pip install -r app/core_backend/requirements.txt
-          pip install pytest pytest-asyncio pytest-mock
+          pip install -r app/agent_service/requirements.txt
+          pip install pytest pytest-asyncio pytest-mock ruff mypy
 
       - name: pytest
-        run: pytest -v --tb=short tests/core_backend/
+        run: pytest -v --tb=short -x tests/agent_service/
         env:
+          LLM_PROVIDER: bedrock
+          AWS_DEFAULT_REGION: eu-west-2
+          AWS_ACCESS_KEY_ID: dummy
+          AWS_SECRET_ACCESS_KEY: dummy
           DB_HOST: localhost
           DB_NAME: dummy
           DB_USER: dummy
           DB_PASSWORD: dummy
-          JWT_SECRET: dummy-secret
-          AWS_DEFAULT_REGION: eu-west-2
-          S3_BUCKET_NAME: dummy-bucket
-          ORCHESTRATOR_URL: http://localhost:8001
-
-  test-agents-evaluation:
-    name: Agents evaluation tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.13
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: app/agents/evaluation/requirements.txt
-
-      - name: Install dependencies
-        run: pip install -r app/agents/evaluation/requirements-ci.txt
-        run: pip install -r app/agents/evaluation/requirements-ci.txt
-
-      - name: Ruff — lint
-        run: ruff check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
-        run: ruff check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
-
-      - name: Ruff — format check
-        run: ruff format --check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
-        run: ruff format --check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
-
-      - name: mypy — type check
-        run: mypy --config-file app/agents/evaluation/pyproject.toml app/agents/evaluation/src/ app/agents/evaluation/main.py
-        run: mypy --config-file app/agents/evaluation/pyproject.toml app/agents/evaluation/src/ app/agents/evaluation/main.py
-
-      - name: pytest
-        run: pytest -v --tb=short -x tests/agents_evaluation/
-        run: pytest -v --tb=short -x tests/agents_evaluation/
-        env:
-          ANTHROPIC_API_KEY: dummy
-          DB_NAME: dummy
-          DB_USER: dummy
-          DB_PASSWORD: dummy
-          REDIS_HOST: localhost

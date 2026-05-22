@@ -12,7 +12,11 @@ import os
 
 from pydantic import ValidationError
 
-from app.agent_service.src.models.schemas import AgentResult, AssessmentRow, PolicyDocResult
+from app.agent_service.src.models.schemas import (
+    AgentResult,
+    AssessmentRow,
+    PolicyDocResult,
+)
 from app.agent_service.src.config import DatabaseConfig
 from app.agent_service.src.utils.doc_parser import _parse_bytes
 from app.agent_service.src.repositories.questions_repo import (
@@ -91,13 +95,9 @@ async def _delete_with_retry(
 
 
 # SQS visibility window — message stays invisible while the agent runs.
-# Must be strictly greater than _AGENT_TIMEOUT_SECONDS so there is always
-# time to publish an error StatusMessage before the message reappears.
 _AGENT_VISIBILITY_TIMEOUT = 600
 
 # Maximum time allowed for a single agent.assess() call.
-# Sourced from AGENT_TIMEOUT_SECONDS (default 480 s).
-# Kept below _AGENT_VISIBILITY_TIMEOUT to guarantee the error path completes.
 _AGENT_TIMEOUT_SECONDS: int = app_config.orchestrator_agent_timeout
 
 MAX_CONCURRENT_TASKS: int = int(os.environ.get("MAX_CONCURRENT_TASKS", "10"))
@@ -298,8 +298,6 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
         )
 
     result = AgentResult(agent_type=agent_type, docs=docs)
-    # TO DO: Handle scenario where result is too large for SQS message body limit (1 MiB)
-    # potentially by uploading to S3 and including a link in the StatusMessage instead.
     status_msg = StatusMessage(
         task_id=task.task_id,
         document_id=task.document_id,

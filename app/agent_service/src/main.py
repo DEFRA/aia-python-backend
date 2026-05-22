@@ -14,7 +14,7 @@ from typing import AsyncGenerator
 import uvicorn
 from fastapi import FastAPI
 
-from app.agent_service.worker import run_worker
+from app.agent_service.src.worker import run_worker
 from app.agent_service.src.shared.app_config import config
 from app.agent_service.src.shared.logger import get_logger
 
@@ -50,7 +50,7 @@ async def health() -> dict[str, str]:
 
 def main() -> None:
     uvicorn.run(
-        "app.agent_service.main:app",
+        "app.agent_service.src.main:app",
         host=config.app.host,
         port=_WORKER_PORT,
         reload=config.app.env == "development",

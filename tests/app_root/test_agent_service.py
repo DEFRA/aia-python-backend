@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.agents.evaluation.src.agents.schemas import (
+from app.agent_service.src.models.schemas import (
     AgentLLMOutput,
     QuestionItem,
     RawAssessmentRow,
