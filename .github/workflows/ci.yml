@@ -25,6 +25,7 @@ jobs:
         run: |
           pip install -r requirements-dev.txt
           pip install -r app/orchestrator/requirements.txt
+          pip install -r app/agent_service/requirements.txt
 
       - name: pytest
         run: pytest -v --tb=short tests/app_root/

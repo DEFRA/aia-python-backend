@@ -327,7 +327,7 @@ async def run_worker() -> None:
     status_url = app_config.sqs.status_queue_url
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-    logger.info("Agent service started — polling %s", task_url)
+    logger.info("Agent service started — polling task queue")
 
     while True:
         try:

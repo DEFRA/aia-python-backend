@@ -32,10 +32,9 @@ class SQSService:
         body = task.model_dump_json(by_alias=True)
         queue_url = config.sqs.task_queue_url
         logger.info(
-            "Publishing task task_id=%s agent_type=%s to %s",
+            "Publishing task task_id=%s agent_type=%s",
             task.task_id,
             task.agent_type,
-            queue_url,
         )
         send_kwargs: dict[str, Any] = {
             "QueueUrl": queue_url,

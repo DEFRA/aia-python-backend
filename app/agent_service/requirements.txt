@@ -25,3 +25,5 @@ reportlab>=4.2.0
 # HTTP framework
 fastapi>=0.115.0
 uvicorn>=0.32.0
+
+python-json-logger>=2.0.7,<3
