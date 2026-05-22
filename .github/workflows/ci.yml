@@ -25,7 +25,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: pytest
-        run: pytest -v --tb=short tests/ --ignore=tests/agents_evaluation/
+        run: pytest -v --tb=short tests/ --ignore=tests/agent_service/
         env:
           DB_HOST: localhost
           DB_NAME: dummy
@@ -114,16 +114,16 @@ jobs:
         run: pip install -r app/agents/evaluation/requirements-ci.txt
 
       - name: Ruff — lint
-        run: ruff check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
+        run: ruff check app/agents/evaluation/src/ tests/agent_service/ app/agents/evaluation/main.py
 
       - name: Ruff — format check
-        run: ruff format --check app/agents/evaluation/src/ tests/agents_evaluation/ app/agents/evaluation/main.py
+        run: ruff format --check app/agents/evaluation/src/ tests/agent_service/ app/agents/evaluation/main.py
 
       - name: mypy — type check
         run: mypy --config-file app/agents/evaluation/pyproject.toml app/agents/evaluation/src/ app/agents/evaluation/main.py
 
       - name: pytest
-        run: pytest -v --tb=short -x tests/agents_evaluation/
+        run: pytest -v --tb=short -x tests/agent_service/
         env:
           ANTHROPIC_API_KEY: dummy
           DB_NAME: dummy
