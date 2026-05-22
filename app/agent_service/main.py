@@ -15,8 +15,8 @@ import uvicorn
 from fastapi import FastAPI
 
 from app.agent_service.worker import run_worker
-from app.config import config
-from app.utils.logger import get_logger
+from app.agent_service.src.shared.app_config import config
+from app.agent_service.src.shared.logger import get_logger
 
 logger = get_logger("app.agent_service.main")
 
@@ -35,7 +35,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         _worker_task.cancel()
         try:
             await _worker_task
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, Exception):
             pass
     logger.info("Agent service process stopped")
 

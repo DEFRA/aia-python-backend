@@ -22,12 +22,12 @@ from app.agent_service.src.repositories.questions_repo import (
 from app.agent_service.src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY
 from app.agent_service.src.utils.llm_client import make_llm_client
 
-from app.config import config as app_config  # noqa: E402
-from app.models.status_message import StatusMessage  # noqa: E402
-from app.models.task_message import TaskMessage  # noqa: E402
-from app.services.s3_service import S3Service  # noqa: E402
-from app.services.sqs_service import SQSService  # noqa: E402
-from app.utils.logger import get_logger  # noqa: E402
+from app.agent_service.src.shared.app_config import config as app_config
+from app.agent_service.src.shared.status_message import StatusMessage
+from app.agent_service.src.shared.task_message import TaskMessage
+from app.agent_service.src.shared.s3_service import S3Service
+from app.agent_service.src.shared.sqs_service import SQSService
+from app.agent_service.src.shared.logger import get_logger
 
 logger = get_logger("app.agent_service")
 
@@ -115,7 +115,7 @@ def _get_db_config() -> DatabaseConfig:
 def _extract_text(file_bytes: bytes, s3_key: str) -> str:
     """Extract plain text from PDF, DOCX, or UTF-8 text files."""
     lower = s3_key.lower()
-    if lower.endswith(".pdf") or lower.endswith(".docx"):
+    if lower.endswith((".pdf", ".docx")):
         chunks = _parse_bytes(file_bytes, s3_key, "")
         return "\n\n".join(c["text"] for c in chunks if c.get("text"))
     return file_bytes.decode("utf-8", errors="replace")
@@ -133,15 +133,103 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
     return _extract_text(file_bytes, task.s3_key)
 
 
-async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
-    """Run one agent task across ALL policy docs for the agent_type and return a StatusMessage.
+async def _assess_one_doc(
+    agent,
+    document: str,
+    dsn: str,
+    policy_doc_id: str,
+    policy_doc_url: str,
+    policy_doc_filename: str,
+    task_id: str,
+    agent_type: str,
+) -> tuple[PolicyDocResult | None, dict[str, int]]:
+    """Assess one policy doc and return (result, token_counts)."""
+    tokens = {"input_tokens": 0, "output_tokens": 0}
+    try:
+        questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
+        llm_output = await asyncio.wait_for(
+            agent.assess(document=document, questions=questions),
+            timeout=_AGENT_TIMEOUT_SECONDS,
+        )
 
-    The Agent Service owns the per-policy-doc fan-out: it fetches every policy document
-    for the given agent_type, runs assessments concurrently, and aggregates results into a
-    single AgentResult.  Individual doc failures are logged and skipped rather than
-    propagated, so a partial result is still publishable.  Infrastructure errors (DB down,
-    S3 unavailable) propagate so the message stays invisible and retries via the DLQ path.
-    """
+        if llm_output.llm_meta is not None:
+            try:
+                tokens["input_tokens"] = llm_output.llm_meta.input_tokens
+                tokens["output_tokens"] = llm_output.llm_meta.output_tokens
+            except AttributeError:
+                logger.exception(
+                    "[TOKEN] Missing token attributes in llm_meta task_id=%s agent_type=%s doc=%s",
+                    task_id,
+                    agent_type,
+                    policy_doc_filename,
+                )
+
+        logger.info(
+            "[TOKEN] Agent assessment complete — task_id=%s agent_type=%s doc=%s | input_tokens=%d output_tokens=%d",
+            task_id,
+            agent_type,
+            policy_doc_filename,
+            tokens["input_tokens"],
+            tokens["output_tokens"],
+        )
+
+        question_map = {q.id: q for q in questions}
+        assessments: list[AssessmentRow] = []
+        for row in llm_output.rows:
+            q_item = question_map.get(row.question_id)
+            if q_item is None:
+                raise ValueError(
+                    f"LLM returned unknown question_id: {row.question_id}"
+                )
+            assessments.append(
+                AssessmentRow(
+                    Question=q_item.question,
+                    Reference=q_item.reference,
+                    Rating=row.Rating,
+                    Comments=row.Comments,
+                )
+            )
+        result = PolicyDocResult(
+            policy_doc_filename=policy_doc_filename,
+            policy_doc_url=policy_doc_url,
+            assessments=assessments,
+            summary=llm_output.summary,
+        )
+        return (result, tokens)
+    except asyncio.TimeoutError:
+        logger.error(
+            "[TOKEN] Agent timed out after %ds — skipping doc task_id=%s policy_doc=%s",
+            _AGENT_TIMEOUT_SECONDS,
+            task_id,
+            policy_doc_filename,
+        )
+        return (None, tokens)
+    except Exception:
+        logger.exception(
+            "[TOKEN] Agent assessment failed — skipping doc task_id=%s policy_doc=%s",
+            task_id,
+            policy_doc_filename,
+        )
+        return (None, tokens)
+
+
+def _aggregate_results(
+    raw_results: list[tuple[PolicyDocResult | None, dict[str, int]]],
+) -> tuple[list[PolicyDocResult], int, int]:
+    """Aggregate successful results and sum token counts."""
+    docs = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+    for doc_result, tokens in raw_results:
+        if doc_result is not None:
+            docs.append(doc_result)
+            total_input_tokens += tokens.get("input_tokens", 0)
+            total_output_tokens += tokens.get("output_tokens", 0)
+    return docs, total_input_tokens, total_output_tokens
+
+
+async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
+    """Run one agent task across ALL policy docs for the agent_type and return a StatusMessage."""
     agent_type = task.agent_type
 
     if agent_type not in AGENT_REGISTRY:
@@ -170,99 +258,17 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
     agent_config = CONFIG_REGISTRY[agent_type]()
     agent = AGENT_REGISTRY[agent_type](client=client, agent_config=agent_config)
 
-    async def _assess_one(
-        policy_doc_id: str, policy_doc_url: str, policy_doc_filename: str
-    ) -> tuple[PolicyDocResult | None, dict[str, int]]:
-        """Assess one policy doc and return (result, token_counts).
-
-        token_counts = {"input_tokens": int, "output_tokens": int} or empty dict on failure.
-        """
-        tokens = {"input_tokens": 0, "output_tokens": 0}
-        try:
-            questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
-            llm_output = await asyncio.wait_for(
-                agent.assess(document=document, questions=questions),
-                timeout=_AGENT_TIMEOUT_SECONDS,
-            )
-
-            # Extract token counts from LLM response metadata.
-            if llm_output.llm_meta is not None:
-                try:
-                    tokens["input_tokens"] = llm_output.llm_meta.input_tokens
-                    tokens["output_tokens"] = llm_output.llm_meta.output_tokens
-                except AttributeError as exc:
-                    logger.error(
-                        "[TOKEN] Missing token attributes in llm_meta task_id=%s agent_type=%s doc=%s: %s",
-                        task.task_id,
-                        agent_type,
-                        policy_doc_filename,
-                        exc,
-                    )
-
-            logger.info(
-                "[TOKEN] Agent assessment complete — task_id=%s agent_type=%s doc=%s | input_tokens=%d output_tokens=%d",
-                task.task_id,
-                agent_type,
-                policy_doc_filename,
-                tokens["input_tokens"],
-                tokens["output_tokens"],
-            )
-
-            question_map = {q.id: q for q in questions}
-            assessments: list[AssessmentRow] = []
-            for row in llm_output.rows:
-                q_item = question_map.get(row.question_id)
-                if q_item is None:
-                    raise ValueError(
-                        f"LLM returned unknown question_id: {row.question_id}"
-                    )
-                assessments.append(
-                    AssessmentRow(
-                        Question=q_item.question,
-                        Reference=q_item.reference,
-                        Rating=row.Rating,
-                        Comments=row.Comments,
-                    )
-                )
-            result = PolicyDocResult(
-                policy_doc_filename=policy_doc_filename,
-                policy_doc_url=policy_doc_url,
-                assessments=assessments,
-                summary=llm_output.summary,
-            )
-            return (result, tokens)
-        except asyncio.TimeoutError:
-            logger.error(
-                "[TOKEN] Agent timed out after %ds — skipping doc task_id=%s policy_doc=%s",
-                _AGENT_TIMEOUT_SECONDS,
-                task.task_id,
-                policy_doc_filename,
-            )
-            return (None, tokens)
-        except Exception as exc:
-            logger.error(
-                "[TOKEN] Agent assessment failed — skipping doc task_id=%s policy_doc=%s: %s",
-                task.task_id,
-                policy_doc_filename,
-                exc,
-            )
-            return (None, tokens)
-
     raw_results = await asyncio.gather(
-        *[_assess_one(pid, url, fname) for pid, url, fname in policy_docs]
+        *[
+            _assess_one_doc(
+                agent, document, dsn, pid, url, fname,
+                task.task_id, agent_type,
+            )
+            for pid, url, fname in policy_docs
+        ]
     )
 
-    # Aggregate results and token counts
-    docs = []
-    total_input_tokens = 0
-    total_output_tokens = 0
-
-    for result_tuple in raw_results:
-        doc_result, tokens = result_tuple
-        if doc_result is not None:
-            docs.append(doc_result)
-            total_input_tokens += tokens.get("input_tokens", 0)
-            total_output_tokens += tokens.get("output_tokens", 0)
+    docs, total_input_tokens, total_output_tokens = _aggregate_results(raw_results)
 
     logger.info(
         "[TOKEN] Aggregated tokens for all docs — task_id=%s agent_type=%s model_id=%s | total_input_tokens=%d total_output_tokens=%d docs_assessed=%d",
@@ -340,9 +346,9 @@ async def run_worker() -> None:
                 t.add_done_callback(_on_task_done)
         except asyncio.CancelledError:
             logger.info("Agent service stopped")
-            return
-        except Exception as exc:
-            logger.exception("Worker poll error: %s", exc)
+            raise
+        except Exception:
+            logger.exception("Worker poll error")
             await asyncio.sleep(5)
 
 
