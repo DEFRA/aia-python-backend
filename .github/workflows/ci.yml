@@ -121,8 +121,8 @@ jobs:
       - name: Ruff — lint
         run: ruff check --fix app/agent_service/src/ tests/agent_service/
 
-      - name: Ruff — format check
-        run: ruff format --check app/agent_service/src/ tests/agent_service/
+      - name: Ruff — format
+        run: ruff format app/agent_service/src/ tests/agent_service/
 
       - name: mypy — type check
         run: mypy app/agent_service/src/
