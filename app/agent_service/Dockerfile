@@ -40,8 +40,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
     AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
     AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} \
-    SQS_TASK_QUEUE_URL=${SQS_TASK_QUEUE_URL} \
-    SQS_STATUS_QUEUE_URL=${SQS_STATUS_QUEUE_URL} \
+    TASK_QUEUE_URL=${SQS_TASK_QUEUE_URL} \
+    STATUS_QUEUE_URL=${SQS_STATUS_QUEUE_URL} \
     S3_BUCKET_NAME=${S3_BUCKET_NAME} \
     MODEL_ID=${MODEL_ID} \
     LLM_PROVIDER=${LLM_PROVIDER} \
@@ -49,7 +49,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AGENT_TIMEOUT_SECONDS=${AGENT_TIMEOUT_SECONDS} \
     WORKER_STUCK_TASK_TIMEOUT_MINUTES=${WORKER_STUCK_TASK_TIMEOUT_MINUTES}
 
-WORKDIR /app/agent_service
+WORKDIR /app
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -59,7 +59,10 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY . ./
+# Place source under app/agent_service/ so imports like
+# `from app.agent_service.*` resolve with PYTHONPATH=/app
+COPY . app/agent_service/
+RUN touch app/__init__.py
 
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app \
  && chown -R app:app /app
@@ -70,4 +73,4 @@ EXPOSE 8002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl --fail http://127.0.0.1:8002/health || exit 1
 
-CMD ["sh", "-c", "uvicorn main:app --host ${HOST} --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn app.agent_service.main:app --host ${HOST} --port ${PORT}"]
