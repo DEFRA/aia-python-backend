@@ -25,7 +25,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: pytest
-        run: pytest -v --tb=short tests/ --ignore=tests/agents_evaluation/
+        run: pytest -v --tb=short tests/ --ignore=tests/agent_service/
         env:
           DB_HOST: localhost
           DB_NAME: dummy
@@ -116,14 +116,25 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r app/agent_service/requirements.txt
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio pytest-mock ruff mypy
+
+      - name: Ruff — lint
+        run: ruff check app/agent_service/src/ tests/agent_service/
+
+      - name: Ruff — format check
+        run: ruff format --check app/agent_service/src/ tests/agent_service/
+
+      - name: mypy — type check
+        run: mypy app/agent_service/src/
 
       - name: pytest
-        run: pytest -v --tb=short app/agent_service/src/tests/
+        run: pytest -v --tb=short -x tests/agent_service/
         env:
-          ANTHROPIC_API_KEY: dummy
+          LLM_PROVIDER: bedrock
+          AWS_DEFAULT_REGION: eu-west-2
+          AWS_ACCESS_KEY_ID: dummy
+          AWS_SECRET_ACCESS_KEY: dummy
           DB_HOST: localhost
           DB_NAME: dummy
           DB_USER: dummy
           DB_PASSWORD: dummy
-          AWS_DEFAULT_REGION: eu-west-2
