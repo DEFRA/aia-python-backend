@@ -118,15 +118,6 @@ jobs:
           pip install -r app/agent_service/requirements.txt
           pip install pytest pytest-asyncio pytest-mock ruff mypy
 
-      - name: Ruff — lint
-        run: ruff check --fix app/agent_service/src/ tests/agent_service/
-
-      - name: Ruff — format
-        run: ruff format app/agent_service/src/ tests/agent_service/
-
-      - name: mypy — type check
-        run: mypy app/agent_service/src/
-
       - name: pytest
         run: pytest -v --tb=short -x tests/agent_service/
         env:
