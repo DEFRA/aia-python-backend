@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 
-import asyncpg
-
 from app.agent_service.src.models.schemas import QuestionItem
 from app.agent_service.src.utils.exceptions import UnknownCategoryError
+from app.agent_service.src.db_pool import get_pool
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -46,7 +45,6 @@ _FETCH_QUESTIONS_SQL = """
 
 
 async def fetch_policy_doc_by_category(
-    dsn: str,
     category: str,
 ) -> tuple[str, str, str]:
     """Resolve a category to the most recently created policy document.
@@ -54,11 +52,9 @@ async def fetch_policy_doc_by_category(
     Raises:
         UnknownCategoryError: If no policy document exists for the given category.
     """
-    conn = await asyncpg.connect(dsn)
-    try:
+    pool = get_pool()
+    async with pool.acquire() as conn:
         row = await conn.fetchrow(_FETCH_POLICY_DOC_SQL, category)
-    finally:
-        await conn.close()
 
     if row is None:
         raise UnknownCategoryError(f"No policy document found for category: {category!r}")
@@ -76,15 +72,12 @@ async def fetch_policy_doc_by_category(
 
 
 async def fetch_all_policy_docs_by_category(
-    dsn: str,
     category: str,
 ) -> list[tuple[str, str, str]]:
     """Return all policy documents for a category, ordered by creation date ascending."""
-    conn = await asyncpg.connect(dsn)
-    try:
+    pool = get_pool()
+    async with pool.acquire() as conn:
         rows = await conn.fetch(_FETCH_ALL_POLICY_DOCS_SQL, category)
-    finally:
-        await conn.close()
 
     docs: list[tuple[str, str, str]] = [
         (row["policy_doc_id"], row["source_url"], row["filename"]) for row in rows
@@ -98,15 +91,12 @@ async def fetch_all_policy_docs_by_category(
 
 
 async def fetch_policy_doc_by_id(
-    dsn: str,
     policy_doc_id: str,
 ) -> tuple[str, str, str]:
     """Fetch a specific policy document by its primary key."""
-    conn = await asyncpg.connect(dsn)
-    try:
+    pool = get_pool()
+    async with pool.acquire() as conn:
         row = await conn.fetchrow(_FETCH_POLICY_DOC_BY_ID_SQL, policy_doc_id)
-    finally:
-        await conn.close()
 
     if row is None:
         raise UnknownCategoryError(f"No policy document found for policy_doc_id: {policy_doc_id!r}")
@@ -123,15 +113,12 @@ async def fetch_policy_doc_by_id(
 
 
 async def fetch_questions_by_policy_doc_id(
-    dsn: str,
     policy_doc_id: str,
 ) -> list[QuestionItem]:
-    """Fetch active questions for a policy document by its primary key."""
-    conn = await asyncpg.connect(dsn)
-    try:
+    """Fetch all active questions for a policy document, ordered by creation date."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
         rows = await conn.fetch(_FETCH_QUESTIONS_SQL, policy_doc_id)
-    finally:
-        await conn.close()
 
     questions: list[QuestionItem] = [
         QuestionItem(id=row["id"], question=row["question_text"], reference=row["reference"])
