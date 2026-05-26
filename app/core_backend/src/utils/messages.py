@@ -18,6 +18,7 @@ class AppMessages:
     DOC_NOT_FOUND = "Document '{doc_id}' not found."
     USER_NOT_FOUND = "User not found."
     FILE_SIZE_EXCEEDS_LIMIT = "File size exceeds the maximum limit of {max_size} MB."
+    UNSUPPORTED_FILE_TYPE = "Unsupported file type '{extension}'. Allowed types: {allowed}."
 
 
 messages = AppMessages()
