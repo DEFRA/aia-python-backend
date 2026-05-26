@@ -15,6 +15,8 @@ import uvicorn
 from fastapi import FastAPI
 
 from app.agent_service.worker import run_worker
+from app.agent_service.src.config import DatabaseConfig
+from app.agent_service.src.db_pool import close_pool, init_pool
 from app.agent_service.src.shared.app_config import config
 from app.agent_service.src.shared.logger import get_logger
 
@@ -28,6 +30,12 @@ _worker_task: asyncio.Task | None = None
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     global _worker_task  # noqa: PLW0603
+
+    # Initialize database connection pool once for repository access.
+    db_config = DatabaseConfig()
+    await init_pool(db_config)
+    logger.info("Database connection pool initialized")
+
     _worker_task = asyncio.create_task(run_worker())
     logger.info("Agent service process started")
     yield
@@ -37,6 +45,8 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
             await _worker_task
         except (asyncio.CancelledError, Exception):
             pass
+
+    await close_pool()
     logger.info("Agent service process stopped")
 
 
