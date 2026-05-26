@@ -26,6 +26,10 @@ _MAX_HISTORY_LIMIT = 100
 _MAX_FILE_UPLOAD = (
     int(getenv("MAX_FILE_UPLOAD", 50)) * 1024 * 1024
 )  # Convert MB to bytes
+_ALLOWED_FILE_EXTENSIONS = [
+    ext.strip().lower()
+    for ext in getenv("ALLOWED_FILE_EXTENSIONS", ".docx").split(",")
+]
 
 
 @router.post(
@@ -46,6 +50,16 @@ async def upload_document(
     logger.info("Upload request userId=%s fileName=%s", user_id, fileName)
 
     upload_request = UploadRequest(templateType=templateType, fileName=fileName)
+
+    # Validate file extension
+    file_ext = "." + fileName.rsplit(".", 1)[-1].lower() if "." in fileName else ""
+    if file_ext not in _ALLOWED_FILE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=messages.UNSUPPORTED_FILE_TYPE.format(
+                extension=file_ext, allowed=", ".join(_ALLOWED_FILE_EXTENSIONS)
+            ),
+        )
 
     # Read file size
     file_bytes = await file.read()
