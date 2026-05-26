@@ -17,19 +17,12 @@ from services.upload_service import UploadService
 from utils.dependencies import get_upload_service, verify_auth
 from utils.messages import messages
 from utils.logger import get_logger
-from os import getenv
+from config import config
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = get_logger(__name__)
 
 _MAX_HISTORY_LIMIT = 100
-_MAX_FILE_UPLOAD = (
-    int(getenv("MAX_FILE_UPLOAD", 50)) * 1024 * 1024
-)  # Convert MB to bytes
-_ALLOWED_FILE_EXTENSIONS = [
-    ext.strip().lower()
-    for ext in getenv("ALLOWED_FILE_EXTENSIONS", ".docx").split(",")
-]
 
 
 @router.post(
@@ -53,11 +46,11 @@ async def upload_document(
 
     # Validate file extension
     file_ext = "." + fileName.rsplit(".", 1)[-1].lower() if "." in fileName else ""
-    if file_ext not in _ALLOWED_FILE_EXTENSIONS:
+    if file_ext not in config.allowed_file_extensions:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=messages.UNSUPPORTED_FILE_TYPE.format(
-                extension=file_ext, allowed=", ".join(_ALLOWED_FILE_EXTENSIONS)
+                extension=file_ext, allowed=", ".join(config.allowed_file_extensions)
             ),
         )
 
