@@ -38,7 +38,7 @@ class TestUploadSuccess:
 
         mock_service = AsyncMock()
         mock_service.process_upload_request.return_value = MOCK_DOC_ID
-        mock_service.get_s3_key.return_value = f"{MOCK_DOC_ID}_test.pdf"
+        mock_service.get_s3_key.return_value = f"{MOCK_DOC_ID}_test.docx"
         mock_service.process_background_upload = AsyncMock()
         app.dependency_overrides[get_upload_service] = lambda: mock_service
 
@@ -47,9 +47,9 @@ class TestUploadSuccess:
             headers=BASE_HEADERS,
             data={
                 "templateType": "CHEDP",
-                "fileName": "test.pdf",
+                "fileName": "test.docx",
             },
-            files={"file": ("test.pdf", b"fake-pdf-content", "application/pdf")},
+            files={"file": ("test.docx", b"fake-docx-content", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
         )
         assert response.status_code == 202
         body = response.json()
@@ -83,9 +83,9 @@ class TestUploadDuplicate:
             headers=BASE_HEADERS,
             data={
                 "templateType": "CHEDP",
-                "fileName": "test.pdf",
+                "fileName": "test.docx",
             },
-            files={"file": ("test.pdf", b"fake-pdf-content", "application/pdf")},
+            files={"file": ("test.docx", b"fake-docx-content", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
         )
         assert response.status_code == 400
 
