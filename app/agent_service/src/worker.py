@@ -17,14 +17,12 @@ from app.agent_service.src.models.schemas import (
     AssessmentRow,
     PolicyDocResult,
 )
-from app.agent_service.src.config import DatabaseConfig
 from app.agent_service.src.utils.doc_parser import _parse_bytes
 from app.agent_service.src.repositories.questions_repo import (
     fetch_all_policy_docs_by_category,
     fetch_questions_by_policy_doc_id,
 )
 from app.agent_service.src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY
-from app.agent_service.src.db_pool import init_pool, close_pool
 from app.agent_service.src.utils.llm_client import make_llm_client
 
 from app.agent_service.src.shared.app_config import config as app_config
@@ -102,15 +100,6 @@ _AGENT_VISIBILITY_TIMEOUT = 600
 _AGENT_TIMEOUT_SECONDS: int = app_config.orchestrator_agent_timeout
 
 MAX_CONCURRENT_TASKS: int = int(os.environ.get("MAX_CONCURRENT_TASKS", "10"))
-
-_db_config: DatabaseConfig | None = None
-
-
-def _get_db_config() -> DatabaseConfig:
-    global _db_config  # noqa: PLW0603
-    if _db_config is None:
-        _db_config = DatabaseConfig()
-    return _db_config
 
 
 def _extract_text(file_bytes: bytes, s3_key: str) -> str:
