@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote_plus
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from utils.enums import LogLevel
 
@@ -134,14 +134,7 @@ class AppConfig(BaseSettings):
         "general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE"
     )
     max_file_upload: int = Field(50, alias="MAX_FILE_UPLOAD")
-    allowed_file_extensions: list[str] = Field(default=[".docx"], alias="ALLOWED_FILE_EXTENSIONS")
-
-    @field_validator("allowed_file_extensions", mode="before")
-    @classmethod
-    def _parse_extensions(cls, v: object) -> list[str]:
-        if isinstance(v, str):
-            return [ext.strip().lower() for ext in v.split(",") if ext.strip()]
-        return v
+    allowed_extensions_raw: str = Field(".docx", alias="ALLOWED_FILE_EXTENSIONS")
     llm_pricing_usd_per_mtokens: dict[str, dict[str, float]] = Field(
         default_factory=lambda: DEFAULT_LLM_PRICING_USD_PER_MTOKENS.copy(),
         alias="LLM_PRICING_USD_PER_MTOKENS",
@@ -153,6 +146,14 @@ class AppConfig(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    @property
+    def allowed_file_extensions(self) -> list[str]:
+        return [
+            ext.strip().lower()
+            for ext in self.allowed_extensions_raw.split(",")
+            if ext.strip()
+        ]
 
     @property
     def app(self) -> AppSettings:
