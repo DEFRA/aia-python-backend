@@ -99,6 +99,7 @@ jobs:
             echo "S3_UPLOAD_PREFIX=${{ vars.S3_UPLOAD_PREFIX }}"
             echo "ORCHESTRATOR_URL=${{ vars.ORCHESTRATOR_URL }}"
             echo "MAX_FILE_UPLOAD=${{ vars.MAX_FILE_UPLOAD }}"
+            echo "ALLOWED_FILE_EXTENSIONS=${{ vars.ALLOWED_FILE_EXTENSIONS || '.docx' }}"
             if [ "${PY_ENV_NORMALIZED}" != "production" ]; then
               echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
               echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
