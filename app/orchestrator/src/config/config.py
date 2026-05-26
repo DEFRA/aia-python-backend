@@ -115,7 +115,7 @@ class AppConfig(BaseSettings):
         """Construct PostgreSQL connection string."""
         password = quote_plus(self.db_password) if self.db_password else ""
         user_part = f"{self.db_user}:{password}@" if self.db_user else ""
-        return f"postgresql+asyncpg://{user_part}{self.db_host}:{self.db_port}/{self.db_name}"
+        return f"postgresql://{user_part}{self.db_host}:{self.db_port}/{self.db_name}"
 
     @property
     def db(self) -> "DBConfig":
