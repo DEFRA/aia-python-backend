@@ -134,6 +134,7 @@ class AppConfig(BaseSettings):
         "general", alias="ORCHESTRATOR_DEFAULT_AGENT_TYPE"
     )
     max_file_upload: int = Field(50, alias="MAX_FILE_UPLOAD")
+    allowed_extensions_raw: str = Field(".docx", alias="ALLOWED_FILE_EXTENSIONS")
     llm_pricing_usd_per_mtokens: dict[str, dict[str, float]] = Field(
         default_factory=lambda: DEFAULT_LLM_PRICING_USD_PER_MTOKENS.copy(),
         alias="LLM_PRICING_USD_PER_MTOKENS",
@@ -145,6 +146,14 @@ class AppConfig(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    @property
+    def allowed_file_extensions(self) -> list[str]:
+        return [
+            ext.strip().lower()
+            for ext in self.allowed_extensions_raw.split(",")
+            if ext.strip()
+        ]
 
     @property
     def app(self) -> AppSettings:
