@@ -104,6 +104,9 @@ class AppConfig(BaseSettings):
     # S3
     documents_bucket: str = Field("documents", alias="S3_BUCKET_NAME")
 
+    # Environment
+    env: str = Field("development", alias="PYTHON_ENV")
+
     # LLM Pricing
     llm_pricing_usd_per_mtokens: dict[str, dict[str, float]] = Field(
         default_factory=lambda: DEFAULT_LLM_PRICING_USD_PER_MTOKENS.copy(),
@@ -134,11 +137,15 @@ class AppConfig(BaseSettings):
 
     @property
     def aws(self) -> AWSConfig:
+        # Only include credentials in development; production uses IAM role-based access
+        access_key = None if self.env == "production" else self.aws_access_key_id
+        secret_key = None if self.env == "production" else self.aws_secret_access_key
+        session_token = None if self.env == "production" else self.aws_session_token
         return AWSConfig(
             region=self.aws_default_region or self.aws_region,
-            access_key_id=self.aws_access_key_id,
-            secret_access_key=self.aws_secret_access_key,
-            session_token=self.aws_session_token,
+            access_key_id=access_key,
+            secret_access_key=secret_key,
+            session_token=session_token,
             endpoint_url=self.aws_endpoint_url,
         )
 
@@ -154,7 +161,7 @@ class AppConfig(BaseSettings):
 
     @property
     def app(self) -> AppRunConfig:
-        return AppRunConfig(host="127.0.0.1", env="development")
+        return AppRunConfig(host="127.0.0.1", env=self.env)
 
     @property
     def templates(self) -> dict[str, list[str]]:
