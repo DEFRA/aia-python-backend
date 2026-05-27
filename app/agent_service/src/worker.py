@@ -24,7 +24,6 @@ from app.agent_service.src.repositories.questions_repo import (
     fetch_questions_by_policy_doc_id,
 )
 from app.agent_service.src.handlers.agent import AGENT_REGISTRY, CONFIG_REGISTRY
-from app.agent_service.src.db_pool import init_pool, close_pool
 from app.agent_service.src.utils.llm_client import make_llm_client
 
 from app.agent_service.src.shared.app_config import config as app_config
@@ -137,6 +136,7 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
 async def _assess_one_doc(
     agent,
     document: str,
+    dsn: str,
     policy_doc_id: str,
     policy_doc_url: str,
     policy_doc_filename: str,
@@ -146,7 +146,7 @@ async def _assess_one_doc(
     """Assess one policy doc and return (result, token_counts)."""
     tokens = {"input_tokens": 0, "output_tokens": 0}
     try:
-        questions = await fetch_questions_by_policy_doc_id(policy_doc_id)
+        questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
         llm_output = await asyncio.wait_for(
             agent.assess(document=document, questions=questions),
             timeout=_AGENT_TIMEOUT_SECONDS,
@@ -242,7 +242,8 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
         )
 
     document = await _get_document(task, s3)
-    policy_docs = await fetch_all_policy_docs_by_category(agent_type)
+    dsn = _get_db_config().dsn
+    policy_docs = await fetch_all_policy_docs_by_category(dsn, agent_type)
 
     if not policy_docs:
         return StatusMessage(
@@ -260,7 +261,7 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
     raw_results = await asyncio.gather(
         *[
             _assess_one_doc(
-                agent, document, pid, url, fname,
+                agent, document, dsn, pid, url, fname,
                 task.task_id, agent_type,
             )
             for pid, url, fname in policy_docs
