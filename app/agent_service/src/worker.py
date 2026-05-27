@@ -17,6 +17,7 @@ from app.agent_service.src.models.schemas import (
     AssessmentRow,
     PolicyDocResult,
 )
+from app.agent_service.src.config import DatabaseConfig
 from app.agent_service.src.utils.doc_parser import _parse_bytes
 from app.agent_service.src.repositories.questions_repo import (
     fetch_all_policy_docs_by_category,
@@ -101,6 +102,15 @@ _AGENT_TIMEOUT_SECONDS: int = app_config.orchestrator_agent_timeout
 
 MAX_CONCURRENT_TASKS: int = int(os.environ.get("MAX_CONCURRENT_TASKS", "10"))
 
+_db_config: DatabaseConfig | None = None
+
+
+def _get_db_config() -> DatabaseConfig:
+    global _db_config  # noqa: PLW0603
+    if _db_config is None:
+        _db_config = DatabaseConfig()
+    return _db_config
+
 
 def _extract_text(file_bytes: bytes, s3_key: str) -> str:
     """Extract plain text from PDF, DOCX, or UTF-8 text files."""
@@ -126,6 +136,7 @@ async def _get_document(task: TaskMessage, s3: S3Service) -> str:
 async def _assess_one_doc(
     agent,
     document: str,
+    dsn: str,
     policy_doc_id: str,
     policy_doc_url: str,
     policy_doc_filename: str,
@@ -135,7 +146,7 @@ async def _assess_one_doc(
     """Assess one policy doc and return (result, token_counts)."""
     tokens = {"input_tokens": 0, "output_tokens": 0}
     try:
-        questions = await fetch_questions_by_policy_doc_id(policy_doc_id)
+        questions = await fetch_questions_by_policy_doc_id(dsn, policy_doc_id)
         llm_output = await asyncio.wait_for(
             agent.assess(document=document, questions=questions),
             timeout=_AGENT_TIMEOUT_SECONDS,
@@ -231,7 +242,8 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
         )
 
     document = await _get_document(task, s3)
-    policy_docs = await fetch_all_policy_docs_by_category(agent_type)
+    dsn = _get_db_config().dsn
+    policy_docs = await fetch_all_policy_docs_by_category(dsn, agent_type)
 
     if not policy_docs:
         return StatusMessage(
@@ -249,7 +261,7 @@ async def dispatch(task: TaskMessage, s3: S3Service) -> StatusMessage:
     raw_results = await asyncio.gather(
         *[
             _assess_one_doc(
-                agent, document, pid, url, fname,
+                agent, document, dsn, pid, url, fname,
                 task.task_id, agent_type,
             )
             for pid, url, fname in policy_docs
