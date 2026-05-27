@@ -143,6 +143,7 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
     mock_agent.assess.return_value = llm_output
 
     with (
+        patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
             "app.agent_service.worker.fetch_all_policy_docs_by_category",
             new=AsyncMock(
@@ -169,6 +170,9 @@ async def test_dispatch_returns_populated_status_on_success() -> None:
             },
         ),
     ):
+        mock_db_cfg.return_value = MagicMock(
+            dsn="postgresql://test:test@localhost/test"
+        )
         status = await dispatch(task, s3)
 
     assert status.task_id == task.task_id
@@ -195,6 +199,7 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
     mock_agent.assess.side_effect = ValueError("LLM parse error")
 
     with (
+        patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
             "app.agent_service.worker.fetch_all_policy_docs_by_category",
             new=AsyncMock(
@@ -221,6 +226,9 @@ async def test_dispatch_captures_agent_exception_as_error() -> None:
             },
         ),
     ):
+        mock_db_cfg.return_value = MagicMock(
+            dsn="postgresql://test:test@localhost/test"
+        )
         status = await dispatch(task, s3)
 
     assert status.error is not None
@@ -249,6 +257,7 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
     mock_agent.assess.side_effect = _slow_assess
 
     with (
+        patch("app.agent_service.worker._get_db_config") as mock_db_cfg,
         patch(
             "app.agent_service.worker.fetch_all_policy_docs_by_category",
             new=AsyncMock(
@@ -276,6 +285,9 @@ async def test_dispatch_returns_error_on_agent_timeout() -> None:
         ),
         patch("app.agent_service.worker._AGENT_TIMEOUT_SECONDS", 1),
     ):
+        mock_db_cfg.return_value = MagicMock(
+            dsn="postgresql://test:test@localhost/test"
+        )
         status = await dispatch(task, s3)
 
     assert status.error is not None
