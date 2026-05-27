@@ -28,26 +28,18 @@ async def init_pool(db_config: DatabaseConfig | None = None) -> asyncpg.Pool:
     if db_config is None:
         db_config = DatabaseConfig()
     
-    print(f"[agent_service] Database connection string: {db_config.dsn}")
-    logger.info("Database connection string: %s", db_config.dsn)
+    _pool = await asyncpg.create_pool(
+        dsn=db_config.dsn,
+        min_size=8,      # Minimum connections to keep open (support 8-9 concurrent agents)
+        max_size=30,     # Maximum concurrent connections (headroom for bursts)
+        command_timeout=30,  # Timeout per query
+        timeout=10,      # Timeout to acquire a connection from the pool
+    )
     
-    try:
-        _pool = await asyncpg.create_pool(
-            dsn=db_config.dsn,
-            min_size=8,      # Minimum connections to keep open (support 8-9 concurrent agents)
-            max_size=30,     # Maximum concurrent connections (headroom for bursts)
-            command_timeout=30,  # Timeout per query
-            timeout=10,      # Timeout to acquire a connection from the pool
-        )
-        print("[agent_service] Database connection SUCCESS")
-        logger.info(
-            "Database connection SUCCESS - pool initialized: min_size=8 max_size=30 dsn=%r",
-            db_config.dsn.split("@")[-1] if "@" in db_config.dsn else "***",
-        )
-    except Exception as e:
-        print(f"[agent_service] Database connection FAILED: {e}")
-        logger.error("Database connection FAILED: %s", str(e))
-        raise
+    logger.info(
+        "Connection pool initialized: min_size=8 max_size=30 dsn=%r",
+        db_config.dsn.split("@")[-1] if "@" in db_config.dsn else "***",
+    )
     
     return _pool
 
